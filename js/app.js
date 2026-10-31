@@ -4,7 +4,7 @@ import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
-import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth } from './tajweed-ai.js';
+import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
 /* ================= أدوات عامة ================= */
 const $ = (s, el = document) => el.querySelector(s);
@@ -1162,6 +1162,7 @@ async function teacherLogin(app) {
     $('#app').innerHTML = `<div class="empty">تعذر تحميل المصحف. تأكد من الاتصال ثم أعد تحميل الصفحة.</div>`;
     return;
   }
+  setTokenProvider(() => store.idToken());
   $('#modeTag').textContent = store.mode === 'cloud' ? 'الحفظ: سحابي' : 'الحفظ: محلي على هذا الجهاز';
   if (cloudError) { const b = $('#banner'); b.hidden = false; b.textContent = 'تعذر الاتصال بقاعدة البيانات السحابية؛ تعمل المنصة الآن بالحفظ المحلي على هذا الجهاز.'; }
   render();

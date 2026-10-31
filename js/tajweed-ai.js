@@ -4,6 +4,9 @@ import { ayahWords, toArabicDigits as ar } from './quran.js';
 
 export const AI_NOTICE = 'هذا المعلّم القرآني نموذج ذكاء اصطناعي قد يخطئ؛ فهو للإعانة فقط ولا يُعتمد عليه، وليس بديلاً عن معلّمٍ مُتقِنٍ مُجاز؛ لأنّ القرآن لا يُؤخذ إلا بالمشافهة.';
 export const aiEnabled = () => !!(TAJWEED_API && TAJWEED_API.url);
+let tokenProvider = async () => null;
+/** يعطي الخادم رمز دخول Firebase ليتأكد أن الطلب من مستخدمي الموقع */
+export const setTokenProvider = (fn) => { tokenProvider = fn; };
 const base = () => TAJWEED_API.url.replace(/\/+$/, '');
 
 export async function health() {
@@ -23,15 +26,28 @@ export async function analyze(blob, { surah, from, to }, onProgress = () => {}, 
   fd.append('madd_monfasel', m.monfasel ?? 4);
   fd.append('madd_mottasel', m.mottasel ?? 4);
   fd.append('madd_aared', m.aared ?? 4);
+  const sync = TAJWEED_API.sync !== false;
+  fd.append('wait', sync ? 'true' : 'false');
+  const headers = {};
+  try { const t = await tokenProvider(); if (t) headers.Authorization = 'Bearer ' + t; } catch {}
   onProgress('جارٍ رفع التسجيل…');
-  let r;
+  const t0 = Date.now();
+  const tick = sync ? setInterval(() => {
+    const secs = Math.round((Date.now() - t0) / 1000);
+    onProgress(`يحلّل النموذج تلاوتك… (${ar(secs)} ث)${secs > 40 ? ' — أول تحليل بعد فترة خمول يتأخر حتى يستيقظ الخادم.' : ''}`);
+  }, 1000) : null;
+  let r, j;
   try {
-    r = await fetch(base() + '/analyze', { method: 'POST', body: fd, signal });
+    r = await fetch(base() + '/analyze', { method: 'POST', body: fd, headers, signal });
+    j = await r.json().catch(() => ({}));
   } catch (e) {
-    throw new Error('تعذر الوصول إلى خادم التحليل. قد يكون في وضع السكون؛ أعد المحاولة بعد دقيقة.');
+    if (signal?.aborted) throw new Error('أُلغي التحليل.');
+    throw new Error('تعذر الوصول إلى خادم التحليل. تحقق من الاتصال وأعد المحاولة.');
+  } finally {
+    if (tick) clearInterval(tick);
   }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.detail || 'رفض الخادم الطلب (' + r.status + ').');
+  if (!r.ok) throw new Error((typeof j.detail === 'string' && j.detail) || 'رفض الخادم الطلب (' + r.status + ').');
+  if (j.status === 'done' && j.result) return compact(j.result, { surah, from, to });
   const started = Date.now();
   for (;;) {
     if (signal?.aborted) throw new Error('أُلغي التحليل.');

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import tempfile
@@ -17,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from transformers import AutoFeatureExtractor
 
@@ -33,6 +34,10 @@ CHUNK_SECONDS = 15.0
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS", "https://m3naji-droid.github.io,http://localhost:8000,http://127.0.0.1:8000"
 ).split(",") if o.strip()]
+
+# حماية الفاتورة: لا يُقبل إلا مستخدمو موقعك المسجلون في Firebase (طالب أو معلم).
+# اترك FIREBASE_PROJECT فارغاً لتعطيل التحقق (للتجربة المحلية فقط).
+FIREBASE_PROJECT = os.environ.get("FIREBASE_PROJECT", "").strip()
 
 NOTICE_AR = "هذا المعلّم القرآني نموذج ذكاء اصطناعي قد يخطئ؛ فهو للإعانة فقط ولا يُعتمد عليه، وليس بديلاً عن معلّمٍ مُتقِنٍ مُجاز؛ لأنّ القرآن لا يُؤخذ إلا بالمشافهة."
 NOTICE_EN = ("This Quranic Teacher is an artificial-intelligence model that may make mistakes. It is intended for "
@@ -105,6 +110,21 @@ def decode_audio(data: bytes) -> np.ndarray:
     return np.frombuffer(proc.stdout, dtype=np.float32).copy()
 
 
+def check_auth(authorization: str | None):
+    if not FIREBASE_PROJECT:
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "يجب تسجيل الدخول في الموقع لاستخدام التحليل.")
+    try:
+        from google.auth.transport import requests as g_requests
+        from google.oauth2 import id_token
+        claims = id_token.verify_firebase_token(authorization[7:], g_requests.Request(), audience=FIREBASE_PROJECT)
+    except Exception:
+        claims = None
+    if not claims or claims.get("aud") != FIREBASE_PROJECT:
+        raise HTTPException(401, "انتهت جلسة الدخول. حدّث الصفحة ثم أعد المحاولة.")
+
+
 # ------------------------------------------------------------ المهام
 JOBS: dict[str, dict] = {}
 pool = ThreadPoolExecutor(max_workers=1)  # مهمة واحدة في كل مرة على الخادم المجاني
@@ -157,7 +177,10 @@ async def analyze(
     madd_monfasel: int = Form(4),
     madd_mottasel: int = Form(4),
     madd_aared: int = Form(4),
+    wait: bool = Form(False),
+    authorization: str | None = Header(None),
 ):
+    check_auth(authorization)
     if STATE["error"]:
         raise HTTPException(503, "تعذر تحميل النموذج: " + STATE["error"])
     if end < start or end - start > 60:
@@ -176,7 +199,15 @@ async def analyze(
         raise HTTPException(413, f"التسجيل أطول من {int(MAX_SECONDS // 60)} دقائق.")
     jid = uuid.uuid4().hex
     JOBS[jid] = {"status": "queued", "created": time.time()}
-    pool.submit(_wait_then_run, jid, wave, surah, start, end, (madd_monfasel, madd_mottasel, madd_aared))
+    args = (jid, wave, surah, start, end, (madd_monfasel, madd_mottasel, madd_aared))
+    if wait:
+        # الوضع المتزامن (Cloud Run): التحليل كاملاً داخل الطلب، لأن المعالج لا يعمل إلا أثناء معالجة طلب
+        await asyncio.get_running_loop().run_in_executor(pool, _wait_then_run, *args)
+        j = JOBS.pop(jid, {})
+        if j.get("status") != "done":
+            raise HTTPException(500, j.get("error") or "فشل التحليل.")
+        return {"status": "done", "result": j["result"]}
+    pool.submit(_wait_then_run, *args)
     return {"job": jid, "status": "queued", "model_ready": STATE["ready"]}
 
 

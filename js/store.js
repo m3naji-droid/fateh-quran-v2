@@ -63,6 +63,7 @@ const local = {
     return { name: LS.get('tname', 'المعلم') };
   },
   async signOut() {},
+  async idToken() { return null; },
   async studentSignIn(pn) {
     const s = LS.get('roster', {})[pn];
     if (!s) throw new Error('لم نجد طالباً بهذا الرقم. تأكد من الرقم أو راجع معلمك.');
@@ -148,6 +149,7 @@ async function makeCloud() {
       }
     },
     async signOut() { try { await au.signOut(auth); } catch {} },
+    async idToken() { await ensureAnon(); return auth.currentUser ? auth.currentUser.getIdToken() : null; },
     async studentSignIn(pn) {
       await ensureAnon();
       const d = await getDoc(doc(db, 'roster', String(pn).trim()));

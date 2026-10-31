@@ -13,10 +13,12 @@ export const FIREBASE = {
   databaseId: '',
 };
 
-// خادم تحليل التجويد على Hugging Face. ضع رابط الـ Space هنا بعد إنشائه، مثل:
-// 'https://m3naji-droid-fateh-tajweed.hf.space'  (اتركه فارغاً لإخفاء التحليل الآلي)
+// خادم تحليل التجويد (Google Cloud Run). ضع رابط الخدمة هنا بعد نشرها، مثل:
+// 'https://fateh-tajweed-xxxxxxxxxx-ew.a.run.app'  (اتركه فارغاً لإخفاء التحليل الآلي)
 export const TAJWEED_API = {
   url: '',
+  // true: التحليل داخل الطلب نفسه (مطلوب في Google Cloud Run)
+  sync: true,
   // مقادير المدود المعتمدة في التصحيح (رواية حفص من طريق الشاطبية)
   madd: { monfasel: 4, mottasel: 4, aared: 4 },
 };
