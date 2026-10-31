@@ -77,7 +77,13 @@ def load_model():
         STATE["error"] = f"{type(e).__name__}: {e}"[:500]
 
 
-threading.Thread(target=load_model, daemon=True).start()
+# في Cloud Run (يضبط K_SERVICE) نحمّل النموذج قبل فتح المنفذ: المعالج متاح كاملاً وقت التشغيل
+# (مع Startup CPU boost)، بينما يُقيَّد بين الطلبات فيتوقف أي تحميل في الخلفية.
+# في غيره (Hugging Face أو التجربة المحلية) نحمّله في الخلفية حتى يستجيب الخادم فوراً.
+if os.environ.get("K_SERVICE") or os.environ.get("LOAD_MODEL_SYNC"):
+    load_model()
+else:
+    threading.Thread(target=load_model, daemon=True).start()
 
 MAX_FEATURES = int(np.ceil((A.SR * CHUNK_SECONDS - 400) / (160 * 2)))
 
