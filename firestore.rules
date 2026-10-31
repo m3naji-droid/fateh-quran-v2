@@ -1,0 +1,51 @@
+rules_version = '2';
+// قواعد حماية مقرأة الفاتح (الإصدار الثاني)
+// - المعلم: مستخدم بريد وكلمة مرور، وله مستند في مجموعة teachers بمعرّف حسابه (UID)
+// - الطالب: دخول مجهول تلقائي؛ يستطيع قراءة سجله فقط إذا عرف رقمه الشخصي، ولا يستطيع سرد قائمة الطلاب
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isTeacher() {
+      return signedIn() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+    }
+
+    match /teachers/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, write: if false; // تُضاف من لوحة Firebase فقط
+    }
+    match /classes/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+    match /tasks/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+    match /roster/{pn} {
+      allow get: if signedIn();
+      allow list, write: if isTeacher();
+
+      match /subs/{sid} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/roster/$(pn))
+          && request.resource.data.pn == pn
+          && request.resource.data.teacher == null;
+        allow update, delete: if isTeacher();
+
+        match /audio/{aid} {
+          allow read: if signedIn();
+          allow create: if signedIn() && request.resource.data.b64.size() < 1000000;
+          allow update, delete: if isTeacher();
+        }
+      }
+    }
+    // استعلام المعلم عن كل التسليمات
+    match /{path=**}/subs/{sid} {
+      allow read: if isTeacher();
+    }
+    // بيانات النسخة القديمة: قراءة فقط للمعلم لأجل النقل
+    match /students/{id} { allow read: if isTeacher(); allow write: if false; }
+    match /assignments/{id} { allow read: if isTeacher(); allow write: if false; }
+  }
+}

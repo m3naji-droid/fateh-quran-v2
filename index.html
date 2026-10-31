@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مقرأة الفاتح</title>
+<meta name="description" content="مقرأة إلكترونية لتصحيح التلاوة وتسميع الحفظ: المصحف كاملاً، متابعة حية كلمة بكلمة، تلوين أحكام التجويد، ولوحة للمعلم.">
+<meta name="theme-color" content="#0d5c46">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='%230d5c46'%3E%3Crect x='7' y='7' width='18' height='18' rx='2'/%3E%3Crect x='7' y='7' width='18' height='18' rx='2' transform='rotate(45 16 16)'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='4' fill='%23e9c46a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Readex+Pro:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="#/">
+      <svg class="khatam" viewBox="0 0 32 32" aria-hidden="true"><g><rect x="7" y="7" width="18" height="18" rx="2"/><rect x="7" y="7" width="18" height="18" rx="2" transform="rotate(45 16 16)"/></g><circle cx="16" cy="16" r="4"/></svg>
+      <span><b>مقرأة الفاتح</b><small>تصحيح التلاوة وتسميع الحفظ</small></span>
+    </a>
+    <nav class="nav" id="nav"></nav>
+    <button class="icon-btn" id="themeBtn" type="button" title="تبديل الوضع الليلي" aria-label="تبديل الوضع الليلي">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+    </button>
+  </div>
+</header>
+<div id="banner" class="banner" hidden></div>
+<main id="app" class="wrap"><div class="loading">جارٍ تحميل المصحف…</div></main>
+<footer class="foot wrap">
+  <span>النص القرآني: الرسم العثماني برواية حفص عن عاصم (مشروع Tanzil). التلاوات الصوتية: EveryAyah.</span>
+  <span id="modeTag"></span>
+</footer>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="modal" class="modal" hidden><div class="modal-card" role="dialog" aria-modal="true"><button class="icon-btn modal-x" type="button" data-close aria-label="إغلاق">✕</button><div id="modalBody"></div></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
