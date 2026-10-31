@@ -1,14 +1,14 @@
-// إعدادات Firebase (من مشروعك الحالي). لتشغيل المنصة محلياً فقط على جهاز واحد اجعل enabled: false
+// إعدادات Firebase لمشروع quran-c16c8. لتشغيل المنصة محلياً فقط على جهاز واحد اجعل enabled: false
 export const FIREBASE = {
   enabled: true,
   config: {
-    apiKey: 'AIzaSyA2CR66DY5I3TCn_gqXvwTjJUCq2ZKZW08',
-    authDomain: 'grounded-technique-rgmzr.firebaseapp.com',
-    projectId: 'grounded-technique-rgmzr',
-    storageBucket: 'grounded-technique-rgmzr.firebasestorage.app',
-    messagingSenderId: '944676198315',
-    appId: '1:944676198315:web:5bf9874602742ff930a4ee',
+    apiKey: 'AIzaSyBPaasG5pKCw9r8YhFiwp9iyYfrvEvSny4',
+    authDomain: 'quran-c16c8.firebaseapp.com',
+    projectId: 'quran-c16c8',
+    storageBucket: 'quran-c16c8.firebasestorage.app',
+    messagingSenderId: '960354071194',
+    appId: '1:960354071194:web:1a3388d1450144a3b32523',
   },
-  // معرّف قاعدة البيانات المخصصة (اتركه فارغاً لاستخدام القاعدة الافتراضية "(default)")
-  databaseId: 'ai-studio-420cd5a9-10ed-4e84-97e9-7649c7b7816a',
+  // اتركه فارغاً لاستخدام قاعدة البيانات الافتراضية "(default)"
+  databaseId: '',
 };
