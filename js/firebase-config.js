@@ -16,7 +16,7 @@ export const FIREBASE = {
 // خادم تحليل التجويد (Google Cloud Run). ضع رابط الخدمة هنا بعد نشرها، مثل:
 // 'https://fateh-tajweed-xxxxxxxxxx-ew.a.run.app'  (اتركه فارغاً لإخفاء التحليل الآلي)
 export const TAJWEED_API = {
-  url: '',
+  url: 'https://fateh-quran-v2-960354071194.europe-west1.run.app',
   // true: التحليل داخل الطلب نفسه (مطلوب في Google Cloud Run)
   sync: true,
   // مقادير المدود المعتمدة في التصحيح (رواية حفص من طريق الشاطبية)
