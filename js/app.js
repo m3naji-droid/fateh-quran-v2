@@ -475,7 +475,7 @@ function render() {
   $('#tip-pop')?.remove();
   const r = location.hash.replace(/^#\/?/, '').split('/')[0];
   const fn = routes[r] || viewHome;
-  $('#nav').innerHTML = [['', 'الرئيسية'], ['practice', 'تدريب حر'], ['student', 'الطالب'], ['teacher', 'المعلم']]
+  $('#nav').innerHTML = [['', 'الرئيسية'], ['student', 'الطالب'], ['teacher', 'المعلم']]
     .map(([k, l]) => `<a href="#/${k}" class="${k === r || (!routes[r] && !k) ? 'on' : ''}">${l}</a>`).join('');
   const app = $('#app');
   app.innerHTML = '';
@@ -494,9 +494,8 @@ function viewHome(app) {
       <span class="pill">المصحف كاملاً · ١١٤ سورة</span>
       <h1 style="margin-top:12px">اقرأ، ونحن نتابعك كلمةً بكلمة</h1>
       <p class="lead">مقرأة إلكترونية للمدارس وحلقات التحفيظ: يقرأ الطالب من أي سورة، فتظهر الكلمات الصحيحة والمحذوفة والخاطئة أثناء القراءة، ثم يُرسل تسجيله إلى المعلم ليقيّم التجويد والأداء.</p>
-      <div class="grid3">
-        <a class="entry" href="#/practice"><b>تدريب حر</b><span>اختر أي سورة وتدرّب تلاوةً أو تسميعاً من الحفظ، دون تسجيل دخول.</span></a>
-        <a class="entry" href="#/student"><b>دخول الطالب</b><span>واجباتك، سجل تسميعك، ودفتر أخطائك للمراجعة.</span></a>
+      <div class="grid2">
+        <a class="entry" href="#/student"><b>دخول الطالب</b><span>واجباتك، والتدريب الحر على أي سورة، وسجل تسميعك، ودفتر أخطائك.</span></a>
         <a class="entry" href="#/teacher"><b>لوحة المعلم</b><span>الصفوف والطلاب والواجبات، والاستماع والتقييم والتقارير.</span></a>
       </div>
     </div>
@@ -512,32 +511,46 @@ function viewHome(app) {
     <li><b>تصحيح دقيق وصادق:</b> مطابقة ذكية تفهم الرسم العثماني، بلا درجات دنيا مصطنعة.</li>
     <li><b>ألوان التجويد آلياً:</b> الإخفاء والإدغام والإقلاب والقلقلة والمدود في أي آية.</li>
     <li><b>${ar(RECITERS.length)} قارئاً:</b> استماع للآية أو المقطع مع التكرار والتحكم بالسرعة.</li>
-    <li><b>للمعلم:</b> تقييم بثلاثة معايير، ملاحظات، تقارير بالكلمات الأكثر خطأً، وتصدير Excel.</li>
+    <li><b>تحليل التجويد بالذكاء الاصطناعي:</b> المدود والغنة والقلقلة والحركات لكل كلمة، للإعانة لا للاعتماد.</li>
+    <li><b>للمعلم:</b> درجة من ١٠ وملاحظات، ونظام يتعلم من تقييماتك، وتقارير بالكلمات الأكثر خطأً، وتصدير Excel.</li>
   </ul>`;
 }
 
-/* ================= التدريب الحر ================= */
+/* ================= التدريب الحر (للطلاب المسجلين والمعلم فقط) ================= */
 let pendingPractice = null;
-function viewPractice(app) {
+function mountPractice(host, learn) {
   const init = pendingPractice || pref.get('lastRange', { surah: 36, from: 1, to: 12 });
   pendingPractice = null;
-  app.innerHTML = `
-    <div class="page-head"><div><h1>تدريب حر</h1><p class="muted" style="margin:4px 0 0">اختر المقطع ثم اضغط زر الميكروفون وابدأ القراءة.</p></div></div>
+  host.innerHTML = `<p class="muted" style="margin:0 0 12px">اختر أي مقطع ثم اضغط زر الميكروفون وابدأ القراءة. التدريب لا يُرسل للمعلم.</p>
     <div class="card" style="margin-bottom:16px">${rangePicker('pr', init)}</div>
     <div id="prBody"></div>`;
   let comp = null;
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', app), { ...r, mode: init.mode }); };
-  bindRangePicker(app, 'pr', mount);
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn }); };
+  bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
   return { destroy: () => comp?.destroy() };
 }
+function viewPractice(app) {
+  const s = session.get();
+  if (s?.role === 'student') { studentStartTab = 'practice'; navTo('student'); return; }
+  if (s?.role !== 'teacher') {
+    app.innerHTML = `<div class="card auth stack"><h2>التدريب للطلاب المسجلين</h2>
+      <p class="muted" style="margin:0">ادخل برقمك الشخصي لتتدرب على أي سورة، وتحفظ تقدمك ودفتر أخطائك.</p>
+      <a class="btn primary" href="#/student">دخول الطالب</a></div>`;
+    return null;
+  }
+  app.innerHTML = `<div class="page-head"><div><span class="muted small">معاينة المعلم</span><h1>تدريب حر</h1></div></div><div id="prHost"></div>`;
+  return mountPractice($('#prHost', app), null);
+}
+let studentStartTab = null;
 
 /* ================= الطالب ================= */
 function viewStudent(app) {
   const s = session.get();
   if (!s || s.role !== 'student') return studentLogin(app);
   let comp = null;
-  let tab = 'tasks';
+  let tab = studentStartTab || 'tasks';
+  studentStartTab = null;
   let data = { tasks: [], subs: [], classes: [] };
   const me = s.student;
 
@@ -575,7 +588,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>`;
     $('#stOut', app).onclick = () => { session.set(null); render(); };
@@ -584,10 +597,22 @@ function viewStudent(app) {
     if (tab === 'tasks') drawTasks(body, doneTasks);
     if (tab === 'history') drawHistory(body);
     if (tab === 'notebook') drawNotebook(body);
+    if (tab === 'practice') drawPractice(body);
+  }
+
+  async function drawPractice(body) {
+    let learn = null;
+    try {
+      const model = await store.getModel();
+      learn = { model, rates: studentRates(model, data.subs), weak: weakRules(model, data.subs, 3) };
+    } catch {}
+    if (tab !== 'practice') return;
+    comp?.destroy();
+    comp = mountPractice(body, learn);
   }
 
   function drawTasks(body, done) {
-    if (!data.tasks.length) { body.innerHTML = '<div class="empty">لا توجد واجبات حالياً. يمكنك التدرب من صفحة «تدريب حر».</div>'; return; }
+    if (!data.tasks.length) { body.innerHTML = '<div class="empty">لا توجد واجبات حالياً. يمكنك التدرب على أي سورة من تبويب «تدريب حر».</div>'; return; }
     body.innerHTML = `<div class="stack">${data.tasks.map((t) => {
       const mySubs = data.subs.filter((x) => x.taskId === t.id);
       const best = mySubs.reduce((m, x) => Math.max(m, x.percent ?? -1), -1);
@@ -656,7 +681,7 @@ function viewStudent(app) {
     if (!list.length) { body.innerHTML = weakHtml + '<div class="empty">دفترك نظيف. الكلمات التي تخطئ فيها ستظهر هنا لتراجعها.</div>'; return; }
     body.innerHTML = weakHtml + `<p class="muted">الكلمات التي تكرر فيها الخطأ أو الترك، مرتبة من الأكثر. اضغط «راجع» للتدرّب على الآية.</p>
       <div class="grid3">${list.map((e, i) => `<div class="card row" style="justify-content:space-between"><div><span class="word-chip">${esc(e.w)}</span><div class="small muted" style="margin-top:6px">${esc(surahName(e.surah))} · آية ${ar(e.a)} · ${ar(e.n)} مرة</div></div><button class="btn sm" data-nb="${i}" type="button">راجع</button></div>`).join('')}</div>`;
-    $$('[data-nb]', body).forEach((b) => (b.onclick = () => { const e = list[+b.dataset.nb]; pendingPractice = { surah: e.surah, from: e.a, to: e.a, mode: 'hifz' }; navTo('practice'); }));
+    $$('[data-nb]', body).forEach((b) => (b.onclick = () => { const e = list[+b.dataset.nb]; pendingPractice = { surah: e.surah, from: e.a, to: e.a, mode: 'hifz' }; tab = 'practice'; draw(); scrollTo(0, 0); }));
   }
 
   load();
@@ -672,7 +697,7 @@ function studentLogin(app) {
       <div id="slErr" class="notice" hidden></div>
       <button class="btn primary" type="submit">دخول</button>
     </form>
-    <p class="small muted" style="margin:0">لا تملك رقماً؟ يمكنك التدرب مباشرة من <a href="#/practice">التدريب الحر</a>.</p>
+    <p class="small muted" style="margin:0">لا تملك رقماً؟ اطلبه من معلمك.</p>
   </div>`;
   $('#slForm', app).onsubmit = async (e) => {
     e.preventDefault();
@@ -725,7 +750,7 @@ function viewTeacher(app) {
     app.innerHTML = `
       <div class="page-head">
         <div><span class="muted small">لوحة المعلم</span><h1>${esc(s.name || 'المعلم')}</h1></div>
-        <button class="btn" id="tOut" type="button">تسجيل الخروج</button>
+        <div class="row"><a class="btn" href="#/practice">معاينة التدريب</a><button class="btn" id="tOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis" id="tKpis"></div>
       <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
