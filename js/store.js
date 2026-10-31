@@ -47,8 +47,7 @@ async function sha(text) {
 }
 
 const DEFAULT_CLASSES = [
-  { id: 'c1', name: 'الحلقة الأولى', createdAt: now() },
-  { id: 'c2', name: 'الحلقة الثانية', createdAt: now() },
+  ...[1, 2, 3, 4, 5].map((n) => ({ id: `g2-${n}`, name: `الثاني الإعدادي ${'٠١٢٣٤٥٦٧٨٩'[n]}`, createdAt: now() })),
 ];
 
 const local = {
@@ -69,7 +68,7 @@ const local = {
     if (!s) throw new Error('لم نجد طالباً بهذا الرقم. تأكد من الرقم أو راجع معلمك.');
     return { id: pn, ...s };
   },
-  // الحلقات
+  // الصفوف
   async listClasses() { return LS.get('classes', []); },
   async saveClass(c) { const all = LS.get('classes', []); const i = all.findIndex((x) => x.id === c.id); if (i >= 0) all[i] = { ...all[i], ...c }; else all.push({ id: uid(), createdAt: now(), ...c }); LS.set('classes', all); },
   async deleteClass(id) { LS.set('classes', LS.get('classes', []).filter((c) => c.id !== id)); },

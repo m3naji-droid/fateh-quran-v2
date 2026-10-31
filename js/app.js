@@ -404,11 +404,11 @@ function viewHome(app) {
     <div>
       <span class="pill">المصحف كاملاً · ١١٤ سورة</span>
       <h1 style="margin-top:12px">اقرأ، ونحن نتابعك كلمةً بكلمة</h1>
-      <p class="lead">مقرأة إلكترونية للحلقات والمدارس: يقرأ الطالب من أي سورة، فتظهر الكلمات الصحيحة والمحذوفة والخاطئة أثناء القراءة، ثم يُرسل تسجيله إلى المعلم ليقيّم التجويد والأداء.</p>
+      <p class="lead">مقرأة إلكترونية للمدارس وحلقات التحفيظ: يقرأ الطالب من أي سورة، فتظهر الكلمات الصحيحة والمحذوفة والخاطئة أثناء القراءة، ثم يُرسل تسجيله إلى المعلم ليقيّم التجويد والأداء.</p>
       <div class="grid3">
         <a class="entry" href="#/practice"><b>تدريب حر</b><span>اختر أي سورة وتدرّب تلاوةً أو تسميعاً من الحفظ، دون تسجيل دخول.</span></a>
         <a class="entry" href="#/student"><b>دخول الطالب</b><span>واجباتك، سجل تسميعك، ودفتر أخطائك للمراجعة.</span></a>
-        <a class="entry" href="#/teacher"><b>لوحة المعلم</b><span>الحلقات والطلاب والواجبات، والاستماع والتقييم والتقارير.</span></a>
+        <a class="entry" href="#/teacher"><b>لوحة المعلم</b><span>الصفوف والطلاب والواجبات، والاستماع والتقييم والتقارير.</span></a>
       </div>
     </div>
     <div class="hero-sheet">
@@ -587,6 +587,8 @@ function studentLogin(app) {
 }
 
 /* ================= المعلم ================= */
+const sortClasses = (arr) => [...arr].sort((a, b) => a.name.localeCompare(b.name, 'ar', { numeric: true }));
+const G2 = [1, 2, 3, 4, 5].map((n) => ({ id: `g2-${n}`, name: `الثاني الإعدادي ${ar(n)}` }));
 function viewTeacher(app) {
   const s = session.get();
   if (!s || s.role !== 'teacher') return teacherLogin(app);
@@ -599,7 +601,7 @@ function viewTeacher(app) {
     app.innerHTML = '<div class="loading">جارٍ تحميل لوحة المعلم…</div>';
     try {
       const [classes, students, tasks] = await Promise.all([store.listClasses(), store.listStudents(), store.listTasks()]);
-      D = { ...D, classes, students, tasks };
+      D = { ...D, classes: sortClasses(classes), students, tasks };
     } catch (e) {
       console.error(e);
       app.innerHTML = `<div class="empty">تعذر تحميل البيانات (${esc(e.code || e.message)}). تأكد من صلاحيات المعلم في قاعدة البيانات.<br><br><button class="btn" id="tOut2">تسجيل الخروج</button></div>`;
@@ -612,10 +614,10 @@ function viewTeacher(app) {
   }
   const reload = async () => {
     const [classes, students, tasks] = await Promise.all([store.listClasses(), store.listStudents(), store.listTasks()]);
-    D = { ...D, classes, students, tasks };
+    D = { ...D, classes: sortClasses(classes), students, tasks };
     drawBody();
   };
-  const className = (id) => (id === 'all' ? 'كل الحلقات' : D.classes.find((c) => c.id === id)?.name || '—');
+  const className = (id) => (id === 'all' ? 'كل الصفوف' : D.classes.find((c) => c.id === id)?.name || '—');
 
   function draw() {
     app.innerHTML = `
@@ -624,7 +626,7 @@ function viewTeacher(app) {
         <button class="btn" id="tOut" type="button">تسجيل الخروج</button>
       </div>
       <div class="kpis" id="tKpis"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الحلقات والطلاب'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     $('#tOut', app).onclick = async () => { unsub?.(); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
@@ -639,7 +641,7 @@ function viewTeacher(app) {
     k.innerHTML = `<div class="kpi"><b>${ar(pending)}</b><span>بانتظار تقييمك</span></div>
       <div class="kpi"><b>${ar(week)}</b><span>تسميع هذا الأسبوع</span></div>
       <div class="kpi"><b>${avg == null ? '—' : ar(avg) + '٪'}</b><span>متوسط الدقة الآلية</span></div>
-      <div class="kpi"><b>${ar(D.students.length)}</b><span>طالباً في ${ar(D.classes.length)} حلقات</span></div>`;
+      <div class="kpi"><b>${ar(D.students.length)}</b><span>طالباً في ${ar(D.classes.length)} صفوف</span></div>`;
   }
   function drawBody() {
     drawHead();
@@ -652,7 +654,7 @@ function viewTeacher(app) {
     const opt = (v, l, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`;
     body.innerHTML = `<div class="row" style="margin-bottom:12px">
       <input type="search" id="fQ" placeholder="بحث باسم الطالب أو رقمه" value="${esc(filters.q)}" style="flex:2 1 200px">
-      <select id="fC" style="flex:1 1 140px">${opt('all', 'كل الحلقات', filters.cls)}${D.classes.map((c) => opt(c.id, c.name, filters.cls)).join('')}</select>
+      <select id="fC" style="flex:1 1 140px">${opt('all', 'كل الصفوف', filters.cls)}${D.classes.map((c) => opt(c.id, c.name, filters.cls)).join('')}</select>
       <select id="fT" style="flex:1 1 160px">${opt('all', 'كل الواجبات', filters.task)}${opt('free', 'بدون واجب', filters.task)}${D.tasks.map((t) => opt(t.id, t.title, filters.task)).join('')}</select>
       <select id="fS" style="flex:1 1 140px">${opt('all', 'كل الحالات', filters.status)}${opt('pending', 'بانتظار التقييم', filters.status)}${opt('graded', 'مُقيَّمة', filters.status)}</select>
       <button class="btn" id="fX" type="button">تصدير Excel</button>
@@ -664,7 +666,7 @@ function viewTeacher(app) {
       (!filters.q || (x.studentName || '').includes(filters.q) || (x.pn || '').includes(filters.q)));
     const paint = () => {
       const L = list();
-      $('#subList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الطالب</th><th>الحلقة</th><th>الواجب / المقطع</th><th>التاريخ</th><th>الدقة الآلية</th><th>المدة</th><th>تقييمك</th></tr></thead><tbody>
+      $('#subList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الطالب</th><th>الصف</th><th>الواجب / المقطع</th><th>التاريخ</th><th>الدقة الآلية</th><th>المدة</th><th>تقييمك</th></tr></thead><tbody>
         ${L.map((x) => `<tr class="click" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td><b>${esc(x.studentName)}</b><div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
         <td>${esc(x.taskTitle || 'تدريب')}<div class="small muted">${esc(rangeLabel(x.surah, x.from, x.to))}</div></td><td class="num">${fmtDate(x.createdAt)}</td>
         <td>${x.percent == null ? '<span class="pill mute">يدوي</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td><td class="num">${fmtTime(x.duration || 0)}</td>
@@ -730,7 +732,7 @@ function viewTeacher(app) {
 
   function exportXlsx(rows) {
     const data = rows.map((x) => ({
-      'الطالب': x.studentName, 'الرقم': x.pn, 'الحلقة': x.className || className(x.classId), 'الواجب': x.taskTitle || 'تدريب',
+      'الطالب': x.studentName, 'الرقم': x.pn, 'الصف': x.className || className(x.classId), 'الواجب': x.taskTitle || 'تدريب',
       'السورة': surahName(x.surah), 'من': x.from, 'إلى': x.to, 'التاريخ': fmtDate(x.createdAt), 'الدقة الآلية %': x.percent ?? '',
       'صحيحة': x.counts?.correct ?? '', 'خطأ': x.counts?.wrong ?? '', 'محذوفة': x.counts?.missing ?? '',
       'الحفظ': x.teacher?.hifz ?? '', 'التجويد': x.teacher?.tajweed ?? '', 'الأداء': x.teacher?.ada ?? '', 'المجموع /30': x.teacher?.total ?? '', 'ملاحظات': x.teacher?.notes ?? '',
@@ -753,7 +755,7 @@ function viewTeacher(app) {
         <label class="field">العنوان<input type="text" id="tkTitle" required placeholder="مثال: حفظ أول سورة يس"></label>
         ${rangePicker('tk', last)}
         <div class="row">
-          <label class="field" style="flex:1 1 140px">الحلقة<select id="tkClass"><option value="all">كل الحلقات</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="field" style="flex:1 1 140px">الصف<select id="tkClass"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
           <label class="field" style="flex:1 1 140px">النوع<select id="tkMode"><option value="hifz">تسميع غيباً</option><option value="recite">تلاوة نظراً</option></select></label>
           <label class="field" style="flex:1 1 140px">آخر موعد<input type="date" id="tkDue"></label>
         </div>
@@ -769,7 +771,7 @@ function viewTeacher(app) {
       e.preventDefault();
       const r = readRange();
       await store.saveTask({ title: $('#tkTitle', body).value.trim(), ...r, classId: $('#tkClass', body).value, mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() });
-      toast('أُضيف الواجب وسيظهر لطلاب الحلقة.');
+      toast('أُضيف الواجب وسيظهر لطلاب الصف.');
       await reload();
     };
     const L = [...D.tasks].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -785,20 +787,21 @@ function viewTeacher(app) {
     $$('[data-del]', body).forEach((b) => (b.onclick = async () => { if (!(await confirmBox('حذف هذا الواجب؟ تبقى تسليمات الطلاب محفوظة.'))) return; await store.deleteTask(b.dataset.del); await reload(); }));
   }
 
-  /* --- الحلقات والطلاب --- */
+  /* --- الصفوف والطلاب --- */
   function drawPeople(body) {
     const firstCls = D.classes[0]?.id || '';
     body.innerHTML = `<div class="grid2" style="align-items:start">
       <div class="stack">
-        <div class="card stack" style="gap:10px"><h3>الحلقات</h3>
-          ${D.classes.map((c) => `<div class="row" style="justify-content:space-between"><span>${esc(c.name)} <span class="muted small">(${ar(D.students.filter((s) => s.classId === c.id).length)} طالباً)</span></span><span class="row" style="gap:4px"><button class="btn sm" data-ren="${esc(c.id)}" type="button">تعديل</button><button class="btn sm danger" data-delc="${esc(c.id)}" type="button">حذف</button></span></div>`).join('') || '<span class="muted">لا توجد حلقات.</span>'}
-          <form id="clForm" class="row"><input type="text" id="clName" placeholder="اسم حلقة جديدة" required style="flex:1"><button class="btn primary" type="submit">إضافة</button></form>
+        <div class="card stack" style="gap:10px"><h3>الصفوف</h3>
+          ${D.classes.map((c) => `<div class="row" style="justify-content:space-between"><span>${esc(c.name)} <span class="muted small">(${ar(D.students.filter((s) => s.classId === c.id).length)} طالباً)</span></span><span class="row" style="gap:4px"><button class="btn sm" data-ren="${esc(c.id)}" type="button">تعديل</button><button class="btn sm danger" data-delc="${esc(c.id)}" type="button">حذف</button></span></div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
+          ${G2.some((g) => !D.classes.find((c) => c.id === g.id)) ? `<button class="btn gold" id="clSeed" type="button">إنشاء صفوف الثاني الإعدادي (١–٥)</button>` : ''}
+          <form id="clForm" class="row"><input type="text" id="clName" placeholder="اسم صف جديد" required style="flex:1"><button class="btn primary" type="submit">إضافة</button></form>
         </div>
         <div class="card stack" style="gap:10px"><h3>إضافة طلاب</h3>
-          <label class="field">الحلقة<select id="stClass">${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="field">الصف<select id="stClass">${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
           <label class="field">طالب في كل سطر: الاسم، الرقم الشخصي<textarea id="stBulk" placeholder="عبدالله أحمد، 1023&#10;يوسف خالد، 1024"></textarea></label>
           <div class="row"><button class="btn primary" id="stAdd" type="button">إضافة</button><label class="btn">استيراد من Excel أو CSV<input type="file" id="stFile" accept=".xlsx,.xls,.csv" hidden></label></div>
-          <p class="small muted" style="margin:0">في ملف Excel: العمود الأول الاسم، والثاني الرقم الشخصي، والثالث (اختياري) اسم الحلقة.</p>
+          <p class="small muted" style="margin:0">في ملف Excel: العمود الأول الاسم، والثاني الرقم الشخصي، والثالث (اختياري) اسم الصف كما هو مكتوب هنا.</p>
         </div>
       </div>
       <div class="card stack" style="gap:10px">
@@ -807,17 +810,24 @@ function viewTeacher(app) {
       </div>
     </div>`;
     $('#stClass', body).value = firstCls;
-    $('#clForm', body).onsubmit = async (e) => { e.preventDefault(); await store.saveClass({ name: $('#clName', body).value.trim() }); toast('أُضيفت الحلقة.'); await reload(); };
+    const seed = $('#clSeed', body);
+    if (seed) seed.onclick = async () => {
+      seed.disabled = true;
+      for (const g of G2) if (!D.classes.find((c) => c.id === g.id)) await store.saveClass(g);
+      toast('أُنشئت صفوف الثاني الإعدادي.');
+      await reload();
+    };
+    $('#clForm', body).onsubmit = async (e) => { e.preventDefault(); await store.saveClass({ name: $('#clName', body).value.trim() }); toast('أُضيف الصف.'); await reload(); };
     $$('[data-ren]', body).forEach((b) => (b.onclick = () => {
       const c = D.classes.find((x) => x.id === b.dataset.ren);
-      openModal(`<form id="rnF" class="stack"><h3>تعديل اسم الحلقة</h3><input type="text" id="rnN" value="${esc(c.name)}" required><button class="btn primary" type="submit">حفظ</button></form>`, (m) => {
+      openModal(`<form id="rnF" class="stack"><h3>تعديل اسم الصف</h3><input type="text" id="rnN" value="${esc(c.name)}" required><button class="btn primary" type="submit">حفظ</button></form>`, (m) => {
         $('#rnF', m).onsubmit = async (e) => { e.preventDefault(); await store.saveClass({ id: c.id, name: $('#rnN', m).value.trim(), createdAt: c.createdAt }); closeModal(); await reload(); };
       });
     }));
     $$('[data-delc]', body).forEach((b) => (b.onclick = async () => {
       const n = D.students.filter((s) => s.classId === b.dataset.delc).length;
-      if (n) return toast(`انقل طلاب هذه الحلقة (${n}) أو احذفهم أولاً.`);
-      if (!(await confirmBox('حذف هذه الحلقة؟'))) return;
+      if (n) return toast(`انقل طلاب هذا الصف (${n}) أو احذفهم أولاً.`);
+      if (!(await confirmBox('حذف هذا الصف؟'))) return;
       await store.deleteClass(b.dataset.delc); await reload();
     }));
     const addMany = async (arr) => {
@@ -849,7 +859,7 @@ function viewTeacher(app) {
     };
     const paint = (q = '') => {
       const L = D.students.filter((s) => !q || s.name.includes(q) || s.id.includes(q)).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-      $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الرقم</th><th>الحلقة</th><th>تسميع</th><th></th></tr></thead><tbody>
+      $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الرقم</th><th>الصف</th><th>تسميع</th><th></th></tr></thead><tbody>
         ${L.map((s) => `<tr><td>${esc(s.name)}</td><td class="num">${esc(s.id)}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
         <td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td><td><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
       $$('[data-mv]', body).forEach((sel) => (sel.onchange = async () => { const s = D.students.find((x) => x.id === sel.dataset.mv); await store.saveStudents([{ ...s, classId: sel.value }]); s.classId = sel.value; toast('نُقل الطالب.'); }));
@@ -877,13 +887,13 @@ function viewTeacher(app) {
     const need = students.filter((x) => x.avg != null && x.avg < 70).sort((a, b) => a.avg - b.avg).slice(0, 10);
     const silent = students.filter((x) => x.n === 0).slice(0, 30);
     body.innerHTML = `<div class="grid2" style="align-items:start">
-      <div class="card stack" style="gap:12px"><h3>متوسط الدقة الآلية لكل حلقة</h3>
+      <div class="card stack" style="gap:12px"><h3>متوسط الدقة الآلية لكل صف</h3>
         ${byClass.map((r) => `<div class="bar-row"><span>${esc(r.c.name)}</span><div class="bar"><i style="width:${r.avg ?? 0}%"></i></div><b class="num">${r.avg == null ? '—' : ar(r.avg) + '٪'}</b></div>
-        <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? ` · متوسط تقييمك ${ar(r.tavg)}/٣٠` : ''}</div>`).join('') || '<span class="muted">لا توجد حلقات.</span>'}
+        <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? ` · متوسط تقييمك ${ar(r.tavg)}/٣٠` : ''}</div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
       </div>
       <div class="card stack" style="gap:12px"><h3>الكلمات الأكثر خطأً بين الطلاب</h3>
         ${top.length ? `<div class="row" style="gap:8px">${top.map((e) => `<span title="${esc(surahName(e.s))} ${e.a}"><span class="word-chip">${esc(e.w)}</span> <span class="small muted">${esc(surahName(e.s))}:${ar(e.a)} · ${ar(e.who.size)} طالب</span></span>`).join('')}</div>` : '<span class="muted">ستظهر هنا بعد أول تسليمات مصححة آلياً.</span>'}
-        <p class="small muted" style="margin:0">استخدمها لتحديد مواضع الشرح في الحلقة القادمة.</p>
+        <p class="small muted" style="margin:0">استخدمها لتحديد مواضع الشرح في الحصة القادمة.</p>
       </div>
       <div class="card stack" style="gap:8px"><h3>طلاب يحتاجون متابعة</h3>
         ${need.length ? need.map((x) => `<div class="row" style="justify-content:space-between"><span>${esc(x.s.name)} <span class="small muted">${esc(className(x.s.classId))}</span></span><span class="pill ${pctClass(x.avg)}">${ar(x.avg)}٪</span></div>`).join('') : '<span class="muted">لا يوجد طالب متوسطه أقل من ٧٠٪.</span>'}
