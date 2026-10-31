@@ -7,7 +7,25 @@ import { analyzeAyah, RULES } from './tajweed.js';
 export const EXTRA = {
   makhraj: { name: 'مخرج حرف', tip: 'خطأ في مخرج حرف أو صفته (مثل الضاد والظاء، الحاء والهاء).' },
   haraka: { name: 'خطأ في الحركة', tip: 'تبديل حركة بحركة (فتحة/ضمة/كسرة) أو سكون.' },
+  madd_tabii: { name: 'مد طبيعي', tip: 'يُمد حركتين.' },
+  madd_leen: { name: 'مد اللين', tip: 'الواو والياء الساكنتان بعد فتح عند الوقف.' },
+  tajweed_other: { name: 'حكم تجويد آخر', tip: '' },
 };
+
+/** موثوقية اقتراحات الذكاء الاصطناعي لكل حكم: كم منها قبله المعلم */
+export function aiReliability(subs) {
+  const t = {};
+  subs.forEach((x) => {
+    if (!x.ai?.errors || !x.tjDone || !x.teacher) return;
+    const marked = new Set((x.tj || []).map((m) => `${m.i}:${m.r}`));
+    x.ai.errors.forEach((e) => {
+      t[e.r] = t[e.r] || [0, 0];
+      t[e.r][0]++;
+      if (marked.has(`${e.i}:${e.r}`)) t[e.r][1]++;
+    });
+  });
+  return t; // { rule: [suggested, accepted] }
+}
 export const ruleName = (k) => (RULES[k] || EXTRA[k] || { name: k }).name;
 
 // احتمالات أولية قبل أي تقييم

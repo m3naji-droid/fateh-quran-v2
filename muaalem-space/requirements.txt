@@ -1,0 +1,8 @@
+# torch يُثبَّت أولاً من فهرس CPU في Dockerfile
+quran-muaalem @ git+https://github.com/obadx/quran-muaalem@2829e1aad719218d2e9b0e2720ff29eb8b84a67a
+transformers>=4.55.0
+numpy>=2.2.6
+levenshtein>=0.27.1
+fastapi>=0.116.1
+uvicorn[standard]>=0.35.0
+python-multipart>=0.0.20

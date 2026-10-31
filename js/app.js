@@ -3,7 +3,8 @@ import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
-import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA } from './learn.js';
+import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
+import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth } from './tajweed-ai.js';
 
 /* ================= أدوات عامة ================= */
 const $ = (s, el = document) => el.querySelector(s);
@@ -40,6 +41,34 @@ function confirmBox(text, okLabel = 'حذف') {
     });
   });
 }
+
+/* تنبيه الذكاء الاصطناعي (شرط ترخيص نموذج «المعلّم القرآني»): يُعرض قبل أول استخدام ويبقى متاحاً من «عن المقرأة» */
+function ensureAiNotice() {
+  if (pref.get('aiNoticeOk', false)) return Promise.resolve(true);
+  return new Promise((res) => {
+    openModal(`<div class="stack"><h2>قبل استخدام تحليل التجويد الآلي</h2>
+      <p class="ai-notice">${AI_NOTICE}</p>
+      <p class="muted" style="margin:0">يُرسَل تسجيلك إلى خادم التحليل ليقارن نطقك بالرسم الصوتي للآيات، ثم تظهر لك المواضع المحتملة للخطأ. الحكم النهائي لمعلمك.</p>
+      <div class="row"><button class="btn primary" id="aiOk" type="button">فهمت، تابع</button><button class="btn" id="aiNo" type="button">ليس الآن</button></div></div>`, (m) => {
+      $('#aiOk', m).onclick = () => { pref.set('aiNoticeOk', true); closeModal(); res(true); };
+      $('#aiNo', m).onclick = () => { closeModal(); res(false); };
+    });
+  });
+}
+function openAbout() {
+  openModal(`<div class="stack"><h2>عن مقرأة الفاتح</h2>
+    <p style="margin:0">مقرأة إلكترونية لتصحيح التلاوة وتسميع الحفظ للطلاب، مع لوحة للمعلم.</p>
+    <h3>تنبيه الذكاء الاصطناعي</h3>
+    <p class="ai-notice">${AI_NOTICE}</p>
+    <p class="ai-notice" dir="ltr" lang="en" style="text-align:left">This Quranic Teacher is an artificial-intelligence model that may make mistakes. It is intended for assistance only and must not be relied upon. It is not a replacement for a proficient, authorized teacher, because the Quran is only received through oral transmission (mushafahah).</p>
+    <h3>المصادر والتراخيص</h3>
+    <ul style="margin:0;padding-inline-start:20px">
+      <li>النص القرآني: الرسم العثماني برواية حفص، من مشروع Tanzil.</li>
+      <li>التلاوات الصوتية: موقع EveryAyah.</li>
+      <li>تحليل التجويد: نموذج «المعلّم القرآني» (Quran Muaalem) من obadx والمساهمين، بترخيص Quran Muaalem License (QML) 1.0.</li>
+    </ul></div>`);
+}
+$('#aboutLink').onclick = (e) => { e.preventDefault(); openAbout(); };
 
 /* الوضع الليلي */
 function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
@@ -171,6 +200,7 @@ function mountRecite(root, opts) {
   let last = null; // آخر نتيجة
   let sess = null;
   let lastBlob = null, lastDuration = 0, lastTranscript = '';
+  let aiRes = null, aiCtl = null;
 
   // أدوات العرض
   $$('[data-mode]', root).forEach((b) => (b.onclick = () => {
@@ -340,7 +370,8 @@ function mountRecite(root, opts) {
       $$('[data-play]', box).forEach((b) => (b.onclick = () => playRange(+b.dataset.play, +b.dataset.play)));
       opts.onResult && opts.onResult(buildSubmission());
     }
-    $('#rcRetry', box).onclick = () => { box.innerHTML = ''; wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed')); if (mode === 'hifz') text.classList.add('hide'); $('#rcTimer', root).textContent = '00:00'; $('#rcProg', root).style.width = '0'; $('#rcStatus', root).textContent = 'جاهز. اضغط الزر وابدأ.'; };
+    if (lastBlob && aiEnabled()) mountAi(box);
+    $('#rcRetry', box).onclick = () => { aiCtl?.abort(); aiRes = null; wEls.forEach((el) => el.classList.remove('tjai')); box.innerHTML = ''; wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed')); if (mode === 'hifz') text.classList.add('hide'); $('#rcTimer', root).textContent = '00:00'; $('#rcProg', root).style.width = '0'; $('#rcStatus', root).textContent = 'جاهز. اضغط الزر وابدأ.'; };
     const sb = $('#rcSubmit', box);
     if (sb) sb.onclick = async () => {
       sb.disabled = true; sb.textContent = 'جارٍ الإرسال…';
@@ -349,8 +380,45 @@ function mountRecite(root, opts) {
     };
   }
 
+  function mountAi(box) {
+    aiRes = null;
+    const card = document.createElement('div');
+    card.className = 'card stack';
+    card.style.gap = '10px';
+    box.appendChild(card);
+    const idle = () => {
+      card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><p class="small muted" style="margin:0">يستمع النموذج لتسجيلك ويحدد أخطاء المدود والغنة والقلقلة والحركات والحروف.</p><button class="btn gold" type="button" id="aiGo">حلّل تجويدي</button>`;
+      $('#aiGo', card).onclick = start;
+    };
+    const start = async () => {
+      if (!(await ensureAiNotice())) return;
+      aiCtl = new AbortController();
+      card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="small" id="aiProg">جارٍ التحضير…</div><div class="progress"><i class="indet"></i></div>${opts.onSubmit ? '<p class="small muted" style="margin:0">يمكنك الإرسال الآن؛ إن لم ينتهِ التحليل فسيُجريه المعلم لاحقاً.</p>' : ''}`;
+      try {
+        aiRes = await aiAnalyze(lastBlob, { surah, from, to }, (t) => { const el = $('#aiProg', card); if (el) el.textContent = t; }, aiCtl.signal);
+        renderAi(card);
+      } catch (e) {
+        if (aiCtl.signal.aborted) return;
+        card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="notice">${esc(e.message)}</div><button class="btn" type="button" id="aiGo">أعد المحاولة</button>`;
+        $('#aiGo', card).onclick = start;
+      }
+    };
+    if (pref.get('aiNoticeOk', false)) start(); else idle();
+  }
+
+  function renderAi(card) {
+    wEls.forEach((el) => el.classList.remove('tjai'));
+    aiRes.errors.forEach((e) => wEls[e.i]?.classList.add('tjai'));
+    const list = aiRes.errors.slice(0, 40);
+    card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3>
+      <div class="row"><span class="pill ${aiRes.errors.length ? 'warn' : 'ok'}">${aiRes.errors.length ? `${ar(aiRes.errors.length)} موضعاً محتملاً` : 'لم يجد النموذج أخطاء'}</span>${aiRes.acc != null ? `<span class="pill mute">تطابق النطق ${ar(Math.round(aiRes.acc * 100))}٪</span>` : ''}</div>
+      ${aiRes.skipped.length ? `<div class="notice">آيات لم يسمعها النموذج: ${aiRes.skipped.map(ar).join('، ')}</div>` : ''}
+      ${list.length ? `<ul class="mistakes">${list.map((e) => `<li><span><span class="qw">${esc(words[e.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[e.i]?.ayah || 0)}</span></span><span class="small">${esc(aiDescribe(e, ruleName))}</span></li>`).join('')}</ul>` : ''}
+      <p class="ai-notice small-notice">${AI_NOTICE}</p>`;
+  }
+
   function buildSubmission() {
-    const base = { surah, from, to, mode, duration: lastDuration, transcript: lastTranscript.slice(0, 5000) };
+    const base = { surah, from, to, mode, duration: lastDuration, transcript: lastTranscript.slice(0, 5000), ...(aiRes ? { ai: aiRes } : {}) };
     if (!last) return { ...base, auto: false, percent: null, statuses: '', mistakes: [], counts: null, wpm: 0 };
     const sc = score(last, lastDuration);
     const code = { correct: 'c', wrong: 'w', missing: 'm', pending: 'm' };
@@ -366,11 +434,11 @@ function mountRecite(root, opts) {
     };
   }
 
-  return { destroy() { player.stop(); sess?.cancel(); pop?.remove(); } };
+  return { destroy() { player.stop(); sess?.cancel(); pop?.remove(); aiCtl?.abort(); } };
 }
 
 /* عرض خريطة الكلمات لتسليم محفوظ */
-function wordMapHtml(sub, { colored = false, risky = null } = {}) {
+function wordMapHtml(sub, { colored = false, risky = null, ai = null } = {}) {
   const cls = { c: 'correct', w: 'wrong', m: 'missing' };
   const tjSet = new Set((sub.tj || []).map((m) => m.i));
   let h = '', gi = 0;
@@ -379,12 +447,17 @@ function wordMapHtml(sub, { colored = false, risky = null } = {}) {
     const parts = colored ? analyzeAyah(ws) : null;
     ws.forEach((w, k) => {
       const i = gi++;
-      const c = ['w', cls[sub.statuses?.[i]] || '', tjSet.has(i) ? 'tjerr' : '', risky?.has(i) ? 'risk' : ''].join(' ').trim();
+      const c = ['w', cls[sub.statuses?.[i]] || '', ai?.has(i) ? 'tjai' : '', tjSet.has(i) ? 'tjerr' : '', risky?.has(i) ? 'risk' : ''].join(' ').trim();
       h += `<span class="${c}" data-i="${i}">${colored ? wordHtml(parts[k]) : esc(w)}</span> `;
     });
     h += `<span class="ayah-end">${ar(a)}</span> `;
   }
   return `<div class="sheet"><div class="quran ${colored ? 'tajweed' : ''}" style="--qsize:24px">${h}</div></div>`;
+}
+function aiListHtml(sub) {
+  if (!sub.ai) return '';
+  const words = rangeWords(sub.surah, sub.from, sub.to);
+  return `<div><b class="small">ملاحظات الذكاء الاصطناعي (${ar(sub.ai.errors.length)})</b>${sub.ai.errors.length ? `<ul class="mistakes">${sub.ai.errors.slice(0, 40).map((e) => `<li><span><span class="qw">${esc(words[e.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[e.i]?.ayah || 0)}</span></span><span class="small">${esc(aiDescribe(e, ruleName))}</span></li>`).join('')}</ul>` : '<div class="small muted">لم يجد النموذج أخطاء.</div>'}<p class="ai-notice small-notice">${AI_NOTICE}</p></div>`;
 }
 function tjMarksHtml(sub) {
   if (!sub.tj?.length) return '';
@@ -561,7 +634,7 @@ function viewStudent(app) {
       const x = data.subs[+r.dataset.i];
       openModal(`<h2>${esc(x.taskTitle || 'تسميع')}</h2><p class="muted">${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)}</p>
         ${x.teacher ? `<div class="card" style="margin-bottom:12px"><b>درجة المعلم: ${ar(x.teacher.total)} / ١٠</b>${x.teacher.notes ? `<p style="margin:8px 0 0">${esc(x.teacher.notes)}</p>` : ''}</div>` : ''}
-        <div class="stack">${x.statuses || x.tj?.length ? wordMapHtml(x, { colored: true }) : ''}${tjMarksHtml(x)}</div>`);
+        <div class="stack">${x.statuses || x.tj?.length || x.ai ? wordMapHtml(x, { colored: true }) : ''}${tjMarksHtml(x)}${aiListHtml(x)}</div>`);
     }));
   }
 
@@ -723,6 +796,7 @@ function viewTeacher(app) {
     const words = rangeWords(x.surah, x.from, x.to);
     const segRules = segmentRules(x.surah, x.from, x.to);
     let marks = (x.tj || []).map((m) => ({ ...m }));
+    let aiRes = x.ai || null;
     const weak = weakRules(model, mine, 3);
     openModal(`
       <div class="stack">
@@ -734,6 +808,7 @@ function viewTeacher(app) {
         <div id="sbMap">${wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet })}</div>
         <div class="tj-menu small" id="sbMenu"><b>لتحديد خطأ تجويد:</b> اضغط على الكلمة في المصحف أعلاه، ثم اختر الحكم الذي أخطأ فيه الطالب. كل خطأ تحدده يتعلم منه النظام فوراً.</div>
         <div id="sbMarks"></div>
+        <div id="sbAi"></div>
         ${x.transcript ? `<details><summary class="small">النص الذي التقطه التعرف على الكلام</summary><p class="small muted">${esc(x.transcript)}</p></details>` : ''}
         <form id="sbForm" class="card stack" style="gap:12px">
           <h3>درجة المقطع</h3>
@@ -755,14 +830,49 @@ function viewTeacher(app) {
         } catch (e) { $('#sbAudio', m).innerHTML = `<span class="muted small">تعذر تحميل التسجيل: ${esc(e.message)}</span>`; }
       };
       const paintMarks = () => {
-        $('#sbMap', m).innerHTML = wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet });
+        $('#sbMap', m).innerHTML = wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet, ai: aiRes ? new Set(aiRes.errors.map((e) => e.i)) : null });
         $('#sbMarks', m).innerHTML = tjMarksHtml({ ...x, tj: marks });
+        paintAi();
       };
+      const has = (e) => marks.some((k) => k.i === e.i && k.r === e.r);
+      function paintAi() {
+        const box = $('#sbAi', m);
+        if (!aiEnabled() && !aiRes) { box.innerHTML = ''; return; }
+        if (!aiRes) {
+          box.innerHTML = x.hasAudio ? `<div class="card stack" style="gap:8px"><h3>تحليل التجويد بالذكاء الاصطناعي</h3><p class="small muted" style="margin:0">يحدد المواضع المحتملة لأخطاء المدود والغنة والقلقلة والحركات، فتقبل منها ما تؤكده بأذنك.</p><button class="btn gold" type="button" id="aiRun">حلّل التسجيل</button><div class="small" id="aiProg"></div></div>` : '';
+          const b = $('#aiRun', box);
+          if (b) b.onclick = async () => {
+            if (!(await ensureAiNotice())) return;
+            b.disabled = true;
+            try {
+              const blob = await store.getAudio(x.pn, x.id);
+              if (!blob) throw new Error('لم يُعثر على التسجيل.');
+              aiRes = await aiAnalyze(blob, x, (t) => { const el = $('#aiProg', box); if (el) el.textContent = t; });
+              paintMarks();
+            } catch (err) { const el = $('#aiProg', box); if (el) el.textContent = err.message; b.disabled = false; }
+          };
+          return;
+        }
+        const pending = aiRes.errors.filter((e) => !has(e));
+        box.innerHTML = `<div class="card stack" style="gap:8px"><div class="row" style="justify-content:space-between"><h3>اقتراحات الذكاء الاصطناعي (${ar(aiRes.errors.length)})</h3>${pending.length ? `<button class="btn sm" type="button" id="aiAll">قبول الكل</button>` : ''}</div>
+          ${aiRes.skipped?.length ? `<div class="notice">آيات لم يسمعها النموذج: ${aiRes.skipped.map(ar).join('، ')}</div>` : ''}
+          ${aiRes.errors.length ? `<ul class="mistakes">${aiRes.errors.slice(0, 60).map((e, k) => `<li><span><span class="qw">${esc(words[e.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[e.i]?.ayah || 0)} · ${esc(aiDescribe(e, ruleName))}</span></span>
+            <button class="btn sm ${has(e) ? 'primary' : ''}" type="button" data-ai="${k}">${has(e) ? 'مقبول ✓' : 'قبول'}</button></li>`).join('')}</ul>` : '<div class="small muted">لم يجد النموذج أخطاء.</div>'}
+          <p class="small muted" style="margin:0">ما تقبله يُحفظ ضمن أخطاء التجويد ويتعلم منه النظام، وما تتركه يُحسب على دقة النموذج في التقارير.</p>
+          <p class="ai-notice small-notice">${AI_NOTICE}</p></div>`;
+        $$('[data-ai]', box).forEach((b) => (b.onclick = () => {
+          const e = aiRes.errors[+b.dataset.ai];
+          if (has(e)) marks = marks.filter((k) => !(k.i === e.i && k.r === e.r)); else marks.push({ i: e.i, r: e.r });
+          paintMarks();
+        }));
+        const all = $('#aiAll', box);
+        if (all) all.onclick = () => { pending.forEach((e) => marks.push({ i: e.i, r: e.r })); paintMarks(); };
+      }
       paintMarks();
       $('#sbMap', m).addEventListener('click', (e) => {
         const w = e.target.closest('.w'); if (!w) return;
         const i = +w.dataset.i;
-        const opts = [...segRules[i], 'makhraj', 'haraka'];
+        const opts = [...new Set([...segRules[i], ...(aiRes ? aiRes.errors.filter((e) => e.i === i).map((e) => e.r) : []), 'makhraj', 'haraka'])];
         const on = new Set(marks.filter((k) => k.i === i).map((k) => k.r));
         $('#sbMenu', m).innerHTML = `<div class="row" style="gap:8px"><span class="qw" style="font-family:var(--f-quran);font-size:22px">${esc(words[i].text)}</span><span class="muted">آية ${ar(words[i].ayah)}: ما الخطأ؟</span></div>
           <div class="row" style="gap:6px;margin-top:8px">${opts.map((r) => `<button type="button" class="chip ${on.has(r) ? 'on' : ''}" data-r="${r}">${esc(ruleName(r))}</button>`).join('')}</div>`;
@@ -779,7 +889,7 @@ function viewTeacher(app) {
         const v = parseFloat($('#gTotal', m).value);
         if (isNaN(v)) return toast('اكتب الدرجة من ١٠.');
         const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 2) / 2)), notes: $('#gN', m).value.trim(), suggested, at: new Date().toISOString() };
-        const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked };
+        const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked, ...(aiRes ? { ai: aiRes } : {}) };
         try {
           await store.updateSubmission(x.pn, x.id, patch);
           Object.assign(x, patch);
@@ -984,6 +1094,8 @@ function viewTeacher(app) {
     return `<div class="card stack" style="gap:10px"><h3>ما تعلّمه النظام من تقييماتك</h3>
       <div class="small muted">${ar(model.n)} مقطعاً مقيّماً، منها ${ar(model.tjN)} حُددت فيها أخطاء التجويد.</div>
       ${recent != null ? `<div>متوسط الفرق بين اقتراح النظام ودرجتك في آخر التقييمات: <b>${ar(recent.toFixed(1))}</b> درجة${withSug.length > 10 ? ` <span class="small muted">(كان ${ar(early.toFixed(1))} في أول ١٠ تقييمات)</span>` : ''}</div>` : '<div class="small muted">قيّم بعض التسليمات ليبدأ النظام في اقتراح الدرجات ومقارنتها بدرجاتك.</div>'}
+      ${(() => { const rel = Object.entries(aiReliability(D.subs)).filter(([, v]) => v[0] >= 3).sort((a, b) => b[1][0] - a[1][0]).slice(0, 6);
+        return rel.length ? `<b class="small">دقة اقتراحات الذكاء الاصطناعي (نسبة ما قبلته منها)</b>${rel.map(([r, [n, ok]]) => `<div class="bar-row"><span>${esc(ruleName(r))}</span><div class="bar"><i style="width:${Math.round((ok / n) * 100)}%"></i></div><b class="num">${ar(Math.round((ok / n) * 100))}٪</b></div>`).join('')}<div class="small muted">نسبة منخفضة لحكمٍ ما تعني أن النموذج يكثر من الإنذارات الخاطئة فيه مع طلابك.</div>` : ''; })()}
       ${rates.length ? `<b class="small">أكثر الأحكام خطأً بين الطلاب</b>${rates.map((x) => `<div class="bar-row"><span>${esc(ruleName(x.r))}</span><div class="bar"><i style="width:${Math.round(x.p * 100)}%;background:var(--bad)"></i></div><b class="num">${ar(Math.round(x.p * 100))}٪</b></div>`).join('')}` : ''}
     </div>`;
   }
@@ -994,10 +1106,13 @@ function viewTeacher(app) {
       <div class="card stack" style="gap:10px"><h3>حفظ البيانات</h3>
         ${store.mode === 'cloud' ? '<p style="margin:0"><span class="pill ok">سحابي</span> البيانات محفوظة في Firebase وتظهر على كل الأجهزة.</p>' : '<p style="margin:0"><span class="pill warn">محلي</span> البيانات محفوظة في هذا المتصفح فقط. للعمل بين أجهزة الطلاب والمعلم فعّل Firebase (راجع ملف README).</p>'}
       </div>
+      <div class="card stack" style="gap:10px"><h3>خادم تحليل التجويد</h3><div id="aiStatus" class="small muted">${aiEnabled() ? 'جارٍ الفحص…' : 'غير مفعّل. ضع رابط الخادم في ملف js/firebase-config.js (راجع muaalem-space/README.md).'}</div></div>
       ${store.mode === 'cloud' ? `<div class="card stack" style="gap:10px"><h3>نقل بيانات النسخة السابقة</h3>
         <p class="muted small" style="margin:0">ينسخ الطلاب وواجبات سورة يس من «مقرأة الفاتح» القديمة إلى النظام الجديد. التسليمات القديمة لا تُنقل.</p>
         <button class="btn" id="mig" type="button">نقل البيانات القديمة</button></div>` : ''}
     </div>`;
+    if (aiEnabled()) aiHealth().then((h) => { const el = $('#aiStatus', body); if (el) el.innerHTML = h.model_error ? `<span class="pill bad">خطأ</span> ${esc(h.model_error)}` : h.model_ready ? `<span class="pill ok">جاهز</span> النموذج محمّل على ${esc(h.device)}${h.queue ? `، وفي الانتظار ${ar(h.queue)}` : ''}.` : '<span class="pill warn">يستيقظ</span> النموذج قيد التحميل.'; })
+      .catch(() => { const el = $('#aiStatus', body); if (el) el.innerHTML = '<span class="pill warn">لا يستجيب</span> قد يكون الخادم نائماً؛ يستيقظ مع أول تحليل خلال دقيقة أو دقيقتين.'; });
     const mg = $('#mig', body);
     if (mg) mg.onclick = async () => {
       mg.disabled = true; mg.textContent = 'جارٍ النقل…';

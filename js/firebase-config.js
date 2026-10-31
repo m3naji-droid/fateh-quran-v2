@@ -12,3 +12,11 @@ export const FIREBASE = {
   // اتركه فارغاً لاستخدام قاعدة البيانات الافتراضية "(default)"
   databaseId: '',
 };
+
+// خادم تحليل التجويد على Hugging Face. ضع رابط الـ Space هنا بعد إنشائه، مثل:
+// 'https://m3naji-droid-fateh-tajweed.hf.space'  (اتركه فارغاً لإخفاء التحليل الآلي)
+export const TAJWEED_API = {
+  url: '',
+  // مقادير المدود المعتمدة في التصحيح (رواية حفص من طريق الشاطبية)
+  madd: { monfasel: 4, mottasel: 4, aared: 4 },
+};

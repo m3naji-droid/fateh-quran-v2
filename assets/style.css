@@ -247,6 +247,7 @@ details summary { cursor: pointer; font-weight: 600; }
 }
 
 /* أخطاء التجويد التي حددها المعلم، والمواضع المتوقعة */
+.w.tjai { outline: 2px dotted var(--tj-idgham_g); outline-offset: 1px; }
 .w.tjerr { outline: 2px dashed var(--bad); outline-offset: 1px; }
 .w.risk { text-decoration: underline wavy var(--gold); text-decoration-thickness: 1.5px; text-underline-offset: .45em; }
 .tj-menu { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
@@ -255,3 +256,9 @@ details summary { cursor: pointer; font-weight: 600; }
 .grade-box { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .grade-box input { width: 110px; font-size: 22px; font-family: var(--f-display); text-align: center; }
 .learn-note { background: var(--green-2); color: var(--green); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+
+.ai-notice { font-size: 15px; line-height: 1.8; background: var(--gold-soft); border-radius: 10px; padding: 10px 12px; margin: 0; color: var(--ink); }
+.ai-notice.small-notice { font-size: 14px; }
+.progress .indet { width: 35%; animation: indet 1.2s ease-in-out infinite alternate; }
+@keyframes indet { from { margin-inline-start: 0; } to { margin-inline-start: 65%; } }
+.foot a { color: var(--green); font-weight: 600; }

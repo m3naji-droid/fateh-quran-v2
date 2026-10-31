@@ -1,0 +1,18 @@
+Fateh Maqraa - Tajweed Analysis Server
+This server runs the Quran Muaalem model (obadx/muaalem-model-v3_2) and the
+quran-muaalem / quran-transcript libraries by obadx and contributors.
+
+Quran Muaalem
+Copyright (c) 2025 obadx and contributors
+Licensed under the Quran Muaalem License (QML), Version 1.0. See LICENSE.
+
+AI Advisory Notice
+
+English:
+This Quranic Teacher is an artificial-intelligence model that may make mistakes.
+It is intended for assistance only and must not be relied upon. It is not a
+replacement for a proficient, authorized teacher, because the Quran is only
+received through oral transmission (mushafahah).
+
+العربية:
+هذا المعلّم القرآني نموذج ذكاء اصطناعي قد يخطئ؛ فهو للإعانة فقط ولا يُعتمد عليه، وليس بديلاً عن معلّمٍ مُتقِنٍ مُجاز؛ لأنّ القرآن لا يُؤخذ إلا بالمشافهة.
