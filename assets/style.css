@@ -245,3 +245,13 @@ details summary { cursor: pointer; font-weight: 600; }
   .nav a { padding: 6px 8px; white-space: nowrap; font-size: 14px; }
   .sheet { padding: 22px 14px; }
 }
+
+/* أخطاء التجويد التي حددها المعلم، والمواضع المتوقعة */
+.w.tjerr { outline: 2px dashed var(--bad); outline-offset: 1px; }
+.w.risk { text-decoration: underline wavy var(--gold); text-decoration-thickness: 1.5px; text-underline-offset: .45em; }
+.tj-menu { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+.chip.on { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); font-weight: 600; }
+.grade-box { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.grade-box input { width: 110px; font-size: 22px; font-family: var(--f-display); text-align: center; }
+.learn-note { background: var(--green-2); color: var(--green); border-radius: 10px; padding: 10px 12px; font-size: 13px; }

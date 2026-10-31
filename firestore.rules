@@ -40,6 +40,11 @@ service cloud.firestore {
         }
       }
     }
+    // نموذج التعلم من تقييمات المعلم
+    match /model/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
     // استعلام المعلم عن كل التسليمات
     match /{path=**}/subs/{sid} {
       allow read: if isTeacher();

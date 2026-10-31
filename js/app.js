@@ -3,6 +3,7 @@ import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
+import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA } from './learn.js';
 
 /* ================= أدوات عامة ================= */
 const $ = (s, el = document) => el.querySelector(s);
@@ -105,6 +106,8 @@ function mountRecite(root, opts) {
     html += `<span class="ayah-end" data-a="${a}" title="استمع للآية ${ar(a)}">۝${ar(a)}</span> </span>`;
   }
   const rulesMap = summarize(analyzed);
+  const L = opts.learn; // { model, rates, weak } للطالب المسجل
+  const riskSet = L ? new Set(riskyWords({ surah, from, to }, L.rates, 6).filter((r) => r.risk >= 0.3).map((r) => r.i)) : null;
   const tajOn = pref.get('tajweed', true);
   const qsize = pref.get('qsize', 30);
   const reciter = pref.get('reciter', RECITERS[0].id);
@@ -127,6 +130,7 @@ function mountRecite(root, opts) {
         <div class="sheet-head"><div class="sname">سورة ${esc(surahName(surah))}</div><div class="muted small">من الآية ${ar(from)} إلى ${ar(to)}، وعدد كلماتها ${ar(words.length)}</div></div>
         <div class="quran ${tajOn ? 'tajweed' : ''} ${mode === 'hifz' ? 'hide' : ''}" id="rcText" style="--qsize:${qsize}px">${html}</div>
       </div>
+      ${L && L.weak.length ? `<div class="learn-note"><b>انتبه في هذا المقطع:</b> من تقييمات معلمك السابقة، تحتاج إلى عناية بـ ${L.weak.map((w) => `«${esc(ruleName(w.r))}»`).join(' و')}. المواضع المتوقعة مسطّرة بخط متموّج.</div>` : ''}
       ${opts.below || ''}
     </div>
     <aside class="side">
@@ -163,6 +167,7 @@ function mountRecite(root, opts) {
 
   const text = $('#rcText', root);
   const wEls = $$('.w', text);
+  if (riskSet) riskSet.forEach((i) => wEls[i]?.classList.add('risk'));
   let last = null; // آخر نتيجة
   let sess = null;
   let lastBlob = null, lastDuration = 0, lastTranscript = '';
@@ -328,6 +333,7 @@ function mountRecite(root, opts) {
           <li><span><span class="qw">${esc(words[i].text)}</span> <span class="small muted">آية ${ar(words[i].ayah)}${last.heard[i] ? ` · سُمعت «${esc(last.heard[i])}»` : ''}</span></span>
           <button class="btn sm" type="button" data-play="${words[i].ayah}">استمع</button></li>`).join('')}</ul></div>` : '<div class="pill ok">لا أخطاء في الكلمات. بارك الله فيك.</div>'}
         ${audioUrl ? `<div><b class="small">تسجيلك</b><audio controls src="${audioUrl}" style="width:100%"></audio></div>` : ''}
+        ${L ? `<div class="learn-note">الدرجة المتوقعة من معلمك: <b>${ar(predict(L.model, { surah, from, to, percent: sc.percent, wpm: sc.wpm }, L.rates))} / ١٠</b><br><span class="small">تقدير يتعلمه النظام من تقييمات المعلم السابقة، والدرجة النهائية للمعلم.</span></div>` : ''}
         <div class="small muted">التصحيح الآلي يقيس صحة الكلمات والحفظ. أحكام التجويد والمخارج يقيّمها المعلم بالاستماع.</div>
         <div class="row">${submitBtn}<button class="btn" id="rcRetry" type="button">إعادة المحاولة</button></div>
       </div>`;
@@ -364,16 +370,26 @@ function mountRecite(root, opts) {
 }
 
 /* عرض خريطة الكلمات لتسليم محفوظ */
-function wordMapHtml(sub) {
-  const ws = rangeWords(sub.surah, sub.from, sub.to);
+function wordMapHtml(sub, { colored = false, risky = null } = {}) {
   const cls = { c: 'correct', w: 'wrong', m: 'missing' };
-  let h = '', cur = null;
-  ws.forEach((w, i) => {
-    if (w.ayah !== cur) { if (cur) h += `<span class="ayah-end">۝${ar(cur)}</span> `; cur = w.ayah; }
-    h += `<span class="w ${cls[sub.statuses?.[i]] || ''}">${esc(w.text)}</span> `;
-  });
-  if (cur) h += `<span class="ayah-end">۝${ar(cur)}</span>`;
-  return `<div class="sheet"><div class="quran" style="--qsize:24px">${h}</div></div>`;
+  const tjSet = new Set((sub.tj || []).map((m) => m.i));
+  let h = '', gi = 0;
+  for (let a = sub.from; a <= sub.to; a++) {
+    const ws = ayahWords(sub.surah, a);
+    const parts = colored ? analyzeAyah(ws) : null;
+    ws.forEach((w, k) => {
+      const i = gi++;
+      const c = ['w', cls[sub.statuses?.[i]] || '', tjSet.has(i) ? 'tjerr' : '', risky?.has(i) ? 'risk' : ''].join(' ').trim();
+      h += `<span class="${c}" data-i="${i}">${colored ? wordHtml(parts[k]) : esc(w)}</span> `;
+    });
+    h += `<span class="ayah-end">${ar(a)}</span> `;
+  }
+  return `<div class="sheet"><div class="quran ${colored ? 'tajweed' : ''}" style="--qsize:24px">${h}</div></div>`;
+}
+function tjMarksHtml(sub) {
+  if (!sub.tj?.length) return '';
+  const words = rangeWords(sub.surah, sub.from, sub.to);
+  return `<div><b class="small">أخطاء التجويد التي حددها المعلم</b><ul class="mistakes">${sub.tj.map((m) => `<li><span><span class="qw">${esc(words[m.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[m.i]?.ayah || 0)}</span></span><span class="pill bad">${esc(ruleName(m.r))}</span></li>`).join('')}</ul></div>`;
 }
 
 /* ================= التوجيه ================= */
@@ -512,14 +528,20 @@ function viewStudent(app) {
     $$('[data-task]', body).forEach((b) => (b.onclick = () => openTask(data.tasks.find((t) => t.id === b.dataset.task))));
   }
 
-  function openTask(t) {
+  async function openTask(t) {
     comp?.destroy();
+    let learn = null;
+    try {
+      const model = await store.getModel();
+      const rates = studentRates(model, data.subs);
+      learn = { model, rates, weak: weakRules(model, data.subs, 3) };
+    } catch {}
     app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="tkBack" type="button">→ رجوع للواجبات</button><h1>${esc(t.title)}</h1>
       <p class="muted" style="margin:4px 0 0">${t.notes ? esc(t.notes) : 'اقرأ المقطع كاملاً ثم أرسل تسجيلك للمعلم.'}</p></div></div><div id="tkBody"></div>`;
     $('#tkBack', app).onclick = () => { comp?.destroy(); draw(); };
     const cls = data.classes.find((c) => c.id === me.classId);
     comp = mountRecite($('#tkBody', app), {
-      surah: t.surah, from: t.from, to: t.to, mode: t.mode,
+      surah: t.surah, from: t.from, to: t.to, mode: t.mode, learn,
       onSubmit: async (sub, blob) => {
         await store.addSubmission(me.id, { ...sub, taskId: t.id, taskTitle: t.title, studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null }, blob);
         toast('تم إرسال التسميع إلى المعلم. جزاك الله خيراً.');
@@ -533,17 +555,24 @@ function viewStudent(app) {
     body.innerHTML = `<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>المقطع</th><th>الدقة الآلية</th><th>تقييم المعلم</th><th>ملاحظات</th></tr></thead><tbody>
       ${data.subs.map((x, i) => `<tr class="click" data-i="${i}"><td class="num">${fmtDate(x.createdAt)}</td><td>${esc(x.taskTitle || rangeLabel(x.surah, x.from, x.to))}</td>
       <td>${x.percent == null ? '<span class="pill mute">بانتظار المعلم</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td>
-      <td>${x.teacher ? `<b class="num">${ar(x.teacher.total)}</b>/٣٠` : '<span class="muted">—</span>'}</td><td style="white-space:normal;min-width:160px">${esc(x.teacher?.notes || '')}</td></tr>`).join('')}
+      <td>${x.teacher ? `<b class="num">${ar(x.teacher.total)}</b>/١٠` : '<span class="muted">—</span>'}</td><td style="white-space:normal;min-width:160px">${esc(x.teacher?.notes || '')}</td></tr>`).join('')}
     </tbody></table></div>`;
     $$('tr[data-i]', body).forEach((r) => (r.onclick = () => {
       const x = data.subs[+r.dataset.i];
       openModal(`<h2>${esc(x.taskTitle || 'تسميع')}</h2><p class="muted">${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)}</p>
-        ${x.teacher ? `<div class="card" style="margin-bottom:12px"><b>تقييم المعلم: ${ar(x.teacher.total)}/٣٠</b><div class="small muted">الحفظ ${ar(x.teacher.hifz)} · التجويد ${ar(x.teacher.tajweed)} · الأداء والمخارج ${ar(x.teacher.ada)}</div>${x.teacher.notes ? `<p style="margin:8px 0 0">${esc(x.teacher.notes)}</p>` : ''}</div>` : ''}
-        ${x.statuses ? wordMapHtml(x) : ''}`);
+        ${x.teacher ? `<div class="card" style="margin-bottom:12px"><b>درجة المعلم: ${ar(x.teacher.total)} / ١٠</b>${x.teacher.notes ? `<p style="margin:8px 0 0">${esc(x.teacher.notes)}</p>` : ''}</div>` : ''}
+        <div class="stack">${x.statuses || x.tj?.length ? wordMapHtml(x, { colored: true }) : ''}${tjMarksHtml(x)}</div>`);
     }));
   }
 
-  function drawNotebook(body) {
+  async function drawNotebook(body) {
+    let weakHtml = '';
+    try {
+      const model = await store.getModel();
+      const weak = weakRules(model, data.subs, 6);
+      if (weak.length) weakHtml = `<div class="card stack" style="gap:8px;margin-bottom:16px"><h3>أحكام التجويد التي تحتاج تدريباً</h3>
+        ${weak.map((w) => `<div class="row" style="justify-content:space-between"><span><b>${esc(ruleName(w.r))}</b> <span class="small muted">أخطأت فيه ${ar(w.errs)} من ${ar(w.seen)} موضعاً قيّمه المعلم</span></span><span class="pill ${w.p > 0.4 ? 'bad' : 'warn'}">${ar(Math.round(w.p * 100))}٪</span></div>`).join('')}</div>`;
+    } catch {}
     const agg = new Map();
     data.subs.forEach((x) => (x.mistakes || []).forEach((m) => {
       const k = `${x.surah}:${m.a}:${m.w}`;
@@ -551,8 +580,8 @@ function viewStudent(app) {
       e.n++; agg.set(k, e);
     }));
     const list = [...agg.values()].sort((a, b) => b.n - a.n).slice(0, 60);
-    if (!list.length) { body.innerHTML = '<div class="empty">دفترك نظيف. الكلمات التي تخطئ فيها ستظهر هنا لتراجعها.</div>'; return; }
-    body.innerHTML = `<p class="muted">الكلمات التي تكرر فيها الخطأ أو الترك، مرتبة من الأكثر. اضغط «راجع» للتدرّب على الآية.</p>
+    if (!list.length) { body.innerHTML = weakHtml + '<div class="empty">دفترك نظيف. الكلمات التي تخطئ فيها ستظهر هنا لتراجعها.</div>'; return; }
+    body.innerHTML = weakHtml + `<p class="muted">الكلمات التي تكرر فيها الخطأ أو الترك، مرتبة من الأكثر. اضغط «راجع» للتدرّب على الآية.</p>
       <div class="grid3">${list.map((e, i) => `<div class="card row" style="justify-content:space-between"><div><span class="word-chip">${esc(e.w)}</span><div class="small muted" style="margin-top:6px">${esc(surahName(e.surah))} · آية ${ar(e.a)} · ${ar(e.n)} مرة</div></div><button class="btn sm" data-nb="${i}" type="button">راجع</button></div>`).join('')}</div>`;
     $$('[data-nb]', body).forEach((b) => (b.onclick = () => { const e = list[+b.dataset.nb]; pendingPractice = { surah: e.surah, from: e.a, to: e.a, mode: 'hifz' }; navTo('practice'); }));
   }
@@ -670,7 +699,7 @@ function viewTeacher(app) {
         ${L.map((x) => `<tr class="click" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td><b>${esc(x.studentName)}</b><div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
         <td>${esc(x.taskTitle || 'تدريب')}<div class="small muted">${esc(rangeLabel(x.surah, x.from, x.to))}</div></td><td class="num">${fmtDate(x.createdAt)}</td>
         <td>${x.percent == null ? '<span class="pill mute">يدوي</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td><td class="num">${fmtTime(x.duration || 0)}</td>
-        <td>${x.teacher ? `<span class="pill ok">${ar(x.teacher.total)}/٣٠</span>` : '<span class="pill warn">بانتظارك</span>'}</td></tr>`).join('')}
+        <td>${x.teacher ? `<span class="pill ok">${ar(x.teacher.total)}/١٠</span>` : '<span class="pill warn">بانتظارك</span>'}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">لا توجد تسليمات مطابقة.</div>';
       $$('tr[data-id]', body).forEach((r) => (r.onclick = () => openSubmission(D.subs.find((x) => x.id === r.dataset.id && x.pn === r.dataset.pn))));
     };
@@ -685,22 +714,34 @@ function viewTeacher(app) {
   function openSubmission(x) {
     if (!x) return;
     const t = x.teacher || {};
-    const suggested = x.percent != null ? Math.round(x.percent / 10) : '';
+    const model = train(D.subs.filter((y) => y !== x));
+    const mine = D.subs.filter((y) => y.pn === x.pn && y !== x);
+    const rates = studentRates(model, mine);
+    const suggested = predict(model, x, rates);
+    const risky = riskyWords(x, rates, 8).filter((r) => r.risk >= 0.3);
+    const riskSet = new Set(risky.map((r) => r.i));
+    const words = rangeWords(x.surah, x.from, x.to);
+    const segRules = segmentRules(x.surah, x.from, x.to);
+    let marks = (x.tj || []).map((m) => ({ ...m }));
+    const weak = weakRules(model, mine, 3);
     openModal(`
       <div class="stack">
         <div><h2>${esc(x.studentName)} <span class="muted small num">${esc(x.pn)}</span></h2>
         <p class="muted" style="margin:4px 0 0">${esc(x.taskTitle || 'تدريب')} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)} · ${x.mode === 'hifz' ? 'غيباً' : 'نظراً'}</p></div>
         <div class="row">${x.percent != null ? `<span class="pill ${pctClass(x.percent)}">الدقة الآلية ${ar(x.percent)}٪</span><span class="pill mute">صحيحة ${ar(x.counts?.correct || 0)} · خطأ ${ar(x.counts?.wrong || 0)} · محذوفة ${ar(x.counts?.missing || 0)}</span>` : '<span class="pill mute">بدون تصحيح آلي</span>'}<span class="pill mute">المدة ${fmtTime(x.duration || 0)}</span></div>
         <div id="sbAudio">${x.hasAudio ? '<button class="btn" id="sbLoad" type="button">تشغيل تسجيل الطالب</button>' : '<span class="muted small">لا يوجد تسجيل صوتي.</span>'}</div>
-        ${x.statuses ? wordMapHtml(x) : ''}
+        ${risky.length ? `<div class="learn-note">استمع أولاً إلى المواضع المسطّرة: هي الأرجح أن يخطئ فيها هذا الطالب${weak.length ? `، فقد أخطأ سابقاً في ${weak.map((w) => `«${esc(ruleName(w.r))}»`).join(' و')}` : ''}.</div>` : ''}
+        <div id="sbMap">${wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet })}</div>
+        <div class="tj-menu small" id="sbMenu"><b>لتحديد خطأ تجويد:</b> اضغط على الكلمة في المصحف أعلاه، ثم اختر الحكم الذي أخطأ فيه الطالب. كل خطأ تحدده يتعلم منه النظام فوراً.</div>
+        <div id="sbMarks"></div>
         ${x.transcript ? `<details><summary class="small">النص الذي التقطه التعرف على الكلام</summary><p class="small muted">${esc(x.transcript)}</p></details>` : ''}
         <form id="sbForm" class="card stack" style="gap:12px">
-          <h3>تقييمك</h3>
-          <div class="grid3">
-            <label class="field">الحفظ وصحة الكلمات (من ١٠)<input type="number" id="gH" min="0" max="10" step="0.5" value="${t.hifz ?? suggested}"></label>
-            <label class="field">أحكام التجويد (من ١٠)<input type="number" id="gT" min="0" max="10" step="0.5" value="${t.tajweed ?? ''}"></label>
-            <label class="field">الأداء ومخارج الحروف (من ١٠)<input type="number" id="gA" min="0" max="10" step="0.5" value="${t.ada ?? ''}"></label>
+          <h3>درجة المقطع</h3>
+          <div class="grade-box">
+            <input type="number" id="gTotal" min="0" max="10" step="0.5" value="${t.total ?? suggested}" aria-label="الدرجة من ١٠"><b>/ ١٠</b>
+            <span class="small muted">اقتراح النظام: <b>${ar(suggested)}</b>${model.n ? ` (تعلّم من ${ar(model.n)} تقييماً)` : ' (تقدير أولي قبل أي تقييم)'}</span>
           </div>
+          <label class="row small" style="gap:6px"><input type="checkbox" id="gTjDone" ${x.tjDone !== false ? 'checked' : ''}> استمعت وحددت أخطاء التجويد في هذا المقطع (إن لم تحدد شيئاً فهذا يعني أن التجويد سليم)</label>
           <label class="field">ملاحظات للطالب<textarea id="gN" placeholder="مثال: انتبه للإخفاء في «من قبل»، وأطل المد المتصل.">${esc(t.notes || '')}</textarea></label>
           <div class="row"><button class="btn primary" type="submit">حفظ التقييم</button><button class="btn danger" type="button" id="sbDel">حذف التسليم</button></div>
         </form>
@@ -713,13 +754,42 @@ function viewTeacher(app) {
           $('#sbAudio', m).innerHTML = blob ? `<audio controls autoplay src="${URL.createObjectURL(blob)}" style="width:100%"></audio>` : '<span class="muted small">لم يُعثر على التسجيل.</span>';
         } catch (e) { $('#sbAudio', m).innerHTML = `<span class="muted small">تعذر تحميل التسجيل: ${esc(e.message)}</span>`; }
       };
+      const paintMarks = () => {
+        $('#sbMap', m).innerHTML = wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet });
+        $('#sbMarks', m).innerHTML = tjMarksHtml({ ...x, tj: marks });
+      };
+      paintMarks();
+      $('#sbMap', m).addEventListener('click', (e) => {
+        const w = e.target.closest('.w'); if (!w) return;
+        const i = +w.dataset.i;
+        const opts = [...segRules[i], 'makhraj', 'haraka'];
+        const on = new Set(marks.filter((k) => k.i === i).map((k) => k.r));
+        $('#sbMenu', m).innerHTML = `<div class="row" style="gap:8px"><span class="qw" style="font-family:var(--f-quran);font-size:22px">${esc(words[i].text)}</span><span class="muted">آية ${ar(words[i].ayah)}: ما الخطأ؟</span></div>
+          <div class="row" style="gap:6px;margin-top:8px">${opts.map((r) => `<button type="button" class="chip ${on.has(r) ? 'on' : ''}" data-r="${r}">${esc(ruleName(r))}</button>`).join('')}</div>`;
+        $$('[data-r]', $('#sbMenu', m)).forEach((b) => (b.onclick = () => {
+          const r = b.dataset.r;
+          if (marks.some((k) => k.i === i && k.r === r)) marks = marks.filter((k) => !(k.i === i && k.r === r));
+          else marks.push({ i, r });
+          b.classList.toggle('on');
+          paintMarks();
+        }));
+      });
       $('#sbForm', m).onsubmit = async (e) => {
         e.preventDefault();
-        const num = (id) => { const v = parseFloat($(id, m).value); return isNaN(v) ? 0 : Math.max(0, Math.min(10, v)); };
-        const teacher = { hifz: num('#gH'), tajweed: num('#gT'), ada: num('#gA'), notes: $('#gN', m).value.trim(), at: new Date().toISOString() };
-        teacher.total = Math.round((teacher.hifz + teacher.tajweed + teacher.ada) * 10) / 10;
-        try { await store.updateSubmission(x.pn, x.id, { teacher }); x.teacher = teacher; closeModal(); toast('حُفظ التقييم وسيظهر للطالب.'); if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } drawBody(); }
-        catch (err) { toast('تعذر الحفظ: ' + err.message); }
+        const v = parseFloat($('#gTotal', m).value);
+        if (isNaN(v)) return toast('اكتب الدرجة من ١٠.');
+        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 2) / 2)), notes: $('#gN', m).value.trim(), suggested, at: new Date().toISOString() };
+        const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked };
+        try {
+          await store.updateSubmission(x.pn, x.id, patch);
+          Object.assign(x, patch);
+          closeModal();
+          if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
+          const all = D.subs.map((y) => (y.id === x.id && y.pn === x.pn ? { ...y, ...patch } : y));
+          store.setModel(pack(train(all))).catch((err) => console.warn('model save', err));
+          toast(`حُفظت الدرجة${marks.length ? ` و${marks.length} من أخطاء التجويد` : ''}، وتعلّم منها النظام.`);
+          drawBody();
+        } catch (err) { toast('تعذر الحفظ: ' + err.message); }
       };
       $('#sbDel', m).onclick = async () => {
         if (!(await confirmBox(`حذف تسليم ${x.studentName}؟ لا يمكن التراجع.`))) return;
@@ -735,7 +805,7 @@ function viewTeacher(app) {
       'الطالب': x.studentName, 'الرقم': x.pn, 'الصف': x.className || className(x.classId), 'الواجب': x.taskTitle || 'تدريب',
       'السورة': surahName(x.surah), 'من': x.from, 'إلى': x.to, 'التاريخ': fmtDate(x.createdAt), 'الدقة الآلية %': x.percent ?? '',
       'صحيحة': x.counts?.correct ?? '', 'خطأ': x.counts?.wrong ?? '', 'محذوفة': x.counts?.missing ?? '',
-      'الحفظ': x.teacher?.hifz ?? '', 'التجويد': x.teacher?.tajweed ?? '', 'الأداء': x.teacher?.ada ?? '', 'المجموع /30': x.teacher?.total ?? '', 'ملاحظات': x.teacher?.notes ?? '',
+      'درجة المعلم /10': x.teacher?.total ?? '', 'أخطاء التجويد': (x.tj || []).map((k) => ruleName(k.r)).join('، '), 'ملاحظات': x.teacher?.notes ?? '',
     }));
     if (!window.XLSX) { toast('مكتبة Excel لم تُحمّل بعد. أعد المحاولة بعد لحظات.'); return; }
     const ws = XLSX.utils.json_to_sheet(data);
@@ -889,18 +959,32 @@ function viewTeacher(app) {
     body.innerHTML = `<div class="grid2" style="align-items:start">
       <div class="card stack" style="gap:12px"><h3>متوسط الدقة الآلية لكل صف</h3>
         ${byClass.map((r) => `<div class="bar-row"><span>${esc(r.c.name)}</span><div class="bar"><i style="width:${r.avg ?? 0}%"></i></div><b class="num">${r.avg == null ? '—' : ar(r.avg) + '٪'}</b></div>
-        <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? ` · متوسط تقييمك ${ar(r.tavg)}/٣٠` : ''}</div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
+        <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? ` · متوسط درجتك ${ar(r.tavg)}/١٠` : ''}</div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
       </div>
       <div class="card stack" style="gap:12px"><h3>الكلمات الأكثر خطأً بين الطلاب</h3>
         ${top.length ? `<div class="row" style="gap:8px">${top.map((e) => `<span title="${esc(surahName(e.s))} ${e.a}"><span class="word-chip">${esc(e.w)}</span> <span class="small muted">${esc(surahName(e.s))}:${ar(e.a)} · ${ar(e.who.size)} طالب</span></span>`).join('')}</div>` : '<span class="muted">ستظهر هنا بعد أول تسليمات مصححة آلياً.</span>'}
         <p class="small muted" style="margin:0">استخدمها لتحديد مواضع الشرح في الحصة القادمة.</p>
       </div>
+      ${learnCard()}
       <div class="card stack" style="gap:8px"><h3>طلاب يحتاجون متابعة</h3>
         ${need.length ? need.map((x) => `<div class="row" style="justify-content:space-between"><span>${esc(x.s.name)} <span class="small muted">${esc(className(x.s.classId))}</span></span><span class="pill ${pctClass(x.avg)}">${ar(x.avg)}٪</span></div>`).join('') : '<span class="muted">لا يوجد طالب متوسطه أقل من ٧٠٪.</span>'}
       </div>
       <div class="card stack" style="gap:8px"><h3>لم يرسلوا أي تسميع بعد (${ar(students.filter((x) => x.n === 0).length)})</h3>
         ${silent.length ? `<div class="row" style="gap:6px">${silent.map((x) => `<span class="pill mute">${esc(x.s.name)}</span>`).join('')}</div>` : '<span class="muted">كل الطلاب أرسلوا.</span>'}
       </div>
+    </div>`;
+  }
+
+  function learnCard() {
+    const model = train(D.subs);
+    const withSug = D.subs.filter((x) => x.teacher && typeof x.teacher.suggested === 'number').sort((a, b) => (a.teacher.at || '').localeCompare(b.teacher.at || ''));
+    const mae = (arr) => (arr.length ? arr.reduce((s, x) => s + Math.abs(x.teacher.total - x.teacher.suggested), 0) / arr.length : null);
+    const recent = mae(withSug.slice(-10)), early = mae(withSug.slice(0, 10));
+    const rates = Object.entries(model.rates).map(([r, [occ, err]]) => ({ r, occ, err, p: occ ? err / occ : 0 })).filter((x) => x.err > 0).sort((a, b) => b.p - a.p).slice(0, 6);
+    return `<div class="card stack" style="gap:10px"><h3>ما تعلّمه النظام من تقييماتك</h3>
+      <div class="small muted">${ar(model.n)} مقطعاً مقيّماً، منها ${ar(model.tjN)} حُددت فيها أخطاء التجويد.</div>
+      ${recent != null ? `<div>متوسط الفرق بين اقتراح النظام ودرجتك في آخر التقييمات: <b>${ar(recent.toFixed(1))}</b> درجة${withSug.length > 10 ? ` <span class="small muted">(كان ${ar(early.toFixed(1))} في أول ١٠ تقييمات)</span>` : ''}</div>` : '<div class="small muted">قيّم بعض التسليمات ليبدأ النظام في اقتراح الدرجات ومقارنتها بدرجاتك.</div>'}
+      ${rates.length ? `<b class="small">أكثر الأحكام خطأً بين الطلاب</b>${rates.map((x) => `<div class="bar-row"><span>${esc(ruleName(x.r))}</span><div class="bar"><i style="width:${Math.round(x.p * 100)}%;background:var(--bad)"></i></div><b class="num">${ar(Math.round(x.p * 100))}٪</b></div>`).join('')}` : ''}
     </div>`;
   }
 

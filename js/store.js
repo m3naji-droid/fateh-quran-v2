@@ -95,6 +95,8 @@ const local = {
   async getAudio(pn, id) { return idbGet(id); },
   async updateSubmission(pn, id, patch) { const all = LS.get('subs', []); const i = all.findIndex((s) => s.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('subs', all); } },
   async deleteSubmission(pn, id) { LS.set('subs', LS.get('subs', []).filter((s) => s.id !== id)); },
+  async getModel() { return LS.get('model', null); },
+  async setModel(m) { LS.set('model', m); },
 };
 
 /* ---------------- النسخة السحابية ---------------- */
@@ -190,6 +192,9 @@ async function makeCloud() {
     },
     async updateSubmission(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'subs', id), patch); },
     async deleteSubmission(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main')).catch(() => {}); await deleteDoc(doc(db, 'roster', pn, 'subs', id)); },
+    // نموذج التعلم من تقييمات المعلم (يقرؤه الطلاب، ويكتبه المعلم)
+    async getModel() { await ensureAnon(); try { const d = await getDoc(doc(db, 'model', 'tajweed')); return d.exists() ? d.data() : null; } catch { return null; } },
+    async setModel(m) { await setDoc(doc(db, 'model', 'tajweed'), m); },
     // ترحيل بيانات النسخة القديمة (مقرأة الفاتح) إلى البنية الجديدة
     async migrateLegacy() {
       const oldStudents = await list('students').catch(() => []);
