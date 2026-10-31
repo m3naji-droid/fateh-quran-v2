@@ -12,7 +12,7 @@ ENV HOME=/home/user \
 WORKDIR /home/user/app
 
 # نسخة المعالج (CPU) من torch: أصغر بكثير من نسخة CUDA
-RUN pip install --no-cache-dir --user torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --user torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
@@ -22,6 +22,8 @@ RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(
 ENV HF_HUB_OFFLINE=1
 
 COPY --chown=user . .
+# فحص الاستيراد أثناء البناء: إن كان هناك خطأ في المكتبات يفشل البناء برسالة واضحة بدل فشل التشغيل
+RUN python -c "import app; print('imports ok')"
 # Cloud Run يحدد المنفذ في PORT (8080)، وHugging Face يستخدم 7860
 ENV PORT=7860
 EXPOSE 7860

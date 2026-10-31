@@ -1,10 +1,16 @@
-# torch يُثبَّت أولاً من فهرس CPU في Dockerfile
+# إصدارات مثبتة مطابقة لملف القفل في مشروع «المعلّم القرآني» (uv.lock) لتجنب تغييرات المكتبات
+# torch==2.8.0 يُثبَّت أولاً من فهرس CPU في Dockerfile
+transformers==4.55.2
+tokenizers==0.21.4
+safetensors==0.6.2
+huggingface-hub==0.34.4
+numpy==2.2.6
+quran-transcript @ git+https://github.com/obadx/quran-transcript@a0417aa3ec6154cfebf00bf3806c76dc59655221
 quran-muaalem @ git+https://github.com/obadx/quran-muaalem@2829e1aad719218d2e9b0e2720ff29eb8b84a67a
-transformers>=4.55.0
-numpy>=2.2.6
-levenshtein>=0.27.1
-fastapi>=0.116.1
-uvicorn[standard]>=0.35.0
+levenshtein==0.27.1
+rich==14.1.0
+fastapi==0.116.1
+uvicorn==0.35.0
 python-multipart>=0.0.20
 google-auth>=2.30.0
 requests>=2.31.0
