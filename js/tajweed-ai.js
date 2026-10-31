@@ -32,20 +32,34 @@ export async function analyze(blob, { surah, from, to }, onProgress = () => {}, 
   try { const t = await tokenProvider(); if (t) headers.Authorization = 'Bearer ' + t; } catch {}
   onProgress('جارٍ رفع التسجيل…');
   const t0 = Date.now();
+  let busyUntil = 0;
   const tick = sync ? setInterval(() => {
     const secs = Math.round((Date.now() - t0) / 1000);
-    onProgress(`يحلّل النموذج تلاوتك… (${ar(secs)} ث)${secs > 40 ? ' — أول تحليل بعد فترة خمول يتأخر حتى يستيقظ الخادم.' : ''}`);
+    if (Date.now() < busyUntil) onProgress(`الخادم مشغول بتلاوات طلاب آخرين، ستُعاد المحاولة تلقائياً… (${ar(secs)} ث)`);
+    else onProgress(`يحلّل النموذج تلاوتك… (${ar(secs)} ث)${secs > 40 ? ' — أول تحليل بعد فترة خمول يتأخر حتى يستيقظ الخادم.' : ''}`);
   }, 1000) : null;
   let r, j;
   try {
-    r = await fetch(base() + '/analyze', { method: 'POST', body: fd, headers, signal });
-    j = await r.json().catch(() => ({}));
+    // عند ازدحام الخادم (429/503) نعيد المحاولة تلقائياً بفواصل متزايدة لمدة تصل إلى نحو ٨ دقائق
+    for (let attempt = 0; ; attempt++) {
+      r = await fetch(base() + '/analyze', { method: 'POST', body: fd, headers, signal });
+      j = await r.json().catch(() => ({}));
+      const busy = r.status === 429 || (r.status === 503 && !/النموذج/.test(String(j.detail || '')));
+      if (!busy || attempt >= 12) break;
+      const wait = Math.min(60, 8 + attempt * 6) * 1000 + Math.random() * 4000;
+      busyUntil = Date.now() + wait;
+      await new Promise((res, rej) => {
+        const t = setTimeout(res, wait);
+        signal?.addEventListener('abort', () => { clearTimeout(t); rej(new Error('aborted')); }, { once: true });
+      });
+    }
   } catch (e) {
     if (signal?.aborted) throw new Error('أُلغي التحليل.');
     throw new Error('تعذر الوصول إلى خادم التحليل. تحقق من الاتصال وأعد المحاولة.');
   } finally {
     if (tick) clearInterval(tick);
   }
+  if (r.status === 429 || r.status === 503) throw new Error('الخادم مزدحم جداً الآن. أرسل تسميعك للمعلم، أو أعد التحليل بعد قليل.');
   if (!r.ok) throw new Error((typeof j.detail === 'string' && j.detail) || 'رفض الخادم الطلب (' + r.status + ').');
   if (j.status === 'done' && j.result) return compact(j.result, { surah, from, to });
   const started = Date.now();
