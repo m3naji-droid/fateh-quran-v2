@@ -4,6 +4,7 @@ import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
+import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -354,6 +355,7 @@ function mountRecite(root, opts) {
       last.status.forEach((s, i) => { if (s === 'wrong' || s === 'missing') mist.push(i); });
       const color = sc.percent >= 85 ? 'var(--ok)' : sc.percent >= 60 ? 'var(--warn)' : 'var(--bad)';
       box.innerHTML = `<div class="card stack" style="gap:14px">
+        ${cheerHtml(sc.outOf10)}
         <div class="score-ring" style="--p:${sc.percent};--c:${color}"><div><div><b>${ar(sc.percent)}٪</b><br><span class="small muted">${sc.grade}</span></div></div></div>
         <div class="stats">
           <div><b style="color:var(--ok)">${ar(last.counts.correct)}</b><span>صحيحة</span></div>
@@ -370,6 +372,8 @@ function mountRecite(root, opts) {
         <div class="row">${submitBtn}<button class="btn" id="rcRetry" type="button">إعادة المحاولة</button></div>
       </div>`;
       $$('[data-play]', box).forEach((b) => (b.onclick = () => playRange(+b.dataset.play, +b.dataset.play)));
+      if (sc.outOf10 >= 8) confetti();
+      box.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
       opts.onResult && opts.onResult(buildSubmission());
     }
     if (lastBlob && aiEnabled()) mountAi(box);
@@ -437,6 +441,25 @@ function mountRecite(root, opts) {
   }
 
   return { destroy() { player.stop(); sess?.cancel(); pop?.remove(); aiCtl?.abort(); } };
+}
+
+/* الاحتفال (٨ من ١٠ فأعلى) والتحفيز لما دونها */
+const fmt10 = (v) => ar(Number.isInteger(v) ? v : Number(v).toFixed(1).replace('.', '٫'));
+function cheerHtml(score10, { who = 'auto' } = {}) {
+  if (score10 >= 8) {
+    const { phrase, hadith } = pickHigh();
+    return `<div class="cheer high" role="status">
+      <div class="cheer-badge" aria-hidden="true">★</div>
+      <div class="cheer-score">${fmt10(score10)} <span>/ ١٠</span></div>
+      <b class="cheer-title">${esc(phrase)}</b>
+      <blockquote>«${esc(hadith.text)}» <small>${esc(hadith.src)}</small></blockquote></div>`;
+  }
+  const { phrase, hadith } = pickLow();
+  const gap = Math.max(0.5, Math.ceil((8 - score10) * 2) / 2);
+  return `<div class="cheer low" role="status">
+    <b class="cheer-title">${esc(phrase)}</b>
+    <div>${who === 'teacher' ? 'درجتك من معلمك' : 'درجتك الآن'} <b>${fmt10(score10)} من ١٠</b>، وتحتاج <b>${fmt10(gap)}</b> ${gap > 2 ? 'درجات' : 'درجة'} فقط لتصل إلى ٨. ${who === 'teacher' ? 'اقرأ ملاحظات معلمك وتدرّب عليها.' : 'راجع المواضع المظللة ثم أعد المحاولة.'}</div>
+    <blockquote>«${esc(hadith.text)}» <small>${esc(hadith.src)}</small></blockquote></div>`;
 }
 
 /* عرض خريطة الكلمات لتسليم محفوظ */
@@ -568,6 +591,26 @@ function viewStudent(app) {
       return;
     }
     draw();
+    announceGrades();
+  }
+
+  /** عند وصول تقييم جديد من المعلم: احتفال (٨ فأعلى) أو تحفيز، مرة واحدة لكل تقييم */
+  function announceGrades() {
+    const seen = new Set(pref.get('seenGrades_' + me.id, []));
+    const fresh = data.subs.filter((x) => x.teacher && typeof x.teacher.total === 'number' && !seen.has(x.id + '@' + x.teacher.at));
+    if (!fresh.length) return;
+    fresh.forEach((x) => seen.add(x.id + '@' + x.teacher.at));
+    pref.set('seenGrades_' + me.id, [...seen].slice(-300));
+    const x = fresh.sort((a, b) => (b.teacher.at || '').localeCompare(a.teacher.at || ''))[0];
+    const more = fresh.length - 1;
+    openModal(`<div class="stack">
+      <h2>${x.teacher.total >= 8 ? 'مبارك! وصل تقييم معلمك' : 'وصل تقييم معلمك'}</h2>
+      <p class="muted" style="margin:0">${esc(x.taskTitle || 'تسميع')} · ${esc(rangeLabel(x.surah, x.from, x.to))}</p>
+      ${cheerHtml(x.teacher.total, { who: 'teacher' })}
+      ${x.teacher.notes ? `<div class="card"><b class="small">ملاحظة معلمك</b><p style="margin:6px 0 0">${esc(x.teacher.notes)}</p></div>` : ''}
+      ${more ? `<p class="small muted" style="margin:0">ولديك ${more === 1 ? 'تقييم آخر جديد' : more === 2 ? 'تقييمان آخران جديدان' : `${ar(more)} تقييمات أخرى جديدة`} في «سجل التسميع».</p>` : ''}
+      <div class="row"><button class="btn primary" type="button" data-close>${x.teacher.total >= 8 ? 'الحمد لله' : 'سأجتهد بإذن الله'}</button></div></div>`);
+    if (x.teacher.total >= 8) setTimeout(() => confetti(), 150);
   }
 
   function draw() {
@@ -675,7 +718,7 @@ function viewStudent(app) {
     body.innerHTML = `<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>المقطع</th><th>الدقة الآلية</th><th>تقييم المعلم</th><th>ملاحظات</th></tr></thead><tbody>
       ${data.subs.map((x, i) => `<tr class="click" data-i="${i}"><td class="num">${fmtDate(x.createdAt)}</td><td>${esc(x.taskTitle || rangeLabel(x.surah, x.from, x.to))}</td>
       <td>${x.percent == null ? '<span class="pill mute">بانتظار المعلم</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td>
-      <td>${x.teacher ? `<b class="num">${ar(x.teacher.total)}</b>/١٠` : '<span class="muted">—</span>'}</td><td style="white-space:normal;min-width:160px">${esc(x.teacher?.notes || '')}</td></tr>`).join('')}
+      <td>${x.teacher ? `${x.teacher.total >= 8 ? '<span class="star" title="درجة متميزة">★</span> ' : ''}<b class="num">${ar(x.teacher.total)}</b>/١٠` : '<span class="muted">—</span>'}</td><td style="white-space:normal;min-width:160px">${esc(x.teacher?.notes || '')}</td></tr>`).join('')}
     </tbody></table></div>`;
     $$('tr[data-i]', body).forEach((r) => (r.onclick = () => {
       const x = data.subs[+r.dataset.i];
