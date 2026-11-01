@@ -770,6 +770,27 @@ function viewTeacher(app) {
   let D = { classes: [], students: [], tasks: [], subs: [] };
   let unsub = null;
   let filters = { cls: 'all', task: 'all', q: '', status: 'all' };
+  // التحديد المتعدد (يبقى عند تحديث الجدول)
+  const selSubs = new Set(), selStu = new Set();
+  const subKey = (x) => `${x.pn}/${x.id}`;
+  /** مربع «تحديد الكل» في رأس الجدول: محدد أو جزئي أو فارغ */
+  function headBox(box, visibleKeys, set) {
+    const n = visibleKeys.filter((k) => set.has(k)).length;
+    box.checked = !!visibleKeys.length && n === visibleKeys.length;
+    box.indeterminate = n > 0 && n < visibleKeys.length;
+  }
+  async function runBulk(title, items, fn) {
+    openModal(`<div class="stack"><h2>${esc(title)}</h2><div id="bkTxt">جارٍ التنفيذ…</div><div class="progress"><i id="bkBar"></i></div></div>`);
+    let ok = 0, fail = 0;
+    for (let i = 0; i < items.length; i++) {
+      try { await fn(items[i]); ok++; } catch (e) { console.warn(e); fail++; }
+      const t = $('#bkTxt'), bar = $('#bkBar');
+      if (t) t.textContent = `تم ${ar(i + 1)} من ${ar(items.length)}`;
+      if (bar) bar.style.width = ((i + 1) / items.length) * 100 + '%';
+    }
+    closeModal();
+    return { ok, fail };
+  }
 
   async function load() {
     app.innerHTML = '<div class="loading">جارٍ تحميل لوحة المعلم…</div>';
@@ -840,13 +861,36 @@ function viewTeacher(app) {
       (!filters.q || (x.studentName || '').includes(filters.q) || (x.pn || '').includes(filters.q)));
     const paint = () => {
       const L = list();
-      $('#subList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الطالب</th><th>الصف</th><th>الواجب / المقطع</th><th>التاريخ</th><th>الدقة الآلية</th><th>المدة</th><th>تقييمك</th></tr></thead><tbody>
-        ${L.map((x) => `<tr class="click" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td><b>${esc(x.studentName)}</b><div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
+      const all = new Set(D.subs.map(subKey));
+      [...selSubs].forEach((k) => { if (!all.has(k)) selSubs.delete(k); });
+      $('#subList', body).innerHTML = (selSubs.size ? `<div class="bulk"><b>المحدد: ${ar(selSubs.size)}</b><button class="btn sm danger" type="button" id="bsDel">حذف المحدد</button><button class="btn sm" type="button" id="bsClr">إلغاء التحديد</button></div>` : '')
+        + (L.length ? `<div class="table-wrap"><table><thead><tr><th class="sel"><input type="checkbox" id="bsAll" aria-label="تحديد كل التسليمات الظاهرة"></th><th>الطالب</th><th>الصف</th><th>الواجب / المقطع</th><th>التاريخ</th><th>الدقة الآلية</th><th>المدة</th><th>تقييمك</th></tr></thead><tbody>
+        ${L.map((x) => `<tr class="click ${selSubs.has(subKey(x)) ? 'picked' : ''}" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td class="sel"><input type="checkbox" data-sk="${esc(subKey(x))}" ${selSubs.has(subKey(x)) ? 'checked' : ''} aria-label="تحديد"></td><td><b>${esc(x.studentName)}</b><div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
         <td>${esc(x.taskTitle || 'تدريب')}<div class="small muted">${esc(rangeLabel(x.surah, x.from, x.to))}</div></td><td class="num">${fmtDate(x.createdAt)}</td>
         <td>${x.percent == null ? '<span class="pill mute">يدوي</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td><td class="num">${fmtTime(x.duration || 0)}</td>
         <td>${x.teacher ? `<span class="pill ok">${ar(x.teacher.total)}/١٠</span>` : '<span class="pill warn">بانتظارك</span>'}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">لا توجد تسليمات مطابقة.</div>';
-      $$('tr[data-id]', body).forEach((r) => (r.onclick = () => openSubmission(D.subs.find((x) => x.id === r.dataset.id && x.pn === r.dataset.pn))));
+      </tbody></table></div>` : '<div class="empty">لا توجد تسليمات مطابقة.</div>');
+      $$('tr[data-id]', body).forEach((r) => (r.onclick = (e) => { if (e.target.closest('.sel')) return; openSubmission(D.subs.find((x) => x.id === r.dataset.id && x.pn === r.dataset.pn)); }));
+      $$('[data-sk]', body).forEach((c) => (c.onchange = () => { c.checked ? selSubs.add(c.dataset.sk) : selSubs.delete(c.dataset.sk); paint(); }));
+      const allBox = $('#bsAll', body);
+      if (allBox) {
+        headBox(allBox, L.map(subKey), selSubs);
+        allBox.onchange = () => { L.forEach((x) => (allBox.checked ? selSubs.add(subKey(x)) : selSubs.delete(subKey(x)))); paint(); };
+      }
+      const clr = $('#bsClr', body);
+      if (clr) clr.onclick = () => { selSubs.clear(); paint(); };
+      const del = $('#bsDel', body);
+      if (del) del.onclick = async () => {
+        const items = D.subs.filter((x) => selSubs.has(subKey(x)));
+        if (!(await confirmBox(`حذف ${items.length === 1 ? 'تسليم واحد' : `${ar(items.length)} من التسليمات`} مع تسجيلاتها الصوتية؟ لا يمكن التراجع.`))) return;
+        const { ok, fail } = await runBulk('حذف التسليمات', items, (x) => store.deleteSubmission(x.pn, x.id));
+        const done = new Set(items.map(subKey));
+        D.subs = D.subs.filter((x) => !done.has(subKey(x)));
+        if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
+        selSubs.clear();
+        toast(fail ? `حُذف ${ar(ok)}، وتعذر حذف ${ar(fail)}.` : `حُذف ${ar(ok)} من التسليمات.`);
+        drawBody();
+      };
     };
     $('#fQ', body).oninput = (e) => { filters.q = e.target.value.trim(); paint(); };
     $('#fC', body).onchange = (e) => { filters.cls = e.target.value; paint(); };
@@ -1149,6 +1193,7 @@ function viewTeacher(app) {
           <button class="btn gold" id="stCards" type="button">بطاقات الدخول (طباعة و PDF)</button>
           ${noAccount().length ? `<button class="btn" id="stMake" type="button">إنشاء حسابات لـ ${ar(noAccount().length)} طالباً بلا حساب</button>` : ''}
         </div>
+        <div id="stSelBar"></div>
         <div id="stList"></div>
       </div>
     </div>`;
@@ -1207,10 +1252,64 @@ function viewTeacher(app) {
     const paint = (q = '') => {
       const L = D.students.filter((s) => !q || s.name.includes(q) || s.id.includes(q)).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
       const accPill = (s) => !hasAcc(s) ? '<span class="pill warn">بلا حساب</span>' : s.pwChanged ? '<span class="pill mute">غيّر كلمة سره</span>' : '<span class="pill ok">جاهز</span>';
-      $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الصف</th><th>الحساب</th><th>تسميع</th><th></th></tr></thead><tbody>
-        ${L.map((s) => `<tr><td>${esc(s.name)}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+      const ids = new Set(D.students.map((x) => x.id));
+      [...selStu].forEach((k) => { if (!ids.has(k)) selStu.delete(k); });
+      $('#stSelBar', body).innerHTML = selStu.size ? `<div class="bulk"><b>المحدد: ${ar(selStu.size)}</b>
+        <button class="btn sm danger" type="button" id="bsSDel">حذف المحدد</button>
+        <span class="row" style="gap:4px;flex-wrap:nowrap"><select id="bsSCls" aria-label="الصف الجديد">${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select><button class="btn sm" type="button" id="bsSMove">نقل إلى الصف</button></span>
+        <button class="btn sm gold" type="button" id="bsSCards">بطاقات المحدد</button>
+        <button class="btn sm" type="button" id="bsSClr">إلغاء التحديد</button></div>` : '';
+      $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th class="sel"><input type="checkbox" id="bsSAll" aria-label="تحديد كل الطلاب الظاهرين"></th><th>الاسم</th><th>الصف</th><th>الحساب</th><th>تسميع</th><th></th></tr></thead><tbody>
+        ${L.map((s) => `<tr class="${selStu.has(s.id) ? 'picked' : ''}"><td class="sel"><input type="checkbox" data-ss="${esc(s.id)}" ${selStu.has(s.id) ? 'checked' : ''} aria-label="تحديد"></td><td>${esc(s.name)}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
         <td>${accPill(s)}</td><td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td>
         <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
+      $$('[data-ss]', body).forEach((c) => (c.onchange = () => { c.checked ? selStu.add(c.dataset.ss) : selStu.delete(c.dataset.ss); paint(q); }));
+      const sAll = $('#bsSAll', body);
+      if (sAll) {
+        headBox(sAll, L.map((x) => x.id), selStu);
+        sAll.onchange = () => { L.forEach((x) => (sAll.checked ? selStu.add(x.id) : selStu.delete(x.id))); paint(q); };
+      }
+      const sClr = $('#bsSClr', body);
+      if (sClr) sClr.onclick = () => { selStu.clear(); paint(q); };
+      const sCards = $('#bsSCards', body);
+      if (sCards) sCards.onclick = () => openCards({ ids: [...selStu] });
+      const sMove = $('#bsSMove', body);
+      if (sMove) sMove.onclick = async () => {
+        const to = $('#bsSCls', body).value;
+        const items = D.students.filter((x) => selStu.has(x.id) && x.classId !== to);
+        if (!items.length) return toast('الطلاب المحددون في هذا الصف أصلاً.');
+        const from = [...new Set(items.map((x) => x.classId))];
+        await store.saveStudents(items.map((x) => ({ ...x, classId: to })));
+        items.forEach((x) => (x.classId = to));
+        await syncDirectory([...from, to]);
+        selStu.clear();
+        toast(`نُقل ${ar(items.length)} إلى ${className(to)}.`);
+        drawBody();
+      };
+      const sDel = $('#bsSDel', body);
+      if (sDel) sDel.onclick = () => {
+        const items = D.students.filter((x) => selStu.has(x.id));
+        const subsN = D.subs.filter((x) => selStu.has(x.pn)).length;
+        openModal(`<div class="stack"><h2>حذف ${items.length === 1 ? 'طالب واحد' : `${ar(items.length)} من الطلاب`}؟</h2>
+          <p style="margin:0">لن يستطيعوا الدخول بعد الحذف، وتختفي أسماؤهم من شاشة الدخول. لا يمكن التراجع.</p>
+          ${subsN ? `<label class="row" style="gap:6px"><input type="checkbox" id="bdSubs"> حذف تسليماتهم أيضاً (${ar(subsN)})</label><p class="small muted" style="margin:0">إن لم تحددها تبقى تسليماتهم ظاهرة في سجل التسليمات.</p>` : ''}
+          <div class="row"><button class="btn primary" id="bdYes" type="button">حذف</button><button class="btn" type="button" data-close>إلغاء</button></div></div>`, (m) => {
+          $('#bdYes', m).onclick = async () => {
+            const withSubs = !!$('#bdSubs', m)?.checked;
+            const classes = [...new Set(items.map((x) => x.classId))];
+            const subs = withSubs ? D.subs.filter((x) => selStu.has(x.pn)) : [];
+            const r1 = await runBulk('حذف الطلاب', items, (x) => store.deleteStudent(x.id));
+            if (subs.length) await runBulk('حذف تسليماتهم', subs, (x) => store.deleteSubmission(x.pn, x.id));
+            await reload(false);
+            await syncDirectory(classes);
+            if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
+            else if (subs.length) { const gone = new Set(subs.map(subKey)); D.subs = D.subs.filter((x) => !gone.has(subKey(x))); }
+            selStu.clear();
+            toast(r1.fail ? `حُذف ${ar(r1.ok)}، وتعذر حذف ${ar(r1.fail)}.` : `حُذف ${ar(r1.ok)} من الطلاب${subs.length ? ' مع تسليماتهم' : ''}.`);
+            drawBody();
+          };
+        });
+      };
       $$('[data-mv]', body).forEach((sel) => (sel.onchange = async () => {
         const st = D.students.find((x) => x.id === sel.dataset.mv);
         const old = st.classId;

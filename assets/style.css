@@ -273,3 +273,9 @@ details summary { cursor: pointer; font-weight: 600; }
   #printRoot { display: block !important; }
   #printRoot img { width: 210mm; height: 297mm; display: block; page-break-after: always; break-after: page; }
 }
+
+/* التحديد المتعدد */
+.bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--gold-soft); border: 1px solid var(--gold); border-radius: 12px; padding: 8px 12px; margin-bottom: 10px; }
+th.sel, td.sel { width: 36px; text-align: center; padding-inline: 6px; }
+td.sel input, th.sel input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--green); }
+tr.picked td { background: var(--green-2); }
