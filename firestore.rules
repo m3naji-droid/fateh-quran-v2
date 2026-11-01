@@ -35,6 +35,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    // لوحة الشرف: أسماء المتصدرين ونقاطهم فقط
+    match /leaderboard/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
     match /model/{id} {
       allow read: if signedIn();
       allow write: if isTeacher();

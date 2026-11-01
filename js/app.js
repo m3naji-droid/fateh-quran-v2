@@ -5,6 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
+import { computeBoard, boardHtml, rankBadge } from './leaderboard.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -462,6 +463,26 @@ function cheerHtml(score10, { who = 'auto' } = {}) {
     <blockquote>«${esc(hadith.text)}» <small>${esc(hadith.src)}</small></blockquote></div>`;
 }
 
+/* لوحة الشرف المشتركة بين الطالب والمعلم */
+function mountBoard(host, board, opts = {}) {
+  if (!board) { host.innerHTML = '<div class="empty">لم تُنشر لوحة الشرف بعد. تظهر بعد أن يفتح المعلم لوحته وتُقيَّم أول الواجبات.</div>'; return; }
+  let per = pref.get('lbPeriod', 'month');
+  let cls = opts.myClass || null;
+  const paint = () => {
+    const p = board[per] || board.all;
+    host.innerHTML = `<div class="stack">
+      <div class="row" style="justify-content:space-between">
+        <div class="seg" role="group" aria-label="الفترة"><button type="button" data-per="month" class="${per === 'month' ? 'on' : ''}">${esc(board.month?.label || 'هذا الشهر')}</button><button type="button" data-per="all" class="${per === 'all' ? 'on' : ''}">منذ البداية</button></div>
+        ${board.at ? `<span class="small muted">آخر تحديث: ${fmtDate(board.at)}</span>` : ''}
+      </div>
+      ${boardHtml(p, { ...opts, classId: cls, myRank: opts.myRank ? opts.myRank[per] : null })}</div>`;
+    $$('[data-per]', host).forEach((b) => (b.onclick = () => { per = b.dataset.per; pref.set('lbPeriod', per); paint(); }));
+    const sel = $('#lbCls', host);
+    if (sel) sel.onchange = () => { cls = sel.value; paint(); };
+  };
+  paint();
+}
+
 /* عرض خريطة الكلمات لتسليم محفوظ */
 function wordMapHtml(sub, { colored = false, risky = null, ai = null } = {}) {
   const cls = { c: 'correct', w: 'wrong', m: 'missing' };
@@ -583,7 +604,8 @@ function viewStudent(app) {
     app.innerHTML = '<div class="loading">جارٍ تحميل بياناتك…</div>';
     if (!(await store.isStudentAuthed(me))) { session.set(null); studentLogin(app, 'انتهت جلسة الدخول. اختر صفك واسمك واكتب كلمة السر من جديد.'); return; }
     try {
-      const [tasks, subs, classes] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses()]);
+      const [tasks, subs, classes, rank] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null)]);
+      me.rankInfo = rank;
       data = { tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
     } catch (e) {
       console.error(e);
@@ -624,7 +646,8 @@ function viewStudent(app) {
     for (let d = new Date(); ; d.setDate(d.getDate() - 1)) { if (days.has(d.toISOString().slice(0, 10))) streak++; else if (streak || d.toDateString() !== new Date().toDateString()) break; }
     app.innerHTML = `
       <div class="page-head">
-        <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1></div>
+        <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1>
+          ${me.rankInfo?.month?.stage === 1 ? `<span class="title-pill">${rankBadge(1)} شيخ المرحلة هذا الشهر</span>` : me.rankInfo?.month?.cls === 1 ? `<span class="title-pill">${rankBadge(1)} قارئ الصف هذا الشهر</span>` : ''}</div>
         <div class="row"><button class="btn" id="stPw" type="button">تغيير كلمة السر</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis">
@@ -634,7 +657,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>`;
     $('#stOut', app).onclick = async () => { await store.signOut(); session.set(null); render(); };
@@ -663,6 +686,22 @@ function viewStudent(app) {
     if (tab === 'history') drawHistory(body);
     if (tab === 'notebook') drawNotebook(body);
     if (tab === 'practice') drawPractice(body);
+    if (tab === 'honor') drawHonor(body);
+  }
+
+  async function drawHonor(body) {
+    body.innerHTML = '<div class="loading">جارٍ تحميل لوحة الشرف…</div>';
+    let board = null, myRank = null;
+    try { [board, myRank] = await Promise.all([store.getBoard(), store.getMyRank(me).catch(() => null)]); }
+    catch (e) { body.innerHTML = `<div class="empty">تعذر تحميل لوحة الشرف: ${esc(e.code || e.message)}</div>`; return; }
+    if (tab !== 'honor') return;
+    mountBoard(body, board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
+    // احتفال أول مرة يدخل فيها الخمسة الأوائل في صفه أو المرحلة (لكل شهر)
+    const r = myRank?.month;
+    if (r && ((r.cls && r.cls <= 5) || (r.stage && r.stage <= 5))) {
+      const key = `lbCheer_${me.id}_${board?.month?.ym || ''}_${r.stage && r.stage <= 5 ? 's' : 'c'}`;
+      if (!pref.get(key, false)) { pref.set(key, true); setTimeout(() => confetti(), 200); toast(r.stage && r.stage <= 5 ? 'مبارك! أنت من الخمسة الأوائل في المرحلة كلها هذا الشهر.' : 'مبارك! أنت من الخمسة الأوائل في صفك هذا الشهر.'); }
+    }
   }
 
   async function drawPractice(body) {
@@ -847,7 +886,7 @@ function viewTeacher(app) {
       return;
     }
     unsub?.();
-    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); if (tab === 'subs' || tab === 'reports') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
+    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
   }
   const reload = async (redraw = true) => {
@@ -864,7 +903,7 @@ function viewTeacher(app) {
         <div class="row"><a class="btn" href="#/practice">معاينة التدريب</a><button class="btn" id="tOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis" id="tKpis"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     $('#tOut', app).onclick = async () => { unsub?.(); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
@@ -884,7 +923,7 @@ function viewTeacher(app) {
   function drawBody() {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
-    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, reports: drawReports, settings: drawSettings })[tab](body);
+    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, honor: drawHonorT, reports: drawReports, settings: drawSettings })[tab](body);
   }
 
   /* --- التسليمات --- */
@@ -1438,6 +1477,30 @@ function viewTeacher(app) {
         return rel.length ? `<b class="small">دقة اقتراحات الذكاء الاصطناعي (نسبة ما قبلته منها)</b>${rel.map(([r, [n, ok]]) => `<div class="bar-row"><span>${esc(ruleName(r))}</span><div class="bar"><i style="width:${Math.round((ok / n) * 100)}%"></i></div><b class="num">${ar(Math.round((ok / n) * 100))}٪</b></div>`).join('')}<div class="small muted">نسبة منخفضة لحكمٍ ما تعني أن النموذج يكثر من الإنذارات الخاطئة فيه مع طلابك.</div>` : ''; })()}
       ${rates.length ? `<b class="small">أكثر الأحكام خطأً بين الطلاب</b>${rates.map((x) => `<div class="bar-row"><span>${esc(ruleName(x.r))}</span><div class="bar"><i style="width:${Math.round(x.p * 100)}%;background:var(--bad)"></i></div><b class="num">${ar(Math.round(x.p * 100))}٪</b></div>`).join('')}` : ''}
     </div>`;
+  }
+
+  /* --- لوحة الشرف: تُحسب هنا وتُنشر للطلاب --- */
+  let lastBoardJson = null, boardTimer = null, lastBoard = null;
+  function schedulePublish() {
+    clearTimeout(boardTimer);
+    boardTimer = setTimeout(publishBoard, 2500);
+  }
+  async function publishBoard() {
+    if (!D.students.length) return;
+    const { board, ranks } = computeBoard(D.subs, D.students, D.classes);
+    lastBoard = board;
+    const json = JSON.stringify(board);
+    if (json === lastBoardJson) return;
+    try {
+      await store.setBoard({ ...board, at: new Date().toISOString() });
+      await store.saveRanks(ranks, D.students);
+      lastBoardJson = json;
+    } catch (e) { console.warn('board publish', e); }
+  }
+  function drawHonorT(body) {
+    const { board } = computeBoard(D.subs, D.students, D.classes);
+    mountBoard(body, { ...board, at: null }, { classes: D.classes, pickClass: true });
+    schedulePublish();
   }
 
   /* --- الإعدادات --- */

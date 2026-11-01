@@ -294,3 +294,44 @@ tr.picked td { background: var(--green-2); }
 .star { color: var(--gold); }
 @keyframes pop { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .cheer-badge { animation: none; } }
+
+/* لوحة الشرف */
+.rank-badge { width: 40px; height: 40px; flex: none; }
+.lb-card { display: flex; flex-direction: column; gap: 10px; }
+.lb-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lb-head select { width: auto; }
+.lb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lb-list li { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 12px; background: var(--paper); border: 1px solid transparent; }
+.lb-list li.r1 { background: linear-gradient(90deg, var(--gold-soft), var(--paper)); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+.lb-list li.me { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+.lb-list li.me .lb-name b::after { content: " (أنت)"; color: var(--green); font-weight: 600; font-size: .85em; }
+.lb-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lb-name b { overflow-wrap: anywhere; }
+.lb-name small { color: var(--muted); font-size: 12px; }
+.lb-val { font-family: var(--f-display); font-size: 20px; font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lb-val small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.lb-bar { display: block; height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+.lb-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--green), var(--gold)); border-radius: 99px; }
+.podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; padding-top: 6px; }
+.pod { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 0; }
+.pod b { font-family: var(--f-display); font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+.pod small { color: var(--muted); font-size: 12px; }
+.pod .rank-badge { width: 46px; height: 46px; }
+.pod.p1 .rank-badge { width: 58px; height: 58px; animation: pop .7s cubic-bezier(.2,1.6,.4,1) both; }
+.pod .step { width: 100%; border-radius: 12px 12px 4px 4px; display: grid; place-items: center; color: #fff; font-family: var(--f-display); font-weight: 700; font-size: 20px; }
+.pod.p1 .step { height: 110px; background: linear-gradient(180deg, #d9b45a, #a77a1c); }
+.pod.p2 .step { height: 80px; background: linear-gradient(180deg, #b9c2c9, #7d8790); }
+.pod.p3 .step { height: 62px; background: linear-gradient(180deg, #d39563, #9a5a2c); }
+.pod.me b { color: var(--green); }
+.lb-me { background: var(--green-2); border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.lb-me-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; text-align: center; }
+.lb-me-grid div { background: var(--card); border-radius: 10px; padding: 8px 4px; }
+.lb-me-grid span { display: block; font-size: 12px; color: var(--muted); }
+.lb-me-grid b { font-family: var(--f-display); font-size: 22px; color: var(--green); font-variant-numeric: tabular-nums; }
+.lb-me-grid small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.lb-title { display: flex; align-items: center; gap: 10px; }
+.lb-title .rank-badge { width: 44px; height: 44px; }
+.title-pill { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 2px 12px 2px 6px; border-radius: 999px; background: var(--gold-soft); border: 1px solid var(--gold); font-weight: 700; font-size: 14px; }
+.title-pill .rank-badge { width: 28px; height: 28px; }
+.lb-list li.myclass { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+.lb-list li.myclass .lb-name b::after { content: " (صفك)"; color: var(--green); font-weight: 600; font-size: .85em; }
