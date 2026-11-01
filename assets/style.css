@@ -262,3 +262,14 @@ details summary { cursor: pointer; font-weight: 600; }
 .progress .indet { width: 35%; animation: indet 1.2s ease-in-out infinite alternate; }
 @keyframes indet { from { margin-inline-start: 0; } to { margin-inline-start: 65%; } }
 .foot a { color: var(--green); font-weight: 600; }
+
+/* بطاقات الدخول */
+.cards-prev img { width: 100%; max-width: 520px; display: block; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+.pw-big { font: 700 40px/1.2 ui-monospace, 'Courier New', monospace; letter-spacing: 8px; text-align: center; background: var(--gold-soft); border-radius: 12px; padding: 12px; direction: ltr; }
+#printRoot { display: none; }
+@media print {
+  @page { size: A4; margin: 0; }
+  body > *:not(#printRoot) { display: none !important; }
+  #printRoot { display: block !important; }
+  #printRoot img { width: 210mm; height: 297mm; display: block; page-break-after: always; break-after: page; }
+}

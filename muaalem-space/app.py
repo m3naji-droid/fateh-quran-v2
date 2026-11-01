@@ -129,6 +129,9 @@ def check_auth(authorization: str | None):
         claims = None
     if not claims or claims.get("aud") != FIREBASE_PROJECT:
         raise HTTPException(401, "انتهت جلسة الدخول. حدّث الصفحة ثم أعد المحاولة.")
+    # الزائر المجهول لا يُقبل: فقط الطالب الذي دخل بكلمة سره والمعلم
+    if (claims.get("firebase") or {}).get("sign_in_provider") == "anonymous":
+        raise HTTPException(401, "ادخل بحسابك (الصف والاسم وكلمة السر) لاستخدام التحليل.")
 
 
 # ------------------------------------------------------------ المهام

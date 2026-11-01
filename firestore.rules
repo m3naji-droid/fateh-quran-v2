@@ -1,12 +1,17 @@
 rules_version = '2';
 // قواعد حماية مقرأة الفاتح (الإصدار الثاني)
-// - المعلم: مستخدم بريد وكلمة مرور، وله مستند في مجموعة teachers بمعرّف حسابه (UID)
-// - الطالب: دخول مجهول تلقائي؛ يستطيع قراءة سجله فقط إذا عرف رقمه الشخصي، ولا يستطيع سرد قائمة الطلاب
+// - المعلم: حساب بريد وكلمة مرور، وله مستند في مجموعة teachers بمعرّف حسابه (UID)
+// - الطالب: حساب ينشئه المعلم من الموقع، ويدخل باختيار صفه واسمه وكتابة كلمة السر
+//   لا يرى الطالب إلا بياناته وتسليماته، ولا تُحفظ كلمات السر إلا في مجموعة cards التي لا يقرؤها إلا المعلم
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function isTeacher() {
       return signedIn() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+    }
+    // الطالب صاحب السجل: حسابه هو المسجل في مستند الطالب
+    function isStudent(pn) {
+      return signedIn() && get(/databases/$(database)/documents/roster/$(pn)).data.get('uid', '') == request.auth.uid;
     }
 
     match /teachers/{uid} {
@@ -17,33 +22,44 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    // أسماء طلاب كل صف لشاشة الدخول (بلا بيانات سرية)
+    match /directory/{classId} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+    // كلمات السر الأولية لطباعة البطاقات: للمعلم فقط
+    match /cards/{pn} {
+      allow read, write: if isTeacher();
+    }
     match /tasks/{id} {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    match /model/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
     match /roster/{pn} {
-      allow get: if signedIn();
-      allow list, write: if isTeacher();
+      allow get: if isTeacher() || (signedIn() && resource.data.get('uid', '') == request.auth.uid);
+      allow list, create, delete: if isTeacher();
+      // الطالب يستطيع فقط تسجيل أنه غيّر كلمة سره
+      allow update: if isTeacher()
+        || (signedIn() && resource.data.get('uid', '') == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pwChanged', 'pwChangedAt']));
 
       match /subs/{sid} {
-        allow read: if signedIn();
-        allow create: if signedIn()
-          && exists(/databases/$(database)/documents/roster/$(pn))
+        allow read: if isTeacher() || isStudent(pn);
+        allow create: if isStudent(pn)
           && request.resource.data.pn == pn
           && request.resource.data.teacher == null;
         allow update, delete: if isTeacher();
 
         match /audio/{aid} {
-          allow read: if signedIn();
-          allow create: if signedIn() && request.resource.data.b64.size() < 1000000;
+          allow read: if isTeacher() || isStudent(pn);
+          allow create: if isStudent(pn) && request.resource.data.b64.size() < 1000000;
           allow update, delete: if isTeacher();
         }
       }
-    }
-    // نموذج التعلم من تقييمات المعلم
-    match /model/{id} {
-      allow read: if signedIn();
-      allow write: if isTeacher();
     }
     // استعلام المعلم عن كل التسليمات
     match /{path=**}/subs/{sid} {

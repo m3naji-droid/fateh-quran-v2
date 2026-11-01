@@ -3,6 +3,7 @@ import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
+import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -16,6 +17,7 @@ const pref = {
 };
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('ar', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
 const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+const latinDigits = (v) => String(v ?? '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
 const rangeLabel = (s, f, t) => `${surahName(s)} ${f === t ? `(${ar(f)})` : `(${ar(f)}–${ar(t)})`}`;
 const pctClass = (p) => (p >= 85 ? 'ok' : p >= 60 ? 'warn' : 'bad');
 
@@ -556,6 +558,7 @@ function viewStudent(app) {
 
   async function load() {
     app.innerHTML = '<div class="loading">جارٍ تحميل بياناتك…</div>';
+    if (!(await store.isStudentAuthed(me))) { session.set(null); studentLogin(app, 'انتهت جلسة الدخول. اختر صفك واسمك واكتب كلمة السر من جديد.'); return; }
     try {
       const [tasks, subs, classes] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses()]);
       data = { tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
@@ -579,7 +582,7 @@ function viewStudent(app) {
     app.innerHTML = `
       <div class="page-head">
         <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1></div>
-        <button class="btn" id="stOut" type="button">تسجيل الخروج</button>
+        <div class="row"><button class="btn" id="stPw" type="button">تغيير كلمة السر</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis">
         <div class="kpi"><b>${ar(doneTasks.size)}/${ar(data.tasks.length)}</b><span>واجبات منجزة</span></div>
@@ -591,7 +594,26 @@ function viewStudent(app) {
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>`;
-    $('#stOut', app).onclick = () => { session.set(null); render(); };
+    $('#stOut', app).onclick = async () => { await store.signOut(); session.set(null); render(); };
+    $('#stPw', app).onclick = () => openModal(`<form id="pwF" class="stack" style="gap:12px"><h2>تغيير كلمة السر</h2>
+      <label class="field">كلمة السر الحالية<input type="password" id="pwC" autocomplete="current-password" required></label>
+      <label class="field">كلمة السر الجديدة (٦ خانات على الأقل)<input type="password" id="pwN" autocomplete="new-password" minlength="6" required></label>
+      <label class="field">أعد كتابة الجديدة<input type="password" id="pwN2" autocomplete="new-password" minlength="6" required></label>
+      <div id="pwErr" class="notice" hidden></div>
+      <p class="small muted" style="margin:0">احفظ كلمتك الجديدة جيداً. إن نسيتها فاطلب من معلمك كلمة سر جديدة.</p>
+      <button class="btn primary" type="submit">حفظ</button></form>`, (m) => {
+      $('#pwF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const err = $('#pwErr', m), btn = e.submitter;
+        const cur = latinDigits($('#pwC', m).value).trim(), n1 = latinDigits($('#pwN', m).value).trim(), n2 = latinDigits($('#pwN2', m).value).trim();
+        err.hidden = true;
+        if (n1.length < 6) { err.hidden = false; err.textContent = 'كلمة السر الجديدة يجب أن تكون ٦ خانات على الأقل.'; return; }
+        if (n1 !== n2) { err.hidden = false; err.textContent = 'الكلمتان الجديدتان غير متطابقتين.'; return; }
+        btn.disabled = true;
+        try { await store.changePassword(me, cur, n1); closeModal(); toast('تم تغيير كلمة السر.'); }
+        catch (x) { err.hidden = false; err.textContent = x.message; btn.disabled = false; }
+      };
+    });
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
     if (tab === 'tasks') drawTasks(body, doneTasks);
@@ -688,27 +710,52 @@ function viewStudent(app) {
   return { destroy: () => comp?.destroy() };
 }
 
-function studentLogin(app) {
+async function studentLogin(app, msg = '') {
+  app.innerHTML = '<div class="loading">جارٍ التحميل…</div>';
+  let classes = [];
+  try { classes = sortClasses(await store.listClasses()); } catch (e) { app.innerHTML = `<div class="empty">تعذر تحميل الصفوف: ${esc(e.message)}</div>`; return; }
+  const last = pref.get('lastLogin', {});
   app.innerHTML = `<div class="card auth stack">
     <h2>دخول الطالب</h2>
-    <p class="muted" style="margin:0">أدخل رقمك الشخصي الذي سجّلك به المعلم.</p>
+    ${msg ? `<div class="notice">${esc(msg)}</div>` : ''}
     <form id="slForm" class="stack" style="gap:12px">
-      <label class="field">الرقم الشخصي<input type="text" id="slPn" inputmode="numeric" autocomplete="off" required></label>
+      <label class="field">الصف<select id="slClass" required><option value="">اختر صفك</option>${classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+      <label class="field">الاسم<select id="slName" required disabled><option value="">اختر صفك أولاً</option></select></label>
+      <label class="field">كلمة السر
+        <span class="row" style="gap:6px;flex-wrap:nowrap"><input type="password" id="slPw" inputmode="numeric" autocomplete="current-password" required style="flex:1"><button class="btn sm" type="button" id="slEye" aria-label="إظهار كلمة السر">إظهار</button></span></label>
       <div id="slErr" class="notice" hidden></div>
       <button class="btn primary" type="submit">دخول</button>
     </form>
-    <p class="small muted" style="margin:0">لا تملك رقماً؟ اطلبه من معلمك.</p>
+    <p class="small muted" style="margin:0">كلمة السر مكتوبة في بطاقتك التي أعطاك إياها المعلم. إن نسيتها فاطلب منه كلمة جديدة.</p>
   </div>`;
+  const C = $('#slClass', app), N = $('#slName', app), P = $('#slPw', app);
+  const loadNames = async (selectId) => {
+    N.disabled = true;
+    if (!C.value) { N.innerHTML = '<option value="">اختر صفك أولاً</option>'; return; }
+    N.innerHTML = '<option value="">جارٍ التحميل…</option>';
+    try {
+      const list = await store.listDirectory(C.value);
+      N.innerHTML = list.length
+        ? '<option value="">اختر اسمك</option>' + list.map((x) => `<option value="${esc(x.id)}" ${x.hasAccount ? '' : 'disabled'}>${esc(x.name)}${x.hasAccount ? '' : ' (لم يُنشأ حسابه)'}</option>`).join('')
+        : '<option value="">لا يوجد طلاب في هذا الصف بعد</option>';
+      N.disabled = !list.length;
+      if (selectId && list.some((x) => x.id === selectId)) N.value = selectId;
+    } catch (e) { N.innerHTML = '<option value="">تعذر تحميل الأسماء</option>'; }
+  };
+  C.onchange = () => loadNames();
+  $('#slEye', app).onclick = (e) => { const show = P.type === 'password'; P.type = show ? 'text' : 'password'; e.target.textContent = show ? 'إخفاء' : 'إظهار'; };
+  if (last.classId && classes.some((c) => c.id === last.classId)) { C.value = last.classId; loadNames(last.id); }
   $('#slForm', app).onsubmit = async (e) => {
     e.preventDefault();
     const btn = e.submitter; btn.disabled = true;
-    const pn = $('#slPn', app).value.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).trim();
+    const box = $('#slErr', app); box.hidden = true;
     try {
-      const student = await store.studentSignIn(pn);
+      const student = await store.studentSignIn(C.value, N.value, latinDigits(P.value).trim());
+      pref.set('lastLogin', { classId: C.value, id: N.value });
       session.set({ role: 'student', student });
       render();
     } catch (err) {
-      const box = $('#slErr', app); box.hidden = false; box.textContent = err.message; btn.disabled = false;
+      box.hidden = false; box.textContent = err.message; btn.disabled = false;
     }
   };
 }
@@ -739,10 +786,10 @@ function viewTeacher(app) {
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); if (tab === 'subs' || tab === 'reports') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
   }
-  const reload = async () => {
+  const reload = async (redraw = true) => {
     const [classes, students, tasks] = await Promise.all([store.listClasses(), store.listStudents(), store.listTasks()]);
     D = { ...D, classes: sortClasses(classes), students, tasks };
-    drawBody();
+    if (redraw) drawBody();
   };
   const className = (id) => (id === 'all' ? 'كل الصفوف' : D.classes.find((c) => c.id === id)?.name || '—');
 
@@ -992,6 +1039,92 @@ function viewTeacher(app) {
     $$('[data-del]', body).forEach((b) => (b.onclick = async () => { if (!(await confirmBox('حذف هذا الواجب؟ تبقى تسليمات الطلاب محفوظة.'))) return; await store.deleteTask(b.dataset.del); await reload(); }));
   }
 
+  /* --- حسابات الطلاب وبطاقات الدخول --- */
+  const hasAcc = (s) => !!(s.email || s.hasAccount);
+  const noAccount = () => D.students.filter((s) => !hasAcc(s));
+  async function syncDirectory(classIds) {
+    try { await store.rebuildDirectory(classIds.filter(Boolean), D.students); }
+    catch (e) { console.warn(e); toast('تعذر تحديث قائمة الأسماء في شاشة الدخول: ' + (e.code || e.message)); }
+  }
+  async function makeAccounts(list) {
+    if (!list.length) { toast('كل الطلاب لديهم حسابات.'); drawBody(); return; }
+    openModal(`<div class="stack"><h2>إنشاء حسابات الطلاب</h2><div id="mkTxt">جارٍ إنشاء ${ar(list.length)} حساباً…</div><div class="progress"><i id="mkBar"></i></div>
+      <p class="small muted" style="margin:0">لا تغلق الصفحة حتى ينتهي.</p></div>`);
+    const res = await store.createAccounts(list, (k, n) => {
+      const t = $('#mkTxt'), bar = $('#mkBar');
+      if (t) t.textContent = `تم ${ar(k)} من ${ar(n)}…`;
+      if (bar) bar.style.width = (k / n) * 100 + '%';
+    });
+    await reload(false);
+    await syncDirectory(list.map((s) => s.classId));
+    drawBody();
+    const ids = res.created.map((c) => c.id);
+    openModal(`<div class="stack"><h2>اكتمل إنشاء الحسابات</h2><p style="margin:0">عدد الحسابات الجديدة: <b>${ar(res.created.length)}</b></p>
+      ${res.failed.length ? `<div class="notice">لم يُنشأ ${ar(res.failed.length)}: ${esc(res.failed[0].error)}</div>` : ''}
+      <p style="margin:0">اطبع بطاقات الدخول ووزعها على الطلاب. كل بطاقة فيها اسم الطالب وكلمة سره ورمز للدخول إلى الموقع.</p>
+      <div class="row">${ids.length ? '<button class="btn primary" type="button" id="mkCards">بطاقات هؤلاء الطلاب</button>' : ''}<button class="btn" type="button" data-close>لاحقاً</button></div></div>`, (m) => {
+      const b = $('#mkCards', m);
+      if (b) b.onclick = () => openCards({ ids });
+    });
+  }
+  async function openCards({ ids = null } = {}) {
+    openModal('<div class="loading">جارٍ تجهيز البطاقات…</div>');
+    let secrets;
+    try { secrets = await store.listCards(); } catch (e) { $('#modalBody').innerHTML = `<div class="notice">تعذر قراءة كلمات السر: ${esc(e.code || e.message)}. تأكد من نشر قواعد الحماية الجديدة.</div>`; return; }
+    const clsName = (id) => D.classes.find((c) => c.id === id)?.name || '';
+    const siteUrl = location.origin + location.pathname;
+    $('#modalBody').innerHTML = `<div class="stack">
+      <h2>بطاقات دخول الطلاب</h2>
+      <div class="row" style="align-items:flex-end">
+        <label class="field" style="flex:1 1 180px">الصف<select id="cdCls">${ids ? '<option value="sel">الطلاب المحددون</option>' : ''}<option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="row small" style="gap:6px;flex:1 1 220px"><input type="checkbox" id="cdSkip" checked> استبعاد من غيّروا كلمة السر</label>
+      </div>
+      <label class="field">ملاحظات تظهر في كل بطاقة<textarea id="cdNotes" rows="3">${esc(pref.get('cardNotes', DEFAULT_NOTES))}</textarea></label>
+      <div class="small muted">رابط الموقع في رمز QR: <span dir="ltr">${esc(siteUrl)}</span></div>
+      <div id="cdInfo" class="small"></div>
+      <div class="row"><button class="btn primary" type="button" id="cdPdf">تنزيل PDF</button><button class="btn" type="button" id="cdPrint">طباعة</button><span id="cdProg" class="small muted"></span></div>
+      <div id="cdPrev" class="cards-prev"></div></div>`;
+    const m = $('#modalBody');
+    const pick = () => {
+      const c = $('#cdCls', m).value, skip = $('#cdSkip', m).checked;
+      return D.students
+        .filter((s) => hasAcc(s) && (c === 'sel' ? ids.includes(s.id) : c === 'all' || s.classId === c))
+        .map((s) => ({ name: s.name, className: clsName(s.classId), password: s.pwChanged ? null : secrets[s.id]?.password || null, classId: s.classId }))
+        .filter((x) => !(skip && !x.password))
+        .sort((a, b) => a.className.localeCompare(b.className, 'ar', { numeric: true }) || a.name.localeCompare(b.name, 'ar'));
+    };
+    const opts = () => ({ url: siteUrl, notes: $('#cdNotes', m).value.trim(), title: 'مقرأة الفاتح' });
+    let tm;
+    const preview = async () => {
+      const cards = pick();
+      $('#cdInfo', m).textContent = cards.length ? `عدد البطاقات: ${ar(cards.length)} — عدد الصفحات: ${ar(Math.ceil(cards.length / PER_PAGE))}` : 'لا توجد بطاقات بهذه الاختيارات.';
+      $('#cdPrev', m).innerHTML = '';
+      if (!cards.length) return;
+      try {
+        const [page] = await renderPages(cards.slice(0, PER_PAGE), opts());
+        $('#cdPrev', m).innerHTML = `<img src="${page.toDataURL('image/png')}" alt="معاينة الصفحة الأولى من البطاقات">`;
+      } catch (e) { $('#cdPrev', m).innerHTML = `<div class="notice">${esc(e.message)}</div>`; }
+    };
+    $('#cdCls', m).onchange = preview;
+    $('#cdSkip', m).onchange = preview;
+    $('#cdNotes', m).oninput = () => { pref.set('cardNotes', $('#cdNotes', m).value); clearTimeout(tm); tm = setTimeout(preview, 500); };
+    const run = async (kind) => {
+      const cards = pick();
+      if (!cards.length) return toast('لا توجد بطاقات للطباعة.');
+      const prog = $('#cdProg', m);
+      prog.textContent = 'جارٍ التجهيز…';
+      try {
+        const pages = await renderPages(cards, opts());
+        if (kind === 'pdf') await downloadPDF(pages, `maqraa-login-cards-${new Date().toISOString().slice(0, 10)}.pdf`, (k, n) => (prog.textContent = `صفحة ${ar(k)} من ${ar(n)}…`));
+        else printPages(pages);
+        prog.textContent = '';
+      } catch (e) { prog.textContent = e.message; }
+    };
+    $('#cdPdf', m).onclick = () => run('pdf');
+    $('#cdPrint', m).onclick = () => run('print');
+    preview();
+  }
+
   /* --- الصفوف والطلاب --- */
   function drawPeople(body) {
     const firstCls = D.classes[0]?.id || '';
@@ -1004,13 +1137,18 @@ function viewTeacher(app) {
         </div>
         <div class="card stack" style="gap:10px"><h3>إضافة طلاب</h3>
           <label class="field">الصف<select id="stClass">${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
-          <label class="field">طالب في كل سطر: الاسم، الرقم الشخصي<textarea id="stBulk" placeholder="عبدالله أحمد، 1023&#10;يوسف خالد، 1024"></textarea></label>
+          <label class="field">اسم طالب في كل سطر (ويمكن إضافة الرقم الشخصي بعد فاصلة)<textarea id="stBulk" placeholder="عبدالله أحمد&#10;يوسف خالد، 1024"></textarea></label>
+          <label class="row small" style="gap:6px"><input type="checkbox" id="stAuto" checked> إنشاء حساب وكلمة سر لكل طالب تلقائياً</label>
           <div class="row"><button class="btn primary" id="stAdd" type="button">إضافة</button><label class="btn">استيراد من Excel أو CSV<input type="file" id="stFile" accept=".xlsx,.xls,.csv" hidden></label></div>
-          <p class="small muted" style="margin:0">في ملف Excel: العمود الأول الاسم، والثاني الرقم الشخصي، والثالث (اختياري) اسم الصف كما هو مكتوب هنا.</p>
+          <p class="small muted" style="margin:0">في ملف Excel: العمود الأول الاسم، والثاني الرقم الشخصي (اختياري)، والثالث اسم الصف كما هو مكتوب هنا (اختياري).</p>
         </div>
       </div>
       <div class="card stack" style="gap:10px">
         <div class="row" style="justify-content:space-between"><h3>الطلاب (${ar(D.students.length)})</h3><input type="search" id="stQ" placeholder="بحث" style="max-width:200px"></div>
+        <div class="row" style="gap:8px">
+          <button class="btn gold" id="stCards" type="button">بطاقات الدخول (طباعة و PDF)</button>
+          ${noAccount().length ? `<button class="btn" id="stMake" type="button">إنشاء حسابات لـ ${ar(noAccount().length)} طالباً بلا حساب</button>` : ''}
+        </div>
         <div id="stList"></div>
       </div>
     </div>`;
@@ -1035,15 +1173,16 @@ function viewTeacher(app) {
       if (!(await confirmBox('حذف هذا الصف؟'))) return;
       await store.deleteClass(b.dataset.delc); await reload();
     }));
+    const normPn = (v) => latinDigits(v).replace(/\s/g, '');
     const addMany = async (arr) => {
-      const clean = arr.filter((x) => x.name && x.id);
-      if (!clean.length) return toast('لم نجد أسماء وأرقاماً صالحة.');
-      const dup = clean.filter((x) => D.students.some((s) => s.id === x.id && s.name !== x.name));
+      const clean = arr.filter((x) => x.name).map((x) => ({ ...x, id: x.id || 'st' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }));
+      if (!clean.length) return toast('لم نجد أسماء صالحة.');
       await store.saveStudents(clean);
-      toast(`أُضيف ${clean.length} طالباً${dup.length ? ` (حُدّثت بيانات ${dup.length} رقماً موجوداً)` : ''}.`);
-      await reload();
+      await reload(false);
+      const fresh = D.students.filter((s) => clean.some((c) => c.id === s.id));
+      if ($('#stAuto', body)?.checked) await makeAccounts(fresh.filter((s) => !hasAcc(s)));
+      else { await syncDirectory(clean.map((c) => c.classId)); toast(`أُضيف ${clean.length} طالباً.`); drawBody(); }
     };
-    const normPn = (v) => String(v ?? '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s/g, '');
     $('#stAdd', body).onclick = () => {
       const cid = $('#stClass', body).value;
       addMany($('#stBulk', body).value.split('\n').map((l) => l.split(/[,،\t;]/)).map(([n, p]) => ({ name: (n || '').trim(), id: normPn(p), classId: cid })));
@@ -1054,7 +1193,7 @@ function viewTeacher(app) {
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
       const cid = $('#stClass', body).value;
-      const arr = rows.filter((r) => r && r[0] && r[1] && !/اسم|name/i.test(String(r[0]))).map((r) => {
+      const arr = rows.filter((r) => r && r[0] && !/^(الاسم|اسم|name)$/i.test(String(r[0]).trim())).map((r) => {
         const cName = r[2] ? String(r[2]).trim() : '';
         const c = cName && D.classes.find((x) => x.name === cName);
         return { name: String(r[0]).trim(), id: normPn(r[1]), classId: c ? c.id : cid };
@@ -1062,13 +1201,47 @@ function viewTeacher(app) {
       e.target.value = '';
       addMany(arr);
     };
+    $('#stCards', body).onclick = () => openCards();
+    const mk = $('#stMake', body);
+    if (mk) mk.onclick = () => makeAccounts(noAccount());
     const paint = (q = '') => {
       const L = D.students.filter((s) => !q || s.name.includes(q) || s.id.includes(q)).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-      $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الرقم</th><th>الصف</th><th>تسميع</th><th></th></tr></thead><tbody>
-        ${L.map((s) => `<tr><td>${esc(s.name)}</td><td class="num">${esc(s.id)}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
-        <td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td><td><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
-      $$('[data-mv]', body).forEach((sel) => (sel.onchange = async () => { const s = D.students.find((x) => x.id === sel.dataset.mv); await store.saveStudents([{ ...s, classId: sel.value }]); s.classId = sel.value; toast('نُقل الطالب.'); }));
-      $$('[data-dels]', body).forEach((b) => (b.onclick = async () => { if (!(await confirmBox('حذف هذا الطالب؟ تبقى تسليماته في السجل.'))) return; await store.deleteStudent(b.dataset.dels); await reload(); }));
+      const accPill = (s) => !hasAcc(s) ? '<span class="pill warn">بلا حساب</span>' : s.pwChanged ? '<span class="pill mute">غيّر كلمة سره</span>' : '<span class="pill ok">جاهز</span>';
+      $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الصف</th><th>الحساب</th><th>تسميع</th><th></th></tr></thead><tbody>
+        ${L.map((s) => `<tr><td>${esc(s.name)}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+        <td>${accPill(s)}</td><td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td>
+        <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
+      $$('[data-mv]', body).forEach((sel) => (sel.onchange = async () => {
+        const st = D.students.find((x) => x.id === sel.dataset.mv);
+        const old = st.classId;
+        await store.saveStudents([{ ...st, classId: sel.value }]);
+        st.classId = sel.value;
+        await syncDirectory([old, sel.value]);
+        toast('نُقل الطالب.');
+      }));
+      $$('[data-dels]', body).forEach((b) => (b.onclick = async () => {
+        const st = D.students.find((x) => x.id === b.dataset.dels);
+        if (!(await confirmBox('حذف هذا الطالب؟ تبقى تسليماته في السجل.'))) return;
+        await store.deleteStudent(st.id);
+        await reload(false);
+        await syncDirectory([st.classId]);
+        drawBody();
+      }));
+      $$('[data-rpw]', body).forEach((b) => (b.onclick = async () => {
+        const st = D.students.find((x) => x.id === b.dataset.rpw);
+        if (hasAcc(st) && !(await confirmBox(`إنشاء كلمة سر جديدة لـ ${st.name}؟ ستتوقف كلمة سره الحالية.`, 'إنشاء كلمة جديدة'))) return;
+        b.disabled = true;
+        try {
+          const pw = await store.resetPassword(st);
+          await reload(false);
+          await syncDirectory([st.classId]);
+          drawBody();
+          openModal(`<div class="stack"><h2>كلمة السر الجديدة</h2><p style="margin:0">${esc(st.name)}</p><div class="pw-big">${esc(pw)}</div>
+            <div class="row"><button class="btn gold" type="button" id="oneCard">طباعة بطاقته</button><button class="btn" type="button" data-close>تم</button></div></div>`, (m) => {
+            $('#oneCard', m).onclick = () => openCards({ ids: [st.id] });
+          });
+        } catch (e) { toast(e.message); b.disabled = false; }
+      }));
     };
     $('#stQ', body).oninput = (e) => paint(e.target.value.trim());
     paint();
