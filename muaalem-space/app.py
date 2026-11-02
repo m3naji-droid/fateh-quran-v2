@@ -51,6 +51,52 @@ app = FastAPI(
 )
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"])
 
+# ------------------------------------------------------------ عدّاد الاستهلاك
+# يسجّل في Firestore (usage/ai-YYYY-MM) عدد التحليلات والثواني التي احتسبها Cloud Run، ليعرضها المعلم.
+# الكتابة عبر Firestore REST بحساب خدمة Cloud Run الافتراضي، ولا توقف التحليل إن فشلت.
+_usage_session = None
+
+
+def _process_start() -> float:
+    """وقت بدء العملية (يشمل استيراد المكتبات) من /proc، وإلا وقت الاستيراد."""
+    try:
+        ticks = int(open("/proc/self/stat").read().rsplit(")", 1)[1].split()[19])
+        btime = next(int(l.split()[1]) for l in open("/proc/stat") if l.startswith("btime"))
+        t = btime + ticks / os.sysconf("SC_CLK_TCK")
+        return t if 0 < time.time() - t < 3600 else _IMPORT_T
+    except Exception:
+        return _IMPORT_T
+
+
+_IMPORT_T = time.time()
+
+
+def usage_inc(**fields):
+    global _usage_session
+    if not (FIREBASE_PROJECT and os.environ.get("K_SERVICE")):
+        return
+    try:
+        if _usage_session is None:
+            import google.auth
+            from google.auth.transport.requests import AuthorizedSession
+            creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/datastore"])
+            _usage_session = AuthorizedSession(creds)
+        month = time.strftime("%Y-%m", time.gmtime())
+        base = f"projects/{FIREBASE_PROJECT}/databases/(default)/documents"
+        tr = [{"fieldPath": k, "increment": {"integerValue": str(v)} if isinstance(v, int) else {"doubleValue": float(v)}}
+              for k, v in fields.items()]
+        tr.append({"fieldPath": "updatedAt", "setToServerValue": "REQUEST_TIME"})
+        body = {"writes": [
+            {"update": {"name": f"{base}/usage/ai-{month}", "fields": {"month": {"stringValue": month}}},
+             "updateMask": {"fieldPaths": ["month"]}, "updateTransforms": tr},
+        ]}
+        r = _usage_session.post(f"https://firestore.googleapis.com/v1/{base}:commit", json=body, timeout=8)
+        if r.status_code >= 300:
+            print("usage write failed", r.status_code, r.text[:300], flush=True)
+    except Exception as e:
+        print("usage write error", type(e).__name__, str(e)[:300], flush=True)
+
+
 # ------------------------------------------------------------ النموذج
 STATE = {"ready": False, "error": None, "loaded_at": None}
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -82,6 +128,8 @@ def load_model():
 # في غيره (Hugging Face أو التجربة المحلية) نحمّله في الخلفية حتى يستجيب الخادم فوراً.
 if os.environ.get("K_SERVICE") or os.environ.get("LOAD_MODEL_SYNC"):
     load_model()
+    # كل تشغيل بارد يُحتسب وقته على الفاتورة (تحميل النموذج قبل أول طلب)
+    usage_inc(cold_starts=1, startup_seconds=round(time.time() - _process_start(), 1))
 else:
     threading.Thread(target=load_model, daemon=True).start()
 
@@ -189,6 +237,7 @@ async def analyze(
     wait: bool = Form(False),
     authorization: str | None = Header(None),
 ):
+    t_req = time.time()
     check_auth(authorization)
     if STATE["error"]:
         raise HTTPException(503, "تعذر تحميل النموذج: " + STATE["error"])
@@ -213,8 +262,13 @@ async def analyze(
         # الوضع المتزامن (Cloud Run): التحليل كاملاً داخل الطلب، لأن المعالج لا يعمل إلا أثناء معالجة طلب
         await asyncio.get_running_loop().run_in_executor(pool, _wait_then_run, *args)
         j = JOBS.pop(jid, {})
+        billed = round(time.time() - t_req, 1)  # يشمل الانتظار في الطابور: Cloud Run يحتسب النسخة ما دام الطلب قائماً
+        audio = round(len(wave) / A.SR, 1)
         if j.get("status") != "done":
+            await asyncio.get_running_loop().run_in_executor(None, lambda: usage_inc(failed=1, billed_seconds=billed, audio_seconds=audio))
             raise HTTPException(500, j.get("error") or "فشل التحليل.")
+        await asyncio.get_running_loop().run_in_executor(None, lambda: usage_inc(analyses=1, billed_seconds=billed, audio_seconds=audio))
+        j["result"]["billed"] = billed
         return {"status": "done", "result": j["result"]}
     pool.submit(_wait_then_run, *args)
     return {"job": jid, "status": "queued", "model_ready": STATE["ready"]}

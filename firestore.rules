@@ -40,6 +40,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    // عدّاد استهلاك خادم التحليل: يكتبه الخادم وحده (حساب الخدمة يتجاوز القواعد)، ويقرؤه المعلم
+    match /usage/{id} {
+      allow read: if isTeacher();
+      allow write: if false;
+    }
     match /model/{id} {
       allow read: if signedIn();
       allow write: if isTeacher();

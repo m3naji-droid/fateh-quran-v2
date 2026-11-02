@@ -141,6 +141,7 @@ const local = {
   async setModel(m) { LS.set('model', m); },
   // لوحة الشرف
   async getBoard() { return LS.get('board', null); },
+  async getAiUsage() { return LS.get('aiUsage', null); },
   async setBoard(b) { LS.set('board', b); },
   async saveRanks(ranks) { const r = LS.get('roster', {}); Object.entries(ranks).forEach(([id, v]) => { if (r[id]) r[id].rank = v; }); LS.set('roster', r); },
   async getMyRank(me) { return LS.get('roster', {})[me.id]?.rank || null; },
@@ -339,6 +340,7 @@ async function makeCloud() {
     async getModel() { await ensureAnon(); try { const d = await getDoc(doc(db, 'model', 'tajweed')); return d.exists() ? d.data() : null; } catch { return null; } },
     async setModel(m) { await setDoc(doc(db, 'model', 'tajweed'), m); },
     // لوحة الشرف: يحسبها المعلم وينشرها (الأسماء والنقاط فقط)، ومرتبة كل طالب في مستنده
+    async getAiUsage(month) { const d = await getDoc(doc(db, 'usage', 'ai-' + month)); return d.exists() ? d.data() : null; },
     async getBoard() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'main')); return d.exists() ? d.data() : null; },
     async setBoard(b) { await setDoc(doc(db, 'leaderboard', 'main'), b); },
     async saveRanks(ranks, students) {

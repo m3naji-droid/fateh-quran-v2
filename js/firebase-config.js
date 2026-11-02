@@ -21,4 +21,6 @@ export const TAJWEED_API = {
   sync: true,
   // مقادير المدود المعتمدة في التصحيح (رواية حفص من طريق الشاطبية)
   madd: { monfasel: 4, mottasel: 4, aared: 4 },
+  // مواصفات نسخة Cloud Run، لحساب الحصة المجانية والتكلفة في عدّاد المعلم. عدّلها إن غيّرتها في Cloud Run.
+  instance: { vcpu: 2, gib: 8 },
 };

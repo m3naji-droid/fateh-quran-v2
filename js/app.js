@@ -3,6 +3,7 @@ import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
+import { TAJWEED_API } from './firebase-config.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge } from './leaderboard.js';
@@ -489,6 +490,52 @@ function dbUsage(subs, students = []) {
   return { audio, docs, total, pct, withAudio, recent, monthsLeft, level: pct >= 0.9 ? 'bad' : pct >= 0.7 ? 'warn' : 'ok' };
 }
 
+/* استهلاك خادم تحليل التجويد (Cloud Run): الحصة المجانية الشهرية والتكلفة بعدها */
+const RUN_FREE = { cpu: 180000, mem: 360000 }; // ثانية vCPU و ثانية GiB شهرياً
+const RUN_PRICE = { cpu: 0.000024, mem: 0.0000025 }; // دولار لكل ثانية vCPU / GiB (الفوترة حسب الطلب)
+const utcMonth = () => new Date().toISOString().slice(0, 7);
+const nWord = (n, one, two, few, many) => (n === 1 ? one : n === 2 ? two : n % 100 >= 3 && n % 100 <= 10 ? `${ar(n)} ${few}` : `${ar(n)} ${many}`);
+const nAnalyses = (n) => (n === 0 ? 'لا تحليلات' : nWord(n, 'تحليل واحد', 'تحليلان', 'تحليلات', 'تحليلاً'));
+const fmtDur = (sec) => { sec = Math.round(sec); if (sec < 60) return `${ar(sec)} ث`; const m = Math.round(sec / 60); if (m < 120) return nWord(m, 'دقيقة', 'دقيقتان', 'دقائق', 'دقيقة'); const h = sec / 3600; return h < 10 ? `${ar(h.toFixed(1).replace('.', '٫'))} ساعة` : nWord(Math.round(h), 'ساعة', 'ساعتان', 'ساعات', 'ساعة'); };
+const fmtUsd = (d) => (d <= 0 ? '٠ $' : `${ar(d < 0.01 ? d.toFixed(4) : d < 1 ? d.toFixed(3) : d.toFixed(2)).replace('.', '٫')} $`);
+function runCost(sec, inst) {
+  return Math.max(0, sec * inst.vcpu - RUN_FREE.cpu) * RUN_PRICE.cpu + Math.max(0, sec * inst.gib - RUN_FREE.mem) * RUN_PRICE.mem;
+}
+function aiUsage(doc, subs) {
+  const inst = TAJWEED_API.instance || { vcpu: 2, gib: 8 };
+  const free = Math.min(RUN_FREE.cpu / inst.vcpu, RUN_FREE.mem / inst.gib); // ثوانٍ مجانية في الشهر
+  const month = utcMonth();
+  const mine = subs.filter((x) => x.ai?.took && (x.ai.at || x.createdAt || '').slice(0, 7) === month);
+  let est = false, n, billed, req, cold, startup, failed, audio;
+  if (doc) {
+    n = doc.analyses || 0; failed = doc.failed || 0; cold = doc.cold_starts || 0;
+    req = doc.billed_seconds || 0; startup = doc.startup_seconds || 0; audio = doc.audio_seconds || 0;
+    billed = req + startup;
+  } else { // قبل أول تسجيل من الخادم: تقدير من نتائج التحليل المحفوظة في التسليمات
+    est = true; n = mine.length; failed = 0; cold = 0; startup = 0;
+    req = mine.reduce((t, x) => t + x.ai.took + 3, 0); audio = mine.reduce((t, x) => t + (x.duration || 0), 0);
+    billed = req;
+  }
+  const done = n + failed;
+  const per = done ? billed / done : 40; // يشمل نصيب المقطع من وقت الإيقاظ
+  const perReq = done ? req / done : 35;
+  const perAudioMin = audio > 30 ? (req / audio) * 60 : null; // ثوانٍ محتسبة لكل دقيقة تلاوة
+  const pct = billed / free;
+  const remaining = Math.max(0, free - billed);
+  const d = new Date(), day = d.getUTCDate(), days = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  const projected = day >= 3 ? (billed / day) * days : null;
+  return {
+    inst, free, month, est, n, failed, cold, startup, req, billed, audio, per, perReq, perAudioMin, pct, remaining,
+    remainingN: Math.floor(remaining / per),
+    perPct: per / free,
+    perCost: per * (inst.vcpu * RUN_PRICE.cpu + inst.gib * RUN_PRICE.mem),
+    cost: runCost(billed, inst),
+    projected, projectedPct: projected == null ? null : projected / free, projectedCost: projected == null ? 0 : runCost(projected, inst),
+    level: pct >= 0.9 ? 'bad' : pct >= 0.7 ? 'warn' : 'ok',
+    updatedAt: doc?.updatedAt?.toDate ? doc.updatedAt.toDate().toISOString() : null,
+  };
+}
+
 /* لوحة الشرف المشتركة بين الطالب والمعلم */
 function mountBoard(host, board, opts = {}) {
   if (!board) { host.innerHTML = '<div class="empty">لم تُنشر لوحة الشرف بعد. تظهر بعد أن يفتح المعلم لوحته وتُقيَّم أول الواجبات.</div>'; return; }
@@ -876,6 +923,15 @@ function viewTeacher(app) {
   if (!s || s.role !== 'teacher') return teacherLogin(app);
   let tab = pref.get('tTab', 'subs');
   let D = { classes: [], students: [], tasks: [], subs: [] };
+  let aiDoc, aiDocLoading = false; // مستند usage/ai-الشهر
+  const loadAiDoc = async (force) => {
+    if (aiDocLoading || (aiDoc !== undefined && !force) || !aiEnabled()) return;
+    aiDocLoading = true;
+    try { aiDoc = await store.getAiUsage(utcMonth()); } catch { aiDoc = null; }
+    aiDocLoading = false;
+    drawHead();
+    if (tab === 'settings') { const b = $('#tBody', app); if (b && $('#aiUse', b)) drawAiCard(b); }
+  };
   let unsub = null;
   let filters = { cls: 'all', task: 'all', q: '', status: 'all' };
   // التحديد المتعدد (يبقى عند تحديث الجدول)
@@ -948,14 +1004,27 @@ function viewTeacher(app) {
       <div class="kpi"><b>${ar(D.students.length)}</b><span>طالباً في ${ar(D.classes.length)} صفوف</span></div>
       ${(() => { const u = dbUsage(D.subs, D.students); return `<button type="button" class="kpi kpi-btn usage-${u.level}" id="kpiDb" title="تفاصيل المساحة">
         <b>${ar(Math.round(u.pct * 100))}٪</b><span>مساحة قاعدة البيانات (${fmtBytes(u.total)} من ١ GB)</span>
-        <span class="meter"><i style="width:${Math.min(100, Math.max(1, u.pct * 100))}%"></i></span></button>`; })()}`;
+        <span class="meter"><i style="width:${Math.min(100, Math.max(1, u.pct * 100))}%"></i></span></button>`; })()}
+      ${aiEnabled() ? (() => { const a = aiUsage(aiDoc, D.subs); return `<button type="button" class="kpi kpi-btn usage-${a.level}" id="kpiAi" title="تفاصيل استهلاك خادم التحليل">
+        <b>${aiDoc === undefined ? '…' : ar(Math.round(a.pct * 100)) + '٪'}</b><span>خادم التجويد هذا الشهر (${nAnalyses(a.n)}، ويتبقى مجاناً نحو ${ar(a.remainingN)})</span>
+        <span class="meter"><i style="width:${Math.min(100, Math.max(1, a.pct * 100))}%"></i></span></button>`; })() : ''}`;
     const kb = $('#kpiDb', app);
-    if (kb) kb.onclick = () => { tab = 'settings'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'settings')); drawBody(); };
+    const toSettings = () => { tab = 'settings'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'settings')); drawBody(); };
+    if (kb) kb.onclick = toSettings;
+    const ka = $('#kpiAi', app);
+    if (ka) ka.onclick = () => { toSettings(); $('#aiUse', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    loadAiDoc();
     const u = dbUsage(D.subs, D.students);
     const warnBox = $('#dbWarn', app);
     if (warnBox) warnBox.innerHTML = u.level === 'ok' ? '' : `<div class="db-warn ${u.level}" role="alert">
       <b>${u.level === 'bad' ? 'تنبيه: مساحة قاعدة البيانات شبه ممتلئة' : 'تنبيه: اقتربت مساحة قاعدة البيانات من الامتلاء'} (${ar(Math.round(u.pct * 100))}٪ من ١ GB المجانية).</b>
       التسجيلات الصوتية تشغل ${fmtBytes(u.audio)}. احذف التسجيلات القديمة من «الإعدادات ← مساحة قاعدة البيانات»، وتبقى الدرجات والتقييمات كما هي.</div>`;
+    if (warnBox && aiEnabled() && aiDoc !== undefined) {
+      const a = aiUsage(aiDoc, D.subs);
+      if (a.level !== 'ok') warnBox.insertAdjacentHTML('beforeend', `<div class="db-warn ${a.level}" role="alert">
+        <b>${a.pct >= 1 ? 'تنبيه: انتهت الحصة المجانية لخادم التجويد هذا الشهر' : a.level === 'bad' ? 'تنبيه: الحصة المجانية لخادم التجويد شبه منتهية' : 'تنبيه: استُهلك معظم الحصة المجانية لخادم التجويد'} (${ar(Math.round(a.pct * 100))}٪).</b>
+        ${a.pct >= 1 ? `كل تحليل إضافي يكلف نحو ${fmtUsd(a.perCost)}، والتكلفة هذا الشهر حتى الآن ${fmtUsd(a.cost)}.` : `يتبقى مجاناً نحو ${nAnalyses(a.remainingN)} حتى بداية الشهر القادم.`} لإيقاف التحليل مؤقتاً اجعل «الحد الأقصى للنسخ» صفراً في Cloud Run.</div>`);
+    }
   }
   function drawBody() {
     drawHead();
@@ -1540,6 +1609,31 @@ function viewTeacher(app) {
     schedulePublish();
   }
 
+  /* --- عدّاد خادم التجويد --- */
+  function drawAiCard(body) {
+    const host = $('#aiUse', body); if (!host) return;
+    const a = aiUsage(aiDoc, D.subs);
+    const monthName = ar(new Date(a.month + '-15').toLocaleDateString('ar', { month: 'long', year: 'numeric' }));
+    const bar = Math.min(100, Math.max(1, a.pct * 100));
+    host.innerHTML = `
+      <div class="row" style="justify-content:space-between"><h3>استهلاك خادم تحليل التجويد · ${esc(monthName)}</h3>
+        <div class="row"><span class="pill ${a.level}">${ar(Math.round(a.pct * 100))}٪ من الحصة المجانية</span><button class="btn sm" type="button" id="aiRef">تحديث</button></div></div>
+      <div class="meter big"><i class="usage-${a.level}" style="width:${bar}%"></i><span class="mark m70" title="٧٠٪"></span><span class="mark m90" title="٩٠٪"></span>${a.projectedPct != null && a.projectedPct > a.pct ? `<span class="mark proj" style="inset-inline-start:${Math.min(100, a.projectedPct * 100)}%" title="المتوقع بنهاية الشهر"></span>` : ''}</div>
+      <div class="usage-grid">
+        <div><span>المستخدم هذا الشهر</span><b>${fmtDur(a.billed)}</b><small>${nAnalyses(a.n)}${a.failed ? `، وفشل ${ar(a.failed)}` : ''}</small></div>
+        <div><span>المتبقي مجاناً</span><b>${fmtDur(a.remaining)}</b><small>${a.remainingN ? `يكفي نحو ${nAnalyses(a.remainingN)}` : 'كل تحليل الآن مدفوع'}</small></div>
+        <div><span>المقطع الواحد</span><b>≈ ${ar(Math.round(a.per))} ث</b><small>${a.perPct * 100 < 0.01 ? 'أقل من ٠٫٠١٪' : ar((a.perPct * 100).toFixed(2).replace('.', '٫')) + '٪'} من حصة الشهر${a.perAudioMin ? ` · ${ar(Math.round(a.perAudioMin))} ث لكل دقيقة تلاوة` : ''}</small></div>
+        <div><span>تكلفة المقطع بعد المجاني</span><b>≈ ${fmtUsd(a.perCost)}</b><small>الدولار يكفي نحو ${nAnalyses(Math.floor(1 / a.perCost))} · هذا الشهر: ${fmtUsd(a.cost)}</small></div>
+      </div>
+      <div class="small" style="line-height:1.9">
+        ${a.projected != null ? `<div>• بهذا المعدل يصل استهلاك الشهر إلى نحو <b>${ar(Math.round(a.projectedPct * 100))}٪</b>${a.projectedCost > 0 ? `، بتكلفة تقديرية ${fmtUsd(a.projectedCost)}` : '، ضمن المجاني'}.</div>` : ''}
+        ${!a.est ? `<div>• مرات الإيقاظ (تشغيل بارد): <b>${ar(a.cold)}</b>${a.cold ? `، استغرقت ${fmtDur(a.startup)}. المقطع الأول بعد خمول الخادم أبطأ لهذا السبب.` : '.'}</div>` : ''}
+        <div>• الحصة المجانية: <b>${fmtDur(a.free)}</b> شهرياً لنسخة ${ar(a.inst.vcpu)} vCPU و${ar(a.inst.gib)} GiB، وتتجدد أول كل شهر.</div>
+      </div>
+      <p class="small muted" style="margin:0">${a.est ? '<span class="pill warn">تقدير</span> لم يسجّل الخادم استهلاكه بعد، فالأرقام محسوبة من مدة التحليلات المحفوظة في التسليمات. يبدأ العدّ الدقيق بعد تحديث الخادم. ' : `يسجّل الخادم كل تحليل بنفسه${a.updatedAt ? `، وآخر تسجيل ${fmtDate(a.updatedAt)}` : ''}. `}الأرقام تقريبية؛ المرجع النهائي صفحة الفوترة في Google Cloud وتنبيه الميزانية (٥ $). لا يُحتسب شيء والخادم نائم.</p>`;
+    $('#aiRef', host).onclick = () => { aiDoc = undefined; host.querySelector('#aiRef').disabled = true; loadAiDoc(true); };
+  }
+
   /* --- الإعدادات --- */
   function drawSettings(body) {
     const u = dbUsage(D.subs, D.students);
@@ -1569,11 +1663,13 @@ function viewTeacher(app) {
       <div class="card stack" style="gap:10px"><h3>حفظ البيانات</h3>
         ${store.mode === 'cloud' ? '<p style="margin:0"><span class="pill ok">سحابي</span> البيانات محفوظة في Firebase وتظهر على كل الأجهزة.</p>' : '<p style="margin:0"><span class="pill warn">محلي</span> البيانات محفوظة في هذا المتصفح فقط. للعمل بين أجهزة الطلاب والمعلم فعّل Firebase (راجع ملف README).</p>'}
       </div>
+      ${aiEnabled() ? '<div class="card stack usage-card" id="aiUse" style="gap:12px;grid-column:1 / -1"></div>' : ''}
       <div class="card stack" style="gap:10px"><h3>خادم تحليل التجويد</h3><div id="aiStatus" class="small muted">${aiEnabled() ? 'جارٍ الفحص…' : 'غير مفعّل. ضع رابط الخادم في ملف js/firebase-config.js (راجع muaalem-space/README.md).'}</div></div>
       ${store.mode === 'cloud' ? `<div class="card stack" style="gap:10px"><h3>نقل بيانات النسخة السابقة</h3>
         <p class="muted small" style="margin:0">ينسخ الطلاب وواجبات سورة يس من «مقرأة الفاتح» القديمة إلى النظام الجديد. التسليمات القديمة لا تُنقل.</p>
         <button class="btn" id="mig" type="button">نقل البيانات القديمة</button></div>` : ''}
     </div>`;
+    if (aiEnabled()) drawAiCard(body);
     if (aiEnabled()) aiHealth().then((h) => { const el = $('#aiStatus', body); if (el) el.innerHTML = h.model_error ? `<span class="pill bad">خطأ</span> ${esc(h.model_error)}` : h.model_ready ? `<span class="pill ok">جاهز</span> النموذج محمّل على ${esc(h.device)}${h.queue ? `، وفي الانتظار ${ar(h.queue)}` : ''}.` : '<span class="pill warn">يستيقظ</span> النموذج قيد التحميل.'; })
       .catch(() => { const el = $('#aiStatus', body); if (el) el.innerHTML = '<span class="pill warn">لا يستجيب</span> قد يكون الخادم نائماً؛ يستيقظ مع أول تحليل خلال دقيقة أو دقيقتين.'; });
     const pickAudio = () => {

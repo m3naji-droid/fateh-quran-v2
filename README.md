@@ -47,6 +47,7 @@ tasks/{id}                          { title, classId|'all', surah, from, to, mod
 roster/{رقم الطالب}                 { name, classId }
 roster/{رقم}/subs/{id}              { taskId, percent, counts, statuses, mistakes, transcript, duration, teacher: {hifz, tajweed, ada, total, notes} }
 roster/{رقم}/subs/{id}/audio/main   { b64, mime }   ← التسجيل الصوتي (حتى ٥ دقائق)
+usage/ai-{YYYY-MM}                  { analyses, failed, billed_seconds, audio_seconds, cold_starts, startup_seconds }  ← يكتبه خادم التحليل
 ```
 
 ## الملفات
@@ -78,12 +79,14 @@ firestore.rules         قواعد حماية قاعدة البيانات
 | الدخول | السماح بالوصول العام (الخادم يتحقق بنفسه من دخول Firebase) |
 | الفوترة | حسب الطلب (Request-based) |
 | عدد النسخ | الأدنى 0، الأقصى 2 |
-| الذاكرة / المعالج | 6 GiB / 2 |
+| الذاكرة / المعالج | 8 GiB / 2 |
 | مهلة الطلب | 900 ثانية |
 | الطلبات المتزامنة لكل نسخة | 1 |
 | متغيرات البيئة | `FIREBASE_PROJECT=quran-c16c8` و `ALLOWED_ORIGINS=https://m3naji-droid.github.io` |
 
 بعد النشر ضع رابط الخدمة في `js/firebase-config.js` في `TAJWEED_API.url`.
+
+**عدّاد الاستهلاك:** يسجّل الخادم في Firestore (`usage/ai-YYYY-MM`) عدد التحليلات، والثواني التي احتسبها Cloud Run، ومرات التشغيل البارد. تعرضها لوحة المعلم مع المتبقي من الحصة المجانية (١٨٠٬٠٠٠ ثانية vCPU و٣٦٠٬٠٠٠ ثانية GiB شهرياً) وتكلفة المقطع الواحد بعدها. إن غيّرت المعالج أو الذاكرة في Cloud Run فعدّل `TAJWEED_API.instance` ليبقى الحساب صحيحاً.
 
 **الترخيص:** النموذج مرخّص بـ Quran Muaalem License (QML) 1.0. من شروطه عرض تنبيه الذكاء الاصطناعي قبل أول استخدام وإبقاؤه متاحاً، ومنع الإعلانات. الموقع يعرض التنبيه قبل أول تحليل، ويبقيه متاحاً من رابط «عن المقرأة» أسفل كل صفحة. فلا تحذفهما، ولا تضف إعلانات إلى الموقع.
 
