@@ -335,3 +335,25 @@ tr.picked td { background: var(--green-2); }
 .title-pill .rank-badge { width: 28px; height: 28px; }
 .lb-list li.myclass { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
 .lb-list li.myclass .lb-name b::after { content: " (صفك)"; color: var(--green); font-weight: 600; font-size: .85em; }
+
+/* مساحة قاعدة البيانات */
+.kpi-btn { text-align: start; cursor: pointer; font: inherit; color: inherit; display: flex; flex-direction: column; gap: 4px; }
+.kpi-btn:hover { border-color: var(--green); }
+.meter { display: block; height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; position: relative; }
+.meter i { display: block; height: 100%; border-radius: 99px; background: var(--ok); }
+.usage-warn .meter i, .meter i.usage-warn { background: var(--warn); }
+.usage-bad .meter i, .meter i.usage-bad { background: var(--bad); }
+.usage-warn b { color: var(--warn); } .usage-bad b { color: var(--bad); }
+.meter.big { height: 14px; overflow: visible; }
+.meter.big i { background: var(--ok); }
+.meter .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--muted); opacity: .5; }
+.meter .m70 { inset-inline-start: 70%; } .meter .m90 { inset-inline-start: 90%; }
+.usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.usage-grid div { background: var(--paper); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.usage-grid span { font-size: 12px; color: var(--muted); }
+.usage-grid b { font-family: var(--f-display); font-size: 20px; font-variant-numeric: tabular-nums; }
+.usage-grid small { font-size: 12px; color: var(--muted); }
+.cleanup { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.db-warn { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; line-height: 1.8; }
+.db-warn.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+.db-warn.bad { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); }

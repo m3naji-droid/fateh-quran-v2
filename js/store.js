@@ -122,7 +122,7 @@ const local = {
   async addSubmission(pn, sub, audio) {
     const id = uid();
     const all = LS.get('subs', []);
-    all.push({ ...sub, id, pn, createdAt: now(), hasAudio: !!audio });
+    all.push({ ...sub, id, pn, createdAt: now(), hasAudio: !!audio, audioBytes: audio ? Math.ceil(audio.size * 4 / 3) : 0 });
     LS.set('subs', all);
     if (audio) await idbPut(id, audio);
     return id;
@@ -133,6 +133,10 @@ const local = {
   async getAudio(pn, id) { return idbGet(id); },
   async updateSubmission(pn, id, patch) { const all = LS.get('subs', []); const i = all.findIndex((s) => s.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('subs', all); } },
   async deleteSubmission(pn, id) { LS.set('subs', LS.get('subs', []).filter((s) => s.id !== id)); },
+  async deleteAudio(pn, id) {
+    try { const db = await idb(); await new Promise((res) => { const tx = db.transaction('audio', 'readwrite'); tx.objectStore('audio').delete(id); tx.oncomplete = res; tx.onerror = res; }); } catch {}
+    await this.updateSubmission(pn, id, { hasAudio: false, audioBytes: 0, audioDeletedAt: now() });
+  },
   async getModel() { return LS.get('model', null); },
   async setModel(m) { LS.set('model', m); },
   // لوحة الشرف
@@ -311,14 +315,14 @@ async function makeCloud() {
         const b64 = await blobToB64(audio);
         if (b64.length < 950000) audioDoc = { b64, mime: audio.type };
       }
-      await setDoc(doc(db, 'roster', pn, 'subs', id), { ...sub, pn, createdAt: now(), hasAudio: !!audioDoc });
+      await setDoc(doc(db, 'roster', pn, 'subs', id), { ...sub, pn, createdAt: now(), hasAudio: !!audioDoc, audioBytes: audioDoc ? audioDoc.b64.length : 0 });
       if (audioDoc) await setDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'), audioDoc);
       return id;
     },
     async studentSubmissions(pn) { await ensureAnon(); return list(`roster/${pn}/subs`); },
-    async allSubmissions() { return (await getDocs(query(collectionGroup(db, 'subs'), limit(1000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
+    async allSubmissions() { return (await getDocs(query(collectionGroup(db, 'subs'), limit(10000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     watchSubmissions(cb, onErr) {
-      return onSnapshot(query(collectionGroup(db, 'subs'), limit(1000)), (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr);
+      return onSnapshot(query(collectionGroup(db, 'subs'), limit(10000)), (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr);
     },
     async getAudio(pn, id) {
       const d = await getDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'));
@@ -326,6 +330,11 @@ async function makeCloud() {
     },
     async updateSubmission(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'subs', id), patch); },
     async deleteSubmission(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main')).catch(() => {}); await deleteDoc(doc(db, 'roster', pn, 'subs', id)); },
+    /** حذف التسجيل الصوتي فقط مع إبقاء التسليم ودرجاته */
+    async deleteAudio(pn, id) {
+      await deleteDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'));
+      await updateDoc(doc(db, 'roster', pn, 'subs', id), { hasAudio: false, audioBytes: 0, audioDeletedAt: now() });
+    },
     // نموذج التعلم من تقييمات المعلم (يقرؤه الطلاب، ويكتبه المعلم)
     async getModel() { await ensureAnon(); try { const d = await getDoc(doc(db, 'model', 'tajweed')); return d.exists() ? d.data() : null; } catch { return null; } },
     async setModel(m) { await setDoc(doc(db, 'model', 'tajweed'), m); },

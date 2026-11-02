@@ -1,6 +1,6 @@
 // لوحة الشرف: تحدي الصفوف، وقارئ الصف، وشيخ المرحلة
 // نقاط الطالب = مجموع أفضل درجة له في كل واجب (درجة المعلم إن وُجدت، وإلا الدرجة الآلية من ١٠)
-// نقاط الصف = متوسط نقاط طلابه (من لم يسلّم يُحسب صفراً)، فلا يتفوق صف بكثرة عدده
+// نقاط الصف = مجموع نقاط كل طلابه
 
 const TOP = 5;
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -42,7 +42,7 @@ function period(students, subs, classes) {
   const classRank = classes.map((c) => {
     const members = list.filter((s) => s.classId === c.id);
     const total = members.reduce((n, s) => n + s.points, 0);
-    return { id: c.id, name: c.name, score: members.length ? round1(total / members.length) : 0, students: members.length, active: members.filter((s) => s.points > 0).length };
+    return { id: c.id, name: c.name, score: round1(total), students: members.length, active: members.filter((s) => s.points > 0).length };
   }).filter((c) => c.students).sort((a, b) => b.score - a.score || b.active - a.active);
   return {
     classes: classRank.slice(0, TOP),
@@ -165,7 +165,7 @@ export function boardHtml(p, opts = {}) {
 
   <div class="grid2" style="align-items:start">
     <section class="card lb-card">
-      <div class="lb-head"><h3>تحدي الصفوف</h3><span class="muted small">متوسط نقاط طلاب الصف</span></div>
+      <div class="lb-head"><h3>تحدي الصفوف</h3><span class="muted small">مجموع نقاط طلاب الصف</span></div>
       ${p.classes.length ? `<ol class="lb-list">${p.classes.map((c, i) => `<li class="${c.id === myClass ? 'myclass' : ''} r${i + 1}">${rankBadge(i + 1)}
         <span class="lb-name"><b>${esc(c.name)}</b><small>المشاركون: ${ar(c.active)} من ${ar(c.students)}</small><span class="lb-bar"><i style="width:${Math.max(4, (c.score / top) * 100)}%"></i></span></span>
         <span class="lb-val">${ar(c.score)}</span></li>`).join('')}</ol>` : '<div class="empty small">لا توجد نتائج بعد.</div>'}
@@ -179,6 +179,6 @@ export function boardHtml(p, opts = {}) {
     </section>
   </div>
   <details class="small muted"><summary>كيف تُحسب النقاط؟</summary>
-    <p>في كل واجب تُحسب أفضل محاولة لك فقط: درجة المعلم إن قيّمها، وإلا الدرجة الآلية (من ١٠). نقاطك مجموع درجات واجباتك، فالإتقان والإنجاز معاً يرفعانك. ونقاط الصف متوسط نقاط طلابه، ومن لم يسلّم يُحسب صفراً، فكل طالب يرفع صفه.</p>
+    <p>في كل واجب تُحسب أفضل محاولة لك فقط: درجة المعلم إن قيّمها، وإلا الدرجة الآلية (من ١٠). نقاطك مجموع درجات واجباتك، فالإتقان والإنجاز معاً يرفعانك. ونقاط الصف مجموع نقاط كل طلابه، فكل واجب متقن من أي طالب يرفع صفه.</p>
   </details>`;
 }

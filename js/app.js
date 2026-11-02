@@ -463,6 +463,32 @@ function cheerHtml(score10, { who = 'auto' } = {}) {
     <blockquote>«${esc(hadith.text)}» <small>${esc(hadith.src)}</small></blockquote></div>`;
 }
 
+/* مساحة قاعدة البيانات: تقدير من حجم التسجيلات ومستندات التسليمات */
+const DB_QUOTA = 1024 ** 3; // الحصة المجانية في Firestore: ١ GB
+const fmtBytes = (b) => (b >= 1024 ** 3 ? `${ar((b / 1024 ** 3).toFixed(2).replace('.', '٫'))} GB` : b >= 1024 ** 2 ? `${ar(Math.round(b / 1024 ** 2))} MB` : `${ar(Math.max(1, Math.round(b / 1024)))} KB`);
+function audioBytesOf(x) {
+  if (!x.hasAudio) return 0;
+  if (x.audioBytes) return x.audioBytes;
+  return Math.round((x.duration || 30) * 3400); // تقدير للتسجيلات القديمة: ٢٠ كيلوبت/ث بعد ترميز base64
+}
+const monthsText = (n) => (n === 1 ? 'شهر واحد' : n === 2 ? 'شهرين' : n <= 10 ? `${ar(n)} أشهر` : `${ar(n)} شهراً`);
+function dbUsage(subs, students = []) {
+  let audio = 0, docs = 0, withAudio = 0, recent = 0;
+  const monthAgo = Date.now() - 30 * 864e5;
+  subs.forEach((x) => {
+    const a = audioBytesOf(x);
+    audio += a;
+    if (a) withAudio++;
+    docs += JSON.stringify(x).length + 300;
+    if (new Date(x.createdAt).getTime() > monthAgo) recent += a + JSON.stringify(x).length + 300;
+  });
+  docs += students.length * 1500 + 200 * 1024; // الطلاب والبطاقات والصفوف والواجبات ولوحة الشرف
+  const total = audio + docs;
+  const pct = total / DB_QUOTA;
+  const monthsLeft = recent > 0 ? (DB_QUOTA - total) / recent : null;
+  return { audio, docs, total, pct, withAudio, recent, monthsLeft, level: pct >= 0.9 ? 'bad' : pct >= 0.7 ? 'warn' : 'ok' };
+}
+
 /* لوحة الشرف المشتركة بين الطالب والمعلم */
 function mountBoard(host, board, opts = {}) {
   if (!board) { host.innerHTML = '<div class="empty">لم تُنشر لوحة الشرف بعد. تظهر بعد أن يفتح المعلم لوحته وتُقيَّم أول الواجبات.</div>'; return; }
@@ -902,6 +928,7 @@ function viewTeacher(app) {
         <div><span class="muted small">لوحة المعلم</span><h1>${esc(s.name || 'المعلم')}</h1></div>
         <div class="row"><a class="btn" href="#/practice">معاينة التدريب</a><button class="btn" id="tOut" type="button">تسجيل الخروج</button></div>
       </div>
+      <div id="dbWarn"></div>
       <div class="kpis" id="tKpis"></div>
       <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
@@ -918,7 +945,17 @@ function viewTeacher(app) {
     k.innerHTML = `<div class="kpi"><b>${ar(pending)}</b><span>بانتظار تقييمك</span></div>
       <div class="kpi"><b>${ar(week)}</b><span>تسميع هذا الأسبوع</span></div>
       <div class="kpi"><b>${avg == null ? '—' : ar(avg) + '٪'}</b><span>متوسط الدقة الآلية</span></div>
-      <div class="kpi"><b>${ar(D.students.length)}</b><span>طالباً في ${ar(D.classes.length)} صفوف</span></div>`;
+      <div class="kpi"><b>${ar(D.students.length)}</b><span>طالباً في ${ar(D.classes.length)} صفوف</span></div>
+      ${(() => { const u = dbUsage(D.subs, D.students); return `<button type="button" class="kpi kpi-btn usage-${u.level}" id="kpiDb" title="تفاصيل المساحة">
+        <b>${ar(Math.round(u.pct * 100))}٪</b><span>مساحة قاعدة البيانات (${fmtBytes(u.total)} من ١ GB)</span>
+        <span class="meter"><i style="width:${Math.min(100, Math.max(1, u.pct * 100))}%"></i></span></button>`; })()}`;
+    const kb = $('#kpiDb', app);
+    if (kb) kb.onclick = () => { tab = 'settings'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'settings')); drawBody(); };
+    const u = dbUsage(D.subs, D.students);
+    const warnBox = $('#dbWarn', app);
+    if (warnBox) warnBox.innerHTML = u.level === 'ok' ? '' : `<div class="db-warn ${u.level}" role="alert">
+      <b>${u.level === 'bad' ? 'تنبيه: مساحة قاعدة البيانات شبه ممتلئة' : 'تنبيه: اقتربت مساحة قاعدة البيانات من الامتلاء'} (${ar(Math.round(u.pct * 100))}٪ من ١ GB المجانية).</b>
+      التسجيلات الصوتية تشغل ${fmtBytes(u.audio)}. احذف التسجيلات القديمة من «الإعدادات ← مساحة قاعدة البيانات»، وتبقى الدرجات والتقييمات كما هي.</div>`;
   }
   function drawBody() {
     drawHead();
@@ -1505,7 +1542,30 @@ function viewTeacher(app) {
 
   /* --- الإعدادات --- */
   function drawSettings(body) {
+    const u = dbUsage(D.subs, D.students);
+    const graded = D.subs.filter((x) => x.hasAudio && x.teacher);
     body.innerHTML = `<div class="grid2" style="align-items:start">
+      <div class="card stack usage-card" style="gap:12px;grid-column:1 / -1">
+        <div class="row" style="justify-content:space-between"><h3>مساحة قاعدة البيانات</h3><span class="pill ${u.level}">${ar(Math.round(u.pct * 100))}٪ مستخدمة</span></div>
+        <div class="meter big"><i class="usage-${u.level}" style="width:${Math.min(100, Math.max(1, u.pct * 100))}%"></i><span class="mark m70" title="٧٠٪"></span><span class="mark m90" title="٩٠٪"></span></div>
+        <div class="usage-grid">
+          <div><span>المستخدم</span><b>${fmtBytes(u.total)}</b><small>من ١ GB مجانية</small></div>
+          <div><span>التسجيلات الصوتية</span><b>${fmtBytes(u.audio)}</b><small>${ar(u.withAudio)} تسجيلاً</small></div>
+          <div><span>الدرجات والبيانات</span><b>${fmtBytes(u.docs)}</b><small>صغيرة جداً</small></div>
+          <div><span>آخر ٣٠ يوماً</span><b>${fmtBytes(u.recent)}</b><small>${u.monthsLeft == null ? 'لا نشاط بعد' : u.monthsLeft > 60 ? 'تكفي سنوات بهذا المعدل' : u.monthsLeft <= 0 ? 'تجاوزت الحصة المجانية' : `تكفي نحو ${monthsText(Math.max(1, Math.round(u.monthsLeft)))} بهذا المعدل`}</small></div>
+        </div>
+        <p class="small muted" style="margin:0">الأرقام تقديرية من حجم التسجيلات. بعد ١ GB تحتسب Google رسوماً شهرية صغيرة لكل GB إضافي، ويصلك تنبيه الميزانية إن تجاوزت دولاراً. التسجيل الذي مدته دقيقة يشغل نحو ٢٠٠ KB.</p>
+        <div class="cleanup">
+          <h3>تفريغ المساحة</h3>
+          <p class="small" style="margin:0">يحذف <b>التسجيلات الصوتية فقط</b>. تبقى التسليمات والدرجات والملاحظات وأخطاء التجويد ولوحة الشرف كما هي، ولكن لن تستطيع الاستماع لتلك التسجيلات بعد حذفها.</p>
+          <div class="row" style="align-items:flex-end">
+            <label class="field" style="flex:1 1 200px">احذف تسجيلات
+              <select id="clWhich"><option value="graded">التسليمات التي قيّمتُها (${ar(graded.length)})</option><option value="30">الأقدم من ٣٠ يوماً</option><option value="60">الأقدم من ٦٠ يوماً</option><option value="90">الأقدم من ٩٠ يوماً</option><option value="all">كل التسجيلات</option></select></label>
+            <button class="btn danger" type="button" id="clRun">حذف التسجيلات</button>
+          </div>
+          <div id="clInfo" class="small muted"></div>
+        </div>
+      </div>
       <div class="card stack" style="gap:10px"><h3>حفظ البيانات</h3>
         ${store.mode === 'cloud' ? '<p style="margin:0"><span class="pill ok">سحابي</span> البيانات محفوظة في Firebase وتظهر على كل الأجهزة.</p>' : '<p style="margin:0"><span class="pill warn">محلي</span> البيانات محفوظة في هذا المتصفح فقط. للعمل بين أجهزة الطلاب والمعلم فعّل Firebase (راجع ملف README).</p>'}
       </div>
@@ -1516,6 +1576,23 @@ function viewTeacher(app) {
     </div>`;
     if (aiEnabled()) aiHealth().then((h) => { const el = $('#aiStatus', body); if (el) el.innerHTML = h.model_error ? `<span class="pill bad">خطأ</span> ${esc(h.model_error)}` : h.model_ready ? `<span class="pill ok">جاهز</span> النموذج محمّل على ${esc(h.device)}${h.queue ? `، وفي الانتظار ${ar(h.queue)}` : ''}.` : '<span class="pill warn">يستيقظ</span> النموذج قيد التحميل.'; })
       .catch(() => { const el = $('#aiStatus', body); if (el) el.innerHTML = '<span class="pill warn">لا يستجيب</span> قد يكون الخادم نائماً؛ يستيقظ مع أول تحليل خلال دقيقة أو دقيقتين.'; });
+    const pickAudio = () => {
+      const w = $('#clWhich', body).value;
+      return D.subs.filter((x) => x.hasAudio && (w === 'all' || (w === 'graded' ? !!x.teacher : Date.now() - new Date(x.createdAt).getTime() > +w * 864e5)));
+    };
+    const info = () => { const L = pickAudio(); $('#clInfo', body).textContent = L.length ? `سيُحذف ${ar(L.length)} تسجيلاً، ويتوفر نحو ${fmtBytes(L.reduce((n, x) => n + audioBytesOf(x), 0))}.` : 'لا توجد تسجيلات بهذا الاختيار.'; };
+    $('#clWhich', body).onchange = info;
+    info();
+    $('#clRun', body).onclick = async () => {
+      const L = pickAudio();
+      if (!L.length) return toast('لا توجد تسجيلات بهذا الاختيار.');
+      if (!(await confirmBox(`حذف ${ar(L.length)} تسجيلاً صوتياً؟ تبقى الدرجات والتقييمات، لكن لا يمكن استرجاع الصوت.`, 'حذف التسجيلات'))) return;
+      const { ok, fail } = await runBulk('حذف التسجيلات الصوتية', L, (x) => store.deleteAudio(x.pn, x.id));
+      L.forEach((x) => { x.hasAudio = false; x.audioBytes = 0; });
+      if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
+      toast(fail ? `حُذف ${ar(ok)}، وتعذر ${ar(fail)}.` : `حُذف ${ar(ok)} تسجيلاً وتوفرت المساحة.`);
+      drawBody();
+    };
     const mg = $('#mig', body);
     if (mg) mg.onclick = async () => {
       mg.disabled = true; mg.textContent = 'جارٍ النقل…';
