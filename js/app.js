@@ -22,6 +22,13 @@ const pref = {
   get(k, d) { try { const v = localStorage.getItem('fp_pref_' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('fp_pref_' + k, JSON.stringify(v)); } catch {} },
 };
+// تذكّر كلمة السر على هذا الجهاز (اختياري، بطلب المستخدم)
+const remember = {
+  get(k) { const v = pref.get('rem_' + k, null); if (!v?.p) return null; try { return { ...v, p: decodeURIComponent(escape(atob(v.p))) }; } catch { return null; } },
+  set(k, data, pw) { pref.set('rem_' + k, { ...data, p: btoa(unescape(encodeURIComponent(pw))) }); },
+  clear(k) { try { localStorage.removeItem('fp_pref_rem_' + k); } catch {} },
+};
+const rememberBox = (id, on) => `<label class="row small remember" style="gap:8px;cursor:pointer"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> تذكّر كلمة السر على هذا الجهاز</label>`;
 const timeAgo = (iso) => {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   if (!(m >= 0)) return '';
@@ -710,10 +717,17 @@ navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type =
 
 /* ================= الرئيسية ================= */
 function viewHome(app) {
-  const sample = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7]];
-  const fat = sample.map(([s, a]) => analyzeAyah(ayahWords(s, a)).map(wordHtml).join(' ') + ` <span class="ayah-end">۝${ar(a)}</span>`).join(' ');
+  const feats = [
+    ['🎙️', 'متابعة حية', 'مؤشر يتقدم مع قراءتك، وتلوين فوري للكلمة الصحيحة أو المتروكة.'],
+    ['🙈', 'تسميع غيباً', 'النص مخفي، وتظهر كل كلمة عندما تقرؤها صحيحة، مع زر تلميح.'],
+    ['🎯', 'تصحيح دقيق وصادق', 'مطابقة ذكية تفهم الرسم العثماني، بلا درجات دنيا مصطنعة.'],
+    ['🎨', 'ألوان التجويد آلياً', 'الإخفاء والإدغام والإقلاب والقلقلة والمدود في أي آية.'],
+    ['🎧', `${ar(RECITERS.length)} قارئاً`, 'استماع للآية أو المقطع مع التكرار والتحكم بالسرعة.'],
+    ['🤖', 'تحليل التجويد بالذكاء الاصطناعي', 'المدود والغنة والقلقلة والحركات لكل كلمة، للإعانة لا للاعتماد.'],
+    ['👨‍🏫', 'للمعلم', 'درجة من ١٠ وملاحظات، ونظام يتعلم من تقييماتك، وتقارير بالكلمات الأكثر خطأً، وتصدير Excel.'],
+  ];
   app.innerHTML = `
-  <section class="hero">
+  <section class="hero hero-solo">
     <div>
       <span class="pill">المصحف كاملاً · ١١٤ سورة</span>
       <h1 style="margin-top:12px">اقرأ، ونحن نتابعك كلمةً بكلمة</h1>
@@ -723,20 +737,9 @@ function viewHome(app) {
         <a class="entry" href="#/teacher"><b>لوحة المعلم</b><span>الصفوف والطلاب والواجبات، والاستماع والتقييم والتقارير.</span></a>
       </div>
     </div>
-    <div class="hero-sheet">
-      <div class="sheet-head"><div class="sname" style="font-family:var(--f-quran);font-size:24px;color:var(--gold)">سورة الفاتحة</div></div>
-      <div class="quran tajweed" style="--qsize:26px">${fat}</div>
-      <div class="hero-legend">${['madd_lazim', 'madd_muttasil', 'ghunnah', 'ikhfa', 'idgham_g', 'qalqala', 'silent'].map((k) => `<span><span class="dot" style="background:var(--tj-${k})"></span>${RULES[k].name}</span>`).join('')}</div>
-    </div>
   </section>
   <ul class="feature-list">
-    <li><b>متابعة حية:</b> مؤشر يتقدم مع قراءتك، وتلوين فوري للكلمة الصحيحة أو المتروكة.</li>
-    <li><b>تسميع غيباً:</b> النص مخفي، وتظهر كل كلمة عندما تقرؤها صحيحة، مع زر تلميح.</li>
-    <li><b>تصحيح دقيق وصادق:</b> مطابقة ذكية تفهم الرسم العثماني، بلا درجات دنيا مصطنعة.</li>
-    <li><b>ألوان التجويد آلياً:</b> الإخفاء والإدغام والإقلاب والقلقلة والمدود في أي آية.</li>
-    <li><b>${ar(RECITERS.length)} قارئاً:</b> استماع للآية أو المقطع مع التكرار والتحكم بالسرعة.</li>
-    <li><b>تحليل التجويد بالذكاء الاصطناعي:</b> المدود والغنة والقلقلة والحركات لكل كلمة، للإعانة لا للاعتماد.</li>
-    <li><b>للمعلم:</b> درجة من ١٠ وملاحظات، ونظام يتعلم من تقييماتك، وتقارير بالكلمات الأكثر خطأً، وتصدير Excel.</li>
+    ${feats.map(([i, h, d]) => `<li><span class="fi" aria-hidden="true">${i}</span><span><b>${h}:</b> ${d}</span></li>`).join('')}
   </ul>`;
 }
 
@@ -1081,7 +1084,11 @@ function viewStudent(app) {
       if (n1 !== n2) { err.hidden = false; err.textContent = 'الكلمتان الجديدتان غير متطابقتين.'; return; }
       if (n1 === cur) { err.hidden = false; err.textContent = 'اختر كلمة سر مختلفة عن الحالية.'; return; }
       btn.disabled = true;
-      try { await store.changePassword(me, cur, n1); pwOpen(false); toast('تم تغيير كلمة السر.'); }
+      try {
+        await store.changePassword(me, cur, n1);
+        const rm = remember.get('student'); if (rm && rm.id === me.id) remember.set('student', { classId: rm.classId, id: rm.id }, n1);
+        pwOpen(false); toast('تم تغيير كلمة السر.');
+      }
       catch (x) { err.hidden = false; err.textContent = x.message; }
       btn.disabled = false;
     };
@@ -1293,7 +1300,8 @@ async function studentLogin(app, msg = '') {
   app.innerHTML = '<div class="loading">جارٍ التحميل…</div>';
   let classes = [];
   try { classes = sortClasses(await store.listClasses()); } catch (e) { app.innerHTML = `<div class="empty">تعذر تحميل الصفوف: ${esc(e.message)}</div>`; return; }
-  const last = pref.get('lastLogin', {});
+  const rem = remember.get('student');
+  const last = rem ? { classId: rem.classId, id: rem.id } : pref.get('lastLogin', {});
   app.innerHTML = `<div class="card auth stack">
     <h2>دخول الطالب</h2>
     ${msg ? `<div class="notice">${esc(msg)}</div>` : ''}
@@ -1301,7 +1309,8 @@ async function studentLogin(app, msg = '') {
       <label class="field">الصف<select id="slClass" required><option value="">اختر صفك</option>${classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
       <label class="field">الاسم<select id="slName" required disabled><option value="">اختر صفك أولاً</option></select></label>
       <label class="field">كلمة السر
-        <span class="row" style="gap:6px;flex-wrap:nowrap"><input type="password" id="slPw" inputmode="numeric" autocomplete="current-password" required style="flex:1"><button class="btn sm" type="button" id="slEye" aria-label="إظهار كلمة السر">إظهار</button></span></label>
+        <span class="row" style="gap:6px;flex-wrap:nowrap"><input type="text" id="slUser" name="username" autocomplete="username" hidden><input type="password" id="slPw" name="password" inputmode="numeric" autocomplete="current-password" required style="flex:1"><button class="btn sm" type="button" id="slEye" aria-label="إظهار كلمة السر">إظهار</button></span></label>
+      ${rememberBox('slRem', !!rem)}
       <div id="slErr" class="notice" hidden></div>
       <button class="btn primary" type="submit">دخول</button>
     </form>
@@ -1319,8 +1328,19 @@ async function studentLogin(app, msg = '') {
         : '<option value="">لا يوجد طلاب في هذا الصف بعد</option>';
       N.disabled = !list.length;
       if (selectId && list.some((x) => x.id === selectId)) N.value = selectId;
+      fillPw();
     } catch (e) { N.innerHTML = '<option value="">تعذر تحميل الأسماء</option>'; }
   };
+  // تعبئة كلمة السر المحفوظة إن كان الاسم المختار هو صاحبها
+  const fillPw = () => {
+    $('#slUser', app).value = N.value ? `${C.value}/${N.value}` : '';
+    const r = remember.get('student');
+    if (r && r.classId === C.value && r.id === N.value) { P.value = r.p; $('#slRem', app).checked = true; }
+    else if (P.dataset.auto) P.value = '';
+    P.dataset.auto = r && r.id === N.value ? '1' : '';
+  };
+  N.onchange = fillPw;
+  $('#slRem', app).onchange = (e) => { if (!e.target.checked) { remember.clear('student'); toast('لن تُحفظ كلمة السر على هذا الجهاز.'); } };
   C.onchange = () => loadNames();
   $('#slEye', app).onclick = (e) => { const show = P.type === 'password'; P.type = show ? 'text' : 'password'; e.target.textContent = show ? 'إخفاء' : 'إظهار'; };
   if (last.classId && classes.some((c) => c.id === last.classId)) { C.value = last.classId; loadNames(last.id); }
@@ -1331,6 +1351,8 @@ async function studentLogin(app, msg = '') {
     try {
       const student = await store.studentSignIn(C.value, N.value, latinDigits(P.value).trim());
       pref.set('lastLogin', { classId: C.value, id: N.value });
+      if ($('#slRem', app).checked) remember.set('student', { classId: C.value, id: N.value }, latinDigits(P.value).trim());
+      else remember.clear('student');
       session.set({ role: 'student', student });
       render();
     } catch (err) {
@@ -2092,14 +2114,16 @@ function viewTeacher(app) {
     try { secrets = await store.listCards(); } catch (e) { $('#modalBody').innerHTML = `<div class="notice">تعذر قراءة كلمات السر: ${esc(e.code || e.message)}. تأكد من نشر قواعد الحماية الجديدة.</div>`; return; }
     const clsName = (id) => D.classes.find((c) => c.id === id)?.name || '';
     const siteUrl = location.origin + location.pathname;
+    const videoUrl = new URL('promo/', location.origin + location.pathname.replace(/[^/]*$/, '')).href;
     $('#modalBody').innerHTML = `<div class="stack">
       <h2>بطاقات دخول الطلاب</h2>
       <div class="row" style="align-items:flex-end">
         <label class="field" style="flex:1 1 180px">الصف<select id="cdCls">${ids ? '<option value="sel">الطلاب المحددون</option>' : ''}<option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
         <label class="row small" style="gap:6px;flex:1 1 220px"><input type="checkbox" id="cdSkip" checked> استبعاد من غيّروا كلمة السر</label>
       </div>
+      <label class="row small" style="gap:6px"><input type="checkbox" id="cdVid" ${pref.get('cardVideo', true) ? 'checked' : ''}> إضافة رمز «فيديو الشرح» بجانب رمز الدخول 🎬</label>
       <label class="field">ملاحظات تظهر في كل بطاقة<textarea id="cdNotes" rows="3">${esc(pref.get('cardNotes', DEFAULT_NOTES))}</textarea></label>
-      <div class="small muted">رابط الموقع في رمز QR: <span dir="ltr">${esc(siteUrl)}</span></div>
+      <div class="small muted">رابط الموقع في رمز QR: <span dir="ltr">${esc(siteUrl)}</span><br>رابط فيديو الشرح: <a href="${esc(videoUrl)}" target="_blank" rel="noopener" dir="ltr">${esc(videoUrl)}</a></div>
       <div id="cdInfo" class="small"></div>
       <div class="row"><button class="btn primary" type="button" id="cdPdf">تنزيل PDF</button><button class="btn" type="button" id="cdPrint">طباعة</button><span id="cdProg" class="small muted"></span></div>
       <div id="cdPrev" class="cards-prev"></div></div>`;
@@ -2112,7 +2136,7 @@ function viewTeacher(app) {
         .filter((x) => !(skip && !x.password))
         .sort((a, b) => a.className.localeCompare(b.className, 'ar', { numeric: true }) || a.name.localeCompare(b.name, 'ar'));
     };
-    const opts = () => ({ url: siteUrl, notes: $('#cdNotes', m).value.trim(), title: 'مقرأة الفاتح' });
+    const opts = () => ({ url: siteUrl, videoUrl: $('#cdVid', m).checked ? videoUrl : null, notes: $('#cdNotes', m).value.trim(), title: 'مقرأة الفاتح' });
     let tm;
     const preview = async () => {
       const cards = pick();
@@ -2126,6 +2150,7 @@ function viewTeacher(app) {
     };
     $('#cdCls', m).onchange = preview;
     $('#cdSkip', m).onchange = preview;
+    $('#cdVid', m).onchange = (e) => { pref.set('cardVideo', e.target.checked); preview(); };
     $('#cdNotes', m).oninput = () => { pref.set('cardNotes', $('#cdNotes', m).value); clearTimeout(tm); tm = setTimeout(preview, 500); };
     const run = async (kind) => {
       const cards = pick();
@@ -2637,22 +2662,31 @@ function viewTeacher(app) {
 async function teacherLogin(app) {
   const st = await store.teacherState();
   const cloud = store.mode === 'cloud';
+  const rem = remember.get('teacher');
   app.innerHTML = `<div class="card auth stack">
     <h2>دخول المعلم</h2>
     <p class="muted" style="margin:0">${cloud ? 'ادخل بالبريد وكلمة المرور لحساب المعلم في Firebase.' : st.hasPassword ? 'أدخل كلمة مرور المعلم.' : 'أول دخول: اختر اسمك وكلمة مرور لحماية لوحة المعلم على هذا الجهاز.'}</p>
     <form id="tlForm" class="stack" style="gap:12px">
       ${cloud ? '<label class="field">البريد الإلكتروني<input type="email" id="tlU" autocomplete="username" required></label>' : st.hasPassword ? '' : '<label class="field">اسم المعلم<input type="text" id="tlU" required></label>'}
-      <label class="field">كلمة المرور<input type="password" id="tlP" autocomplete="current-password" minlength="4" required></label>
+      <label class="field">كلمة المرور
+        <span class="row" style="gap:6px;flex-wrap:nowrap"><input type="password" id="tlP" name="password" autocomplete="current-password" minlength="4" required style="flex:1"><button class="btn sm" type="button" id="tlEye" aria-label="إظهار كلمة المرور">إظهار</button></span></label>
+      ${rememberBox('tlRem', !!rem)}
       <div id="tlErr" class="notice" hidden></div>
       <button class="btn primary" type="submit">دخول</button>
     </form>
   </div>`;
+  const TP = $('#tlP', app);
+  if (rem) { TP.value = rem.p; if (cloud && $('#tlU', app)) $('#tlU', app).value = rem.u || ''; }
+  $('#tlEye', app).onclick = (e) => { const show = TP.type === 'password'; TP.type = show ? 'text' : 'password'; e.target.textContent = show ? 'إخفاء' : 'إظهار'; };
+  $('#tlRem', app).onchange = (e) => { if (!e.target.checked) { remember.clear('teacher'); toast('لن تُحفظ كلمة المرور على هذا الجهاز.'); } };
   $('#tlForm', app).onsubmit = async (e) => {
     e.preventDefault();
     const btn = e.submitter; btn.disabled = true;
     const box = $('#tlErr', app); box.hidden = true;
     try {
       const r = await store.teacherSignIn($('#tlU', app)?.value || '', $('#tlP', app).value);
+      if ($('#tlRem', app).checked) remember.set('teacher', { u: cloud ? $('#tlU', app)?.value || '' : '' }, TP.value);
+      else remember.clear('teacher');
       session.set({ role: 'teacher', name: r.name });
       render();
     } catch (err) {

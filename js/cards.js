@@ -1,4 +1,4 @@
-// بطاقات دخول الطلاب: ٨ بطاقات في صفحة A4، كل بطاقة فيها رمز QR للموقع وملاحظات واسم الطالب وكلمة سره.
+// بطاقات دخول الطلاب: ٨ بطاقات في صفحة A4، كل بطاقة فيها رمز QR للموقع (ورمز فيديو الشرح اختيارياً) وملاحظات واسم الطالب وكلمة سره.
 // الرسم على canvas مباشرة (لا لقطة HTML) حتى تتصل الحروف العربية بشكل صحيح في PDF.
 
 export const LIBS = {
@@ -75,6 +75,75 @@ function drawQR(ctx, qr, x, y, size) {
   }
 }
 
+// تصميم بطاقة فيها رمزان: رمز الدخول للموقع، ورمز فيديو طريقة الاستخدام
+function drawCard2(ctx, x, y, card, opts, qr, qrVid) {
+  const w = CARD_W, h = CARD_H, pad = 22;
+  ctx.save();
+  roundRect(ctx, x, y, w, h, 18);
+  ctx.fillStyle = C.paper; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = C.gold; ctx.stroke();
+  roundRect(ctx, x + 7, y + 7, w - 14, h - 14, 13);
+  ctx.lineWidth = 1; ctx.strokeStyle = C.line; ctx.stroke();
+  roundRect(ctx, x + 7, y + 7, w - 14, 58, 13);
+  ctx.save(); ctx.clip(); ctx.fillStyle = C.green; ctx.fillRect(x + 7, y + 7, w - 14, 58); ctx.restore();
+  ctx.direction = 'rtl'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'right';
+  ctx.font = `700 28px ${FONT}`;
+  ctx.fillText(opts.title, x + w - pad, y + 37);
+  ctx.textAlign = 'left'; ctx.font = `500 20px ${FONT}`;
+  ctx.fillText(card.className || '', x + pad, y + 37);
+
+  const right = x + w - pad, full = w - pad * 2;
+  // الاسم (عرض كامل)
+  ctx.textAlign = 'right'; ctx.fillStyle = C.muted; ctx.font = `500 17px ${FONT}`;
+  ctx.fillText('اسم الطالب', right, y + 88);
+  ctx.fillStyle = C.ink; fitText(ctx, card.name, 700, 30, full);
+  ctx.fillText(card.name, right, y + 120);
+  // كلمة السر: العنوان على اليمين والمربع بجانبه
+  ctx.fillStyle = C.muted; ctx.font = `500 17px ${FONT}`;
+  ctx.fillText('كلمة السر', right, y + 180);
+  const lblW = ctx.measureText('كلمة السر').width + 16;
+  const boxW = Math.min(300, full - lblW), boxH = 56, boxX = right - lblW - boxW, boxY = y + 152;
+  roundRect(ctx, boxX, boxY, boxW, boxH, 10);
+  ctx.fillStyle = C.box; ctx.fill(); ctx.strokeStyle = C.line; ctx.stroke();
+  ctx.fillStyle = C.ink; ctx.textAlign = 'center';
+  if (card.password) {
+    ctx.direction = 'ltr'; ctx.font = `700 38px ui-monospace, 'Courier New', monospace`;
+    ctx.fillText(card.password.split('').join(' '), boxX + boxW / 2, boxY + boxH / 2 + 2);
+    ctx.direction = 'rtl';
+  } else { ctx.font = `500 18px ${FONT}`; ctx.fillText('غيّرها الطالب بنفسه', boxX + boxW / 2, boxY + boxH / 2); }
+
+  // فاصل خفيف
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x + pad, y + 226); ctx.lineTo(right, y + 226); ctx.stroke();
+
+  // الرمزان في الأسفل يساراً
+  const qs = 112, gap = 14, qy = y + 238;
+  const q1x = x + pad + qs + gap, q2x = x + pad; // رمز الدخول أقرب إلى النص، ورمز الفيديو في الطرف
+  drawQR(ctx, qr, q1x, qy, qs);
+  drawQR(ctx, qrVid, q2x, qy, qs);
+  // شارة تشغيل صغيرة في وسط رمز الفيديو
+  const cx = q2x + qs / 2, cy = qy + qs / 2, rr = 13;
+  ctx.beginPath(); ctx.arc(cx, cy, rr + 3, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fillStyle = C.green; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx - 4, cy - 6.5); ctx.lineTo(cx + 7, cy); ctx.lineTo(cx - 4, cy + 6.5); ctx.closePath(); ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.textAlign = 'center'; ctx.font = `600 15px ${FONT}`;
+  ctx.fillStyle = C.green; ctx.fillText('امسح للدخول', q1x + qs / 2, qy + qs + 15);
+  ctx.fillStyle = C.gold; ctx.fillText('فيديو الشرح', q2x + qs / 2, qy + qs + 15);
+
+  // الملاحظات على يمين الرمزين
+  const nW = full - (qs * 2 + gap) - 18;
+  ctx.textAlign = 'right'; ctx.fillStyle = C.ink; ctx.font = `400 15px ${FONT}`;
+  const top = qy + 6, lh = 20, maxLines = Math.floor((y + h - 30 - top) / lh) + 1;
+  const lines = wrap(ctx, opts.notes, nW).slice(0, maxLines);
+  lines.forEach((l, i) => ctx.fillText(l, right, top + i * lh));
+  // رابط الموقع صغيراً أسفل الملاحظات
+  const shortUrl = opts.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  ctx.direction = 'ltr'; ctx.fillStyle = C.muted; let us = 13; ctx.font = `500 ${us}px ${FONT}`;
+  while (ctx.measureText(shortUrl).width > nW && us > 9) { us--; ctx.font = `500 ${us}px ${FONT}`; }
+  ctx.textAlign = 'right'; ctx.fillText(shortUrl, right, qy + qs + 15);
+  ctx.restore();
+}
+
 function drawCard(ctx, x, y, card, opts, qr) {
   const w = CARD_W, h = CARD_H, pad = 22;
   // الإطار
@@ -143,6 +212,8 @@ export async function renderPages(cards, opts) {
   const qr = window.qrcode(0, 'M');
   qr.addData(opts.url);
   qr.make();
+  let qrVid = null;
+  if (opts.videoUrl) { qrVid = window.qrcode(0, 'Q'); qrVid.addData(opts.videoUrl); qrVid.make(); }
   const pages = [];
   for (let p = 0; p < cards.length; p += PER_PAGE) {
     const cv = document.createElement('canvas');
@@ -159,7 +230,7 @@ export async function renderPages(cards, opts) {
       // الترتيب من اليمين إلى اليسار
       const x = PAGE_W - MARGIN - (col + 1) * CARD_W - col * GAP;
       const y = MARGIN + row * (CARD_H + GAP);
-      drawCard(ctx, x, y, card, opts, qr);
+      if (qrVid) drawCard2(ctx, x, y, card, opts, qr, qrVid); else drawCard(ctx, x, y, card, opts, qr);
     });
     pages.push(cv);
   }

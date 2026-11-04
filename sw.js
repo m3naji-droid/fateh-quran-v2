@@ -1,7 +1,7 @@
 // عامل الخدمة: يجعل المقرأة قابلة للتثبيت كتطبيق، ويفتح الصفحة من الذاكرة إن انقطع الاتصال.
 // الشبكة أولاً دائماً لملفات الموقع حتى تصل التحديثات فوراً؛ والذاكرة احتياط فقط.
 // لا يتدخل في طلبات Firebase وخادم التجويد والقرّاء (نطاقات أخرى).
-const CACHE = 'maqraa-v3';
+const CACHE = 'maqraa-v4';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -13,6 +13,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // الفيديو يُطلب على أجزاء (Range) ولا يُخزَّن: نتركه للمتصفح مباشرة
+  if (req.headers.has('range') || /\.(mp4|webm|mov)$/i.test(url.pathname)) return;
   e.respondWith(
     // يتحقق من الخادم كل مرة فتصل التحديثات فوراً (طلب الصفحة نفسها يُعاد بنائه برابطه)
     fetch(req.mode === 'navigate' ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : new Request(req, { cache: 'no-cache' }))
