@@ -1424,7 +1424,7 @@ function viewTeacher(app) {
         const wantNotify = $('#gNotify', m).checked && prevTotal !== teacher.total;
         try {
           await store.updateSubmission(x.pn, x.id, patch);
-          if (wantNotify) notifyGrade(x, teacher, prevTotal).then((r) => r && toast(r)).catch((err) => console.warn(err));
+          if (wantNotify) notifyGrade(x, teacher, prevTotal).then((r) => r && setTimeout(() => toast(r), 1200)).catch((err) => { console.warn(err); setTimeout(() => toast('تعذر إرسال تنبيه الدرجة: ' + (err.code || err.message)), 1200); });
           Object.assign(x, patch);
           closeModal();
           if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
@@ -1475,7 +1475,9 @@ function viewTeacher(app) {
     const id = await store.addStudentNotif(x.pn, n);
     try {
       const r = await sendPush(id, x.pn);
-      return r && r.sent ? `وصل إشعار الدرجة إلى جوال ${x.studentName || 'الطالب'}.` : '';
+      if (!r) return '';
+      const who = x.studentName || 'الطالب';
+      return r.sent ? `وصل إشعار الدرجة إلى جوال ${who}.` : r.already ? '' : `ظهرت الدرجة لـ${who} في الموقع. لم يصل إشعار للجوال لأنه لم يفعّل الإشعارات على جهازه بعد.`;
     } catch (e) { return `تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر للطالب في الموقع.`; }
   }
   /** يحفظ التنبيه (للجرس) ثم يطلب إرساله إلى الجوالات */
@@ -1486,7 +1488,7 @@ function viewTeacher(app) {
     const id = await store.addNotif({ ...n, classId: t.classId, taskId: t.id, link: `./#/student/task/${t.id}`, tag: 'task-' + t.id });
     try {
       const r = await sendPush(id);
-      return r ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}` : '';
+      return !r ? '' : r.sent ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}` : '، ولم يفعّل أحد من طلاب الصف إشعارات الجوال بعد';
     } catch (e) { console.warn(e); return `. تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر في الموقع`; }
   }
   function drawTasks(body) {
