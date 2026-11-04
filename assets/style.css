@@ -358,3 +358,11 @@ tr.picked td { background: var(--green-2); }
 .db-warn { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; line-height: 1.8; }
 .db-warn.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
 .db-warn.bad { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); }
+
+/* تثبيت التطبيق */
+.install-card { background: linear-gradient(160deg, var(--green-2), var(--card)); }
+.install-ico { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--green); color: #fff; }
+.install-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; align-self: flex-start; }
+.install-steps { margin: 0; padding-inline-start: 0; list-style: none; counter-reset: st; display: grid; gap: 10px; }
+.install-steps li { counter-increment: st; display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; line-height: 1.8; }
+.install-steps li::before { content: counter(st, arabic-indic); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--green); color: #fff; font-weight: 700; font-size: 14px; }

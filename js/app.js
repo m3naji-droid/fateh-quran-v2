@@ -4,6 +4,7 @@ import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API } from './firebase-config.js';
+import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge } from './leaderboard.js';
@@ -602,6 +603,7 @@ function render() {
   current = fn(app) || null;
 }
 addEventListener('hashchange', render);
+registerSW();
 
 /* ================= الرئيسية ================= */
 function viewHome(app) {
@@ -664,6 +666,33 @@ function viewPractice(app) {
 let studentStartTab = null;
 
 /* ================= الطالب ================= */
+function installStepsHtml(p) {
+  const share = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="vertical-align:-3px"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12M8 7l4-4 4 4M6 11H5v10h14V11h-1"/></svg>';
+  const plus = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="vertical-align:-3px"><rect x="4" y="4" width="16" height="16" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  const steps = p.ios
+    ? [
+        p.inApp ? 'افتح المقرأة في متصفح <b>Safari</b> (من القائمة ⋯ اختر «فتح في Safari»).' : null,
+        `اضغط زر <b>المشاركة</b> ${share} أسفل الشاشة (أو أعلاها في الآيباد). إن لم تجده فاضغط <b>⋯</b> ثم «مشاركة».`,
+        `مرّر للأسفل واختر <b>«إضافة إلى الشاشة الرئيسية»</b> ${plus}.`,
+        'اضغط <b>«إضافة»</b> أعلى الشاشة. ستظهر أيقونة المقرأة بجانب تطبيقاتك.',
+      ].filter(Boolean)
+    : p.android
+      ? [
+          'افتح المقرأة في متصفح <b>Chrome</b> (أو Samsung Internet).',
+          'اضغط القائمة <b>⋮</b> أعلى الشاشة (في Samsung Internet: <b>≡</b> أسفلها).',
+          'اختر <b>«تثبيت التطبيق»</b> أو <b>«إضافة إلى الشاشة الرئيسية»</b>.',
+          'اضغط <b>«تثبيت»</b>. ستظهر أيقونة المقرأة بجانب تطبيقاتك.',
+        ]
+      : [
+          'في Chrome أو Edge: اضغط أيقونة التثبيت في نهاية شريط العنوان، أو القائمة ⋮ ثم «تثبيت مقرأة الفاتح».',
+          'على الجوال يكون التثبيت أسهل: امسح رمز بطاقتك أو افتح الرابط من جوالك ثم اضغط هذا الزر.',
+        ];
+  return `<div class="stack"><h2>ثبّت المقرأة على ${p.ios ? 'الآيفون' : p.android ? 'جوالك' : 'جهازك'}</h2>
+    <ol class="install-steps">${steps.map((t) => `<li><span>${t}</span></li>`).join('')}</ol>
+    <p class="small muted" style="margin:0">بعدها افتح المقرأة من أيقونتها، وادخل مرة واحدة فقط؛ يبقى دخولك محفوظاً.</p>
+    <div class="row"><button class="btn primary" type="button" data-close>حسناً</button></div></div>`;
+}
+
 function viewStudent(app) {
   const s = session.get();
   if (!s || s.role !== 'student') return studentLogin(app);
@@ -721,7 +750,7 @@ function viewStudent(app) {
       <div class="page-head">
         <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1>
           ${me.rankInfo?.month?.stage === 1 ? `<span class="title-pill">${rankBadge(1)} شيخ المرحلة هذا الشهر</span>` : me.rankInfo?.month?.cls === 1 ? `<span class="title-pill">${rankBadge(1)} قارئ الصف هذا الشهر</span>` : ''}</div>
-        <div class="row"><button class="btn" id="stPw" type="button">تغيير كلمة السر</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
+        <div class="row"><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis">
         <div class="kpi"><b>${ar(doneTasks.size)}/${ar(data.tasks.length)}</b><span>واجبات منجزة</span></div>
@@ -730,29 +759,10 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>`;
     $('#stOut', app).onclick = async () => { await store.signOut(); session.set(null); render(); };
-    $('#stPw', app).onclick = () => openModal(`<form id="pwF" class="stack" style="gap:12px"><h2>تغيير كلمة السر</h2>
-      <label class="field">كلمة السر الحالية<input type="password" id="pwC" autocomplete="current-password" required></label>
-      <label class="field">كلمة السر الجديدة (٦ خانات على الأقل)<input type="password" id="pwN" autocomplete="new-password" minlength="6" required></label>
-      <label class="field">أعد كتابة الجديدة<input type="password" id="pwN2" autocomplete="new-password" minlength="6" required></label>
-      <div id="pwErr" class="notice" hidden></div>
-      <p class="small muted" style="margin:0">احفظ كلمتك الجديدة جيداً. إن نسيتها فاطلب من معلمك كلمة سر جديدة.</p>
-      <button class="btn primary" type="submit">حفظ</button></form>`, (m) => {
-      $('#pwF', m).onsubmit = async (e) => {
-        e.preventDefault();
-        const err = $('#pwErr', m), btn = e.submitter;
-        const cur = latinDigits($('#pwC', m).value).trim(), n1 = latinDigits($('#pwN', m).value).trim(), n2 = latinDigits($('#pwN2', m).value).trim();
-        err.hidden = true;
-        if (n1.length < 6) { err.hidden = false; err.textContent = 'كلمة السر الجديدة يجب أن تكون ٦ خانات على الأقل.'; return; }
-        if (n1 !== n2) { err.hidden = false; err.textContent = 'الكلمتان الجديدتان غير متطابقتين.'; return; }
-        btn.disabled = true;
-        try { await store.changePassword(me, cur, n1); closeModal(); toast('تم تغيير كلمة السر.'); }
-        catch (x) { err.hidden = false; err.textContent = x.message; btn.disabled = false; }
-      };
-    });
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
     if (tab === 'tasks') drawTasks(body, doneTasks);
@@ -760,6 +770,66 @@ function viewStudent(app) {
     if (tab === 'notebook') drawNotebook(body);
     if (tab === 'practice') drawPractice(body);
     if (tab === 'honor') drawHonor(body);
+    if (tab === 'settings') drawStSettings(body);
+  }
+
+  /* --- إعدادات الطالب: تثبيت التطبيق وكلمة السر --- */
+  let offInstall = null;
+  function drawStSettings(body) {
+    const cls = data.classes.find((c) => c.id === me.classId);
+    body.innerHTML = `<div class="grid2" style="align-items:start">
+      <div class="card stack install-card" id="instCard" style="gap:12px"></div>
+      <form class="card stack" id="pwF" style="gap:12px">
+        <h3>كلمة السر</h3>
+        <p class="small muted" style="margin:0">حسابك: <b>${esc(me.name)}</b>${cls ? ` · ${esc(cls.name)}` : ''}</p>
+        <label class="field">كلمة السر الحالية<input type="password" id="pwC" autocomplete="current-password" inputmode="numeric" required></label>
+        <label class="field">كلمة السر الجديدة (٦ خانات على الأقل)<input type="password" id="pwN" autocomplete="new-password" minlength="6" required></label>
+        <label class="field">أعد كتابة الجديدة<input type="password" id="pwN2" autocomplete="new-password" minlength="6" required></label>
+        <label class="row small" style="gap:6px"><input type="checkbox" id="pwShow"> إظهار كلمات السر</label>
+        <div id="pwErr" class="notice" hidden></div>
+        <p class="small muted" style="margin:0">احفظ كلمتك الجديدة جيداً ولا تعطها لأحد. إن نسيتها فاطلب من معلمك كلمة سر جديدة.</p>
+        <button class="btn primary" type="submit">حفظ كلمة السر</button>
+      </form>
+    </div>`;
+    $('#pwShow', body).onchange = (e) => ['#pwC', '#pwN', '#pwN2'].forEach((q) => ($(q, body).type = e.target.checked ? 'text' : 'password'));
+    $('#pwF', body).onsubmit = async (e) => {
+      e.preventDefault();
+      const err = $('#pwErr', body), btn = e.submitter;
+      const cur = latinDigits($('#pwC', body).value).trim(), n1 = latinDigits($('#pwN', body).value).trim(), n2 = latinDigits($('#pwN2', body).value).trim();
+      err.hidden = true;
+      if (n1.length < 6) { err.hidden = false; err.textContent = 'كلمة السر الجديدة يجب أن تكون ٦ خانات على الأقل.'; return; }
+      if (n1 !== n2) { err.hidden = false; err.textContent = 'الكلمتان الجديدتان غير متطابقتين.'; return; }
+      if (n1 === cur) { err.hidden = false; err.textContent = 'اختر كلمة سر مختلفة عن الحالية.'; return; }
+      btn.disabled = true;
+      try { await store.changePassword(me, cur, n1); $('#pwF', body).reset(); toast('تم تغيير كلمة السر.'); }
+      catch (x) { err.hidden = false; err.textContent = x.message; }
+      btn.disabled = false;
+    };
+    drawInstall(body);
+    offInstall?.();
+    offInstall = onInstallChange(() => { if (tab === 'settings') drawInstall(body); });
+  }
+
+  function drawInstall(body) {
+    const host = $('#instCard', body); if (!host) return;
+    const p = platform();
+    const phone = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 3v13h8V5H8zm4 14.2a1 1 0 1 0 0 .01z"/></svg>';
+    host.innerHTML = `<div class="row" style="gap:10px"><span class="install-ico">${phone}</span><h3 style="margin:0">المقرأة تطبيقاً على جوالك</h3></div>
+      ${p.standalone
+        ? '<p style="margin:0"><span class="pill ok">مثبّت</span> أنت تستخدم المقرأة الآن كتطبيق. تجدها في الشاشة الرئيسية لجوالك.</p>'
+        : `<p class="small" style="margin:0">ضع أيقونة المقرأة على الشاشة الرئيسية لجوالك، فتفتحها بلمسة كأي تطبيق، بشاشة كاملة ودون كتابة الرابط. لا يحتاج متجر التطبيقات، ولا يأخذ مساحة تُذكر.</p>
+          ${p.ios && p.inApp ? '<div class="notice small">أنت تفتح المقرأة من داخل تطبيق آخر (مثل واتساب). افتحها في متصفح <b>Safari</b> أولاً: اضغط ⋯ أو أيقونة البوصلة ثم «فتح في Safari».</div>' : ''}
+          <button class="btn primary install-btn" type="button" id="instBtn">${phone} ثبّت التطبيق</button>
+          <p class="small muted" style="margin:0">${p.ios ? 'على الآيفون والآيباد: يعرض لك الزر الخطوات (ثلاث لمسات)، لأن Apple لا تسمح بالتثبيت المباشر من المواقع.' : p.canPrompt ? 'يعمل على أندرويد والحاسوب: تظهر نافذة التثبيت فاضغط «تثبيت».' : 'إن لم تظهر نافذة التثبيت، يعرض لك الزر الخطوات حسب متصفحك.'}</p>`}`;
+    const btn = $('#instBtn', host);
+    if (btn) btn.onclick = async () => {
+      if (platform().canPrompt) {
+        const r = await promptInstall();
+        if (r === 'accepted') toast('تم التثبيت. تجد المقرأة في الشاشة الرئيسية.');
+        return;
+      }
+      openModal(installStepsHtml(platform()));
+    };
   }
 
   async function drawHonor(body) {
