@@ -155,6 +155,23 @@ const local = {
   async listNotifs(classId, pn) { const from = Date.now() - NOTIF_DAYS * 864e5; return LS.get('notifs', []).filter((n) => (n.classId === 'all' || n.classId === classId || (pn && n.classId === 'stu:' + pn) || classId === '*') && new Date(n.createdAt).getTime() > from); },
   watchNotifs(classId, cb, pn) { this.listNotifs(classId, pn).then(cb); const h = (e) => { if (e.key === 'fp_notifs') this.listNotifs(classId, pn).then(cb); }; addEventListener('storage', h); return () => removeEventListener('storage', h); },
   async cleanupNotifs() { const from = Date.now() - NOTIF_DAYS * 864e5; LS.set('notifs', LS.get('notifs', []).filter((n) => new Date(n.createdAt).getTime() > from)); },
+  // الإعلانات (محلياً تُنشر من المتصفح نفسه، ولا إشعارات جوال)
+  async saveAnnouncement(a) { const all = LS.get('anns', []); const id = a.id || uid(); const i = all.findIndex((x) => x.id === id); const doc = { ...(i >= 0 ? all[i] : { createdAt: now() }), ...a, id }; if (i >= 0) all[i] = doc; else all.push(doc); LS.set('anns', all); return id; },
+  async listAnnouncements() { return LS.get('anns', []); },
+  async publishAnnouncementLocal(id) {
+    const all = LS.get('anns', []); const a = all.find((x) => x.id === id); if (!a || a.status === 'sent') return;
+    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, link: './#/student/ann/' + id, tag: 'ann-' + id };
+    const t = a.target || { type: 'all' };
+    if (t.type === 'student') await this.addNotif({ ...n, classId: 'stu:' + t.studentId, studentId: t.studentId });
+    else for (const cid of t.type === 'classes' ? t.classIds : ['all']) await this.addNotif({ ...n, classId: cid });
+    a.status = 'sent'; a.sentAt = now(); LS.set('anns', all);
+  },
+  async deleteAnnouncement(a) { LS.set('anns', LS.get('anns', []).filter((x) => x.id !== a.id)); LS.set('notifs', LS.get('notifs', []).filter((n) => n.annId !== a.id)); },
+  async markAnnRead(aid, pn) { const r = LS.get('annReads', {}); (r[aid] = r[aid] || {})[pn] = now(); LS.set('annReads', r); },
+  async listAnnReads(aid) { return Object.keys(LS.get('annReads', {})[aid] || {}); },
+  async getCronStatus() { return null; },
+  async getNotifySettings() { return LS.get('notifySettings', {}); },
+  async setNotifySettings(v) { LS.set('notifySettings', { ...LS.get('notifySettings', {}), ...v }); },
   async pushToken() { return null; },
   async savePushToken() {},
   async deletePushToken() {},
@@ -409,6 +426,19 @@ async function makeCloud() {
       for (const d of old) await deleteDoc(d.ref).catch(() => {});
       return old.length;
     },
+    // الإعلانات: ينشرها خادم الإشعارات (فوراً أو في موعدها)
+    async saveAnnouncement(a) { const id = a.id || uid(); const { id: _, ...rest } = a; await setDoc(doc(db, 'announcements', id), a.id ? rest : { ...rest, createdAt: now() }, { merge: true }); return id; },
+    async listAnnouncements() { return list('announcements'); },
+    async publishAnnouncementLocal() {},
+    async deleteAnnouncement(a) {
+      for (const p of a.notifPaths || []) await deleteDoc(doc(db, p)).catch(() => {});
+      await deleteDoc(doc(db, 'announcements', a.id));
+    },
+    async markAnnRead(aid, pn) { await setDoc(doc(db, 'announcements', aid, 'reads', pn), { at: now() }).catch(() => {}); },
+    async listAnnReads(aid) { return (await getDocs(collection(db, 'announcements', aid, 'reads'))).docs.map((d) => d.id); },
+    async getCronStatus() { const d = await getDoc(doc(db, 'settings', 'cron')); return d.exists() ? d.data() : null; },
+    async getNotifySettings() { const d = await getDoc(doc(db, 'settings', 'notify')).catch(() => null); return d?.exists() ? d.data() : {}; },
+    async setNotifySettings(v) { await setDoc(doc(db, 'settings', 'notify'), v, { merge: true }); },
     // الإشعارات على الجوال (Firebase Cloud Messaging)
     async pushToken(vapidKey, registration) {
       const m = await import(`${base}/firebase-messaging.js`);

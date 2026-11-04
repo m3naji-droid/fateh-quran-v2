@@ -67,6 +67,19 @@ export async function testNotification() {
   await reg.showNotification('مقرأة الفاتح', { body: 'الإشعارات تعمل على جهازك. سيصلك كل واجب جديد هنا.', icon: 'assets/icons/icon-192.png', badge: 'assets/icons/icon-192.png', dir: 'rtl', lang: 'ar', tag: 'test' });
 }
 
+/** ينشر إعلاناً عبر الخادم، أو يعيد إرسال إشعاره لطلاب بأعينهم (من لم يقرأ) */
+export async function sendAnnouncement(annId, resend = null) {
+  if (!PUSH.url || store.mode !== 'cloud') { if (!resend) await store.publishAnnouncementLocal(annId); return null; }
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/announce', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify(resend ? { ann: annId, resend } : { ann: annId }),
+  });
+  if (!res.ok) { let m = ''; try { m = (await res.json()).detail; } catch {} throw new Error(m || 'تعذر الإرسال (' + res.status + ').'); }
+  return res.json();
+}
+
 /** يطلب من خادم الإشعارات إرسال تنبيه محفوظ إلى أجهزة صفه. يعيد {sent, failed} أو null إن لم يُعدّ الخادم */
 export async function sendPush(notifId, student = null) {
   if (!PUSH.url || store.mode !== 'cloud') return null;

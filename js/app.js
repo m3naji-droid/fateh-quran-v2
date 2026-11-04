@@ -5,7 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, pushConfigured } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendAnnouncement, pushConfigured } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge } from './leaderboard.js';
@@ -666,6 +666,7 @@ function render() {
   current?.destroy?.();
   current = null;
   $('#tip-pop')?.remove();
+  if (!$('#modal').hidden) closeModal(); // لا تبقى نافذة صفحة سابقة مفتوحة
   const r = location.hash.replace(/^#\/?/, '').split('/')[0];
   const fn = routes[r] || viewHome;
   $('#nav').innerHTML = [['', 'الرئيسية'], ['student', 'الطالب'], ['teacher', 'المعلم']]
@@ -783,7 +784,8 @@ function viewStudent(app) {
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/(task|grade|retake)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann)\/([\w-]+)/);
+  let openAnnId = deep && deep[1] === 'ann' ? deep[2] : null;
   let openRetakeId = deep && deep[1] === 'retake' ? deep[2] : null;
   let openTaskId = deep && deep[1] === 'task' ? deep[2] : null;
   let openSubId = deep && deep[1] === 'grade' ? deep[2] : null;
@@ -805,6 +807,29 @@ function viewStudent(app) {
     const row = i >= 0 && $(`tr[data-i="${i}"]`, app);
     if (row) row.click(); else toast('هذا التسليم لم يعد موجوداً.');
   }
+  const ackKey = 'annAck_' + me.id;
+  const anns = () => notifs.filter((n) => n.type === 'ann').sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  function ackAnn(aid) {
+    const acked = new Set(pref.get(ackKey, []));
+    if (!acked.has(aid)) { acked.add(aid); pref.set(ackKey, [...acked].slice(-200)); store.markAnnRead(aid, me.id).catch(() => {}); }
+    paintAnnBar();
+  }
+  function paintAnnBar() {
+    const host = $('#annBar', app); if (!host) return;
+    const acked = new Set(pref.get(ackKey, []));
+    const L = anns().filter((n) => !acked.has(n.annId));
+    host.innerHTML = L.slice(0, 3).map((n) => `<div class="ann-bar" role="status"><span class="ann-ico">📢</span>
+      <div class="ann-tx"><b>${esc((n.title || '').replace(/^📢\s*/, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></div>
+      <button class="btn sm primary" type="button" data-ack="${esc(n.annId)}">فهمت</button></div>`).join('');
+    $$('[data-ack]', host).forEach((b) => (b.onclick = () => ackAnn(b.dataset.ack)));
+  }
+  function openAnn(aid) {
+    const n = anns().find((x) => x.annId === aid);
+    if (!n) return toast('هذا الإعلان لم يعد موجوداً.');
+    openModal(`<div class="stack"><h2>📢 ${esc((n.title || '').replace(/^📢\s*/, ''))}</h2><p style="margin:0;white-space:pre-wrap;line-height:2">${esc(n.body || '')}</p>
+      <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row"><button class="btn primary" type="button" data-close>فهمت</button></div></div>`);
+    ackAnn(aid);
+  }
   function openBell() {
     const seen = pref.get(seenKey, '');
     const L = [...notifs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -812,14 +837,15 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^🎉\s*/, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
         const n = notifs.find((x) => x.id === b.dataset.nid);
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
+        if (n?.type === 'ann') { openAnn(n.annId); return; }
         if (n?.type === 'retake') { store.listRetakes(me.id).then((L) => { data.retakes = L; startRetake(n.retakeId); }).catch(() => startRetake(n.retakeId)); return; }
         const t = n?.taskId && data.tasks.find((x) => x.id === n.taskId);
         if (t) { tab = 'tasks'; openTask(t); } else if (n?.taskId) toast('هذا الواجب لم يعد موجوداً.');
@@ -856,7 +882,8 @@ function viewStudent(app) {
         if ($('#stBody', app)) { draw(); announceGrades(); }
       }
       const first = !notifs.length && !paintBell.done;
-      notifs = L; paintBell(); paintBell.done = true;
+      notifs = L; paintBell(); paintBell.done = true; paintAnnBar();
+      if (openAnnId && anns().some((n) => n.annId === openAnnId)) { const id = openAnnId; openAnnId = null; openAnn(id); }
       const onList = $('#stBody', app) && tab === 'tasks';
       // واجب جديد وصل والطالب على صفحة الواجبات: نحدّث القائمة
       if (L.some((n) => n.taskId && !data.tasks.some((t) => t.id === n.taskId))) {
@@ -907,13 +934,14 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi"><b>${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
+      <div id="annBar"></div>
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>`;
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell();
+    paintBell(); paintAnnBar();
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
@@ -1288,7 +1316,7 @@ function viewTeacher(app) {
       </div>
       <div id="dbWarn"></div>
       <div class="kpis" id="tKpis"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     $('#tOut', app).onclick = async () => { unsub?.(); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
@@ -1331,7 +1359,7 @@ function viewTeacher(app) {
   function drawBody() {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
-    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, honor: drawHonorT, reports: drawReports, settings: drawSettings })[tab](body);
+    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, honor: drawHonorT, reports: drawReports, settings: drawSettings })[tab](body);
   }
 
   /* --- التسليمات --- */
@@ -1542,6 +1570,143 @@ function viewTeacher(app) {
   }
 
   /* --- الواجبات --- */
+  /* --- الإعلانات والتذكير --- */
+  let notifySettings = { eveTime: '19:00' };
+  store.getNotifySettings().then((v) => { notifySettings = { ...notifySettings, ...v }; }).catch(() => {});
+  function remindTimeLabel() { const [h, m] = (notifySettings.eveTime || '19:00').split(':').map(Number); return ar(`${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}`) + (h >= 12 ? ' مساءً' : ' صباحاً'); }
+  const annTargetLabel = (t) => !t || t.type === 'all' ? 'كل الصفوف' : t.type === 'classes' ? (t.classIds || []).map(className).join('، ') : `${D.students.find((x) => x.id === t.studentId)?.name || 'طالب'} (${className(D.students.find((x) => x.id === t.studentId)?.classId)})`;
+  const annRecipients = (t) => !t || t.type === 'all' ? D.students : t.type === 'classes' ? D.students.filter((x) => (t.classIds || []).includes(x.classId)) : D.students.filter((x) => x.id === t.studentId);
+  const whenText = (iso) => { try { return ar(new Date(iso).toLocaleString('ar', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })); } catch { return iso; } };
+  async function drawAnn(body) {
+    const first = D.classes[0]?.id || '';
+    const today = new Date(); const pad = (n) => String(n).padStart(2, '0');
+    const d0 = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    body.innerHTML = `<div class="grid2" style="align-items:start">
+      <form class="card stack" id="anForm" style="gap:12px">
+        <h3>📢 إعلان جديد</h3>
+        <label class="field">العنوان (اختياري)<input type="text" id="anTitle" maxlength="80" placeholder="مثال: تنبيه مهم"></label>
+        <label class="field">نص الإعلان<textarea id="anBody" maxlength="500" required placeholder="مثال: لا تسميع غداً بسبب الاختبارات، ونكمل يوم الأحد بإذن الله."></textarea></label>
+        <fieldset class="seg-field"><legend>لمن؟</legend>
+          <label><input type="radio" name="anT" value="all" checked> كل الصفوف</label>
+          <label><input type="radio" name="anT" value="classes"> صفوف محددة</label>
+          <label><input type="radio" name="anT" value="student"> طالب بعينه</label>
+        </fieldset>
+        <div id="anCls" class="chk-grid" hidden>${D.classes.map((c) => `<label><input type="checkbox" value="${esc(c.id)}"> ${esc(c.name)}</label>`).join('')}</div>
+        <div id="anStu" class="row" hidden>
+          <label class="field" style="flex:1 1 160px">الصف<select id="anStuC">${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="field" style="flex:2 1 200px">الطالب<select id="anStuS"></select></label>
+        </div>
+        <fieldset class="seg-field"><legend>متى يُرسل؟</legend>
+          <label><input type="radio" name="anW" value="now" checked> الآن</label>
+          <label><input type="radio" name="anW" value="later"> في موعد محدد</label>
+        </fieldset>
+        <div id="anLater" class="row" hidden>
+          <label class="field" style="flex:1 1 150px">اليوم<input type="date" id="anDate" value="${d0}" min="${d0}"></label>
+          <label class="field" style="flex:1 1 120px">الساعة<input type="time" id="anTime" value="07:00"></label>
+        </div>
+        <p class="small muted" style="margin:0">يظهر الإعلان للطلاب شريطاً أعلى صفحتهم وفي الجرس، ويصل إشعاراً إلى جوالات من فعّلها. الإعلان المجدول يُرسل خلال ١٠ دقائق من موعده.</p>
+        <button class="btn primary" type="submit">أرسل الإعلان</button>
+      </form>
+      <div class="stack">
+        <div class="card stack" style="gap:10px"><h3>⏰ تذكير الواجبات</h3>
+          <p class="small" style="margin:0">في كل واجب له موعد، يمكنك تفعيل تذكير مساء اليوم السابق للموعد (من نموذج الواجب). اختر هنا ساعة التذكير:</p>
+          <div class="row"><input type="time" id="evT" value="${esc(notifySettings.eveTime || '19:00')}" style="max-width:150px"><button class="btn" type="button" id="evSave">حفظ</button></div>
+          <div class="small muted" id="cronStat"></div>
+        </div>
+        <div class="stack" id="anList"><div class="loading">جارٍ تحميل الإعلانات…</div></div>
+      </div>
+    </div>`;
+    const fillStu = () => { const c = $('#anStuC', body).value; $('#anStuS', body).innerHTML = D.students.filter((x) => x.classId === c).sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(''); };
+    if (first) { $('#anStuC', body).value = first; fillStu(); }
+    $('#anStuC', body).onchange = fillStu;
+    $$('[name=anT]', body).forEach((r) => (r.onchange = () => { const v = $('[name=anT]:checked', body).value; $('#anCls', body).hidden = v !== 'classes'; $('#anStu', body).hidden = v !== 'student'; }));
+    $$('[name=anW]', body).forEach((r) => (r.onchange = () => { $('#anLater', body).hidden = $('[name=anW]:checked', body).value !== 'later'; }));
+    $('#evSave', body).onclick = async () => {
+      const v = $('#evT', body).value || '19:00';
+      try { await store.setNotifySettings({ eveTime: v }); notifySettings.eveTime = v; toast(`سيصل تذكير الواجبات الساعة ${remindTimeLabel()} من اليوم السابق للموعد.`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    };
+    $('#anForm', body).onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = e.submitter;
+      const tt = $('[name=anT]:checked', body).value;
+      const target = tt === 'classes' ? { type: 'classes', classIds: $$('#anCls input:checked', body).map((x) => x.value) } : tt === 'student' ? { type: 'student', studentId: $('#anStuS', body).value } : { type: 'all' };
+      if (tt === 'classes' && !target.classIds.length) return toast('اختر صفاً واحداً على الأقل.');
+      if (tt === 'student' && !target.studentId) return toast('اختر الطالب.');
+      const later = $('[name=anW]:checked', body).value === 'later';
+      let sendAt = null;
+      if (later) {
+        const when = new Date(`${$('#anDate', body).value}T${$('#anTime', body).value || '07:00'}`);
+        if (isNaN(when) || when < Date.now()) return toast('اختر موعداً في المستقبل.');
+        sendAt = when.toISOString();
+      }
+      btn.disabled = true;
+      try {
+        const id = await store.saveAnnouncement({ title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length });
+        if (later) toast(`جُدول الإعلان ليُرسل ${whenText(sendAt)}.`);
+        else { const r = await sendAnnouncement(id); toast(`أُرسل الإعلان${r && r.sent ? `، ووصل إشعار إلى ${ar(r.sent)} ${r.sent === 1 ? 'جهاز' : r.sent <= 10 ? 'أجهزة' : 'جهازاً'}` : ''}.`); }
+        drawAnn(body);
+      } catch (x) { toast('تعذر الإرسال: ' + (x.code || x.message)); btn.disabled = false; }
+    };
+    // حالة المؤقت (Cloud Scheduler): آخر مرة استيقظ فيها
+    if (store.mode === 'cloud') store.getCronStatus().then((c) => {
+      const el = $('#cronStat', body); if (!el) return;
+      const age = c?.lastRun ? (Date.now() - new Date(c.lastRun)) / 60000 : null;
+      el.innerHTML = age == null ? '<span class="pill warn">المؤقت غير مفعّل</span> لن تُرسل الإعلانات المجدولة ولا التذكيرات حتى يُضبط المؤقت في Google Cloud Scheduler.'
+        : age < 25 ? `<span class="pill ok">المؤقت يعمل</span> آخر فحص ${esc(timeAgo(c.lastRun))}.` : `<span class="pill bad">المؤقت متوقف</span> آخر فحص ${esc(timeAgo(c.lastRun))}. تحقق من Cloud Scheduler.`;
+    }).catch(() => {});
+    // القائمة
+    let L = [];
+    try { L = await store.listAnnouncements(); } catch (e) { $('#anList', body).innerHTML = `<div class="empty">تعذر التحميل: ${esc(e.code || e.message)}</div>`; return; }
+    if (store.mode === 'local') { // لا مؤقت في الوضع المحلي: ننشر المستحق عند فتح الصفحة
+      for (const a of L.filter((x) => x.status === 'scheduled' && x.sendAt <= new Date().toISOString())) await store.publishAnnouncementLocal(a.id);
+      L = await store.listAnnouncements();
+    }
+    L.sort((a, b) => (b.sentAt || b.sendAt || b.createdAt || '').localeCompare(a.sentAt || a.sendAt || a.createdAt || ''));
+    const host = $('#anList', body); if (!host) return;
+    host.innerHTML = L.length ? L.slice(0, 30).map((a) => `<div class="card ann-item" data-an="${esc(a.id)}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start"><div><b>${esc(a.title || 'إعلان من معلمك')}</b><div class="small muted">إلى: ${esc(annTargetLabel(a.target))}</div></div>
+        ${a.status === 'scheduled' ? `<span class="pill warn">مجدول · ${esc(whenText(a.sendAt))}</span>` : a.status === 'sent' ? `<span class="pill ok">أُرسل ${esc(timeAgo(a.sentAt) === 'الآن' ? 'للتو' : timeAgo(a.sentAt))}</span>` : '<span class="pill mute">لم يُرسل</span>'}</div>
+      <p style="margin:6px 0;white-space:pre-wrap">${esc(a.body)}</p>
+      <div class="row" style="justify-content:space-between">
+        <span class="small" data-reads="${esc(a.id)}">${a.status === 'sent' ? 'جارٍ عدّ القراءات…' : ''}</span>
+        <span class="row" style="gap:4px">${a.status === 'scheduled' || a.status === 'pending' ? `<button class="btn sm" type="button" data-now="${esc(a.id)}">أرسل الآن</button>` : `<button class="btn sm" type="button" data-unread="${esc(a.id)}">من لم يقرأ؟</button>`}<button class="btn sm danger" type="button" data-andel="${esc(a.id)}">${a.status === 'scheduled' ? 'إلغاء' : 'حذف'}</button></span>
+      </div></div>`).join('') : '<div class="empty">لم ترسل أي إعلان بعد.</div>';
+    const reads = {};
+    L.filter((a) => a.status === 'sent').slice(0, 30).forEach(async (a) => {
+      try {
+        const r = new Set(await store.listAnnReads(a.id));
+        const rec = annRecipients(a.target);
+        reads[a.id] = { read: rec.filter((x) => r.has(x.id)), unread: rec.filter((x) => !r.has(x.id)) };
+        const el = $(`[data-reads="${a.id}"]`, host);
+        if (el) el.innerHTML = `<b>قرأه ${ar(reads[a.id].read.length)} من ${ar(rec.length)}</b>`;
+      } catch { const el = $(`[data-reads="${a.id}"]`, host); if (el) el.textContent = ''; }
+    });
+    $$('[data-now]', host).forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try { await store.saveAnnouncement({ id: b.dataset.now, status: 'pending' }); const r = await sendAnnouncement(b.dataset.now); toast(`أُرسل الإعلان${r && r.sent ? `، ووصل إلى ${ar(r.sent)} جهازاً` : ''}.`); drawAnn(body); }
+      catch (e) { toast('تعذر الإرسال: ' + e.message); b.disabled = false; }
+    }));
+    $$('[data-andel]', host).forEach((b) => (b.onclick = async () => {
+      const a = L.find((x) => x.id === b.dataset.andel);
+      if (!(await confirmBox(a.status === 'scheduled' ? 'إلغاء هذا الإعلان المجدول؟' : 'حذف هذا الإعلان؟ يختفي من صفحات الطلاب (الإشعار الذي وصل الجوال لا يُسحب).', a.status === 'scheduled' ? 'إلغاء الإعلان' : 'حذف'))) return;
+      await store.deleteAnnouncement(a); toast('حُذف الإعلان.'); drawAnn(body);
+    }));
+    $$('[data-unread]', host).forEach((b) => (b.onclick = () => {
+      const a = L.find((x) => x.id === b.dataset.unread), r = reads[a.id];
+      if (!r) return toast('انتظر حتى يكتمل العدّ.');
+      openModal(`<div class="stack"><h2>من لم يقرأ الإعلان؟</h2><p class="muted" style="margin:0">قرأه ${ar(r.read.length)} من ${ar(r.read.length + r.unread.length)}.</p>
+        ${r.unread.length ? `<ul class="name-list">${r.unread.map((x) => `<li>${esc(x.name)} <span class="muted small">${esc(className(x.classId))}</span></li>`).join('')}</ul>
+        <button class="btn primary" type="button" id="anResend">🔔 أعد إرسال الإشعار لهؤلاء (${ar(r.unread.length)})</button>` : '<div class="pill ok">قرأه الجميع. بارك الله فيهم.</div>'}</div>`, (m) => {
+        const rs = $('#anResend', m);
+        if (rs) rs.onclick = async () => {
+          rs.disabled = true;
+          try { const x = await sendAnnouncement(a.id, r.unread.map((u) => u.id)); closeModal(); toast(x ? (x.sent ? `أُعيد الإشعار إلى ${ar(x.sent)} جهازاً.` : 'لم يفعّل هؤلاء الطلاب إشعارات الجوال، والإعلان ظاهر لهم في الموقع.') : 'الإشعارات على الجوال غير مفعّلة في الوضع المحلي.'); }
+          catch (e) { toast('تعذر الإرسال: ' + e.message); rs.disabled = false; }
+        };
+      });
+    }));
+  }
+
   let editTask = null; // الواجب الجاري تعديله
   const dueText = (d) => { try { return new Date(d + 'T12:00').toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/\d/g, (x) => ar(x)); } catch { return d; } };
   const taskNotifBody = (t) => `${rangeLabel(t.surah, t.from, t.to)} · ${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'} · ${t.due ? 'التسليم ' + dueText(t.due) : 'بلا موعد محدد'}`;
@@ -1633,6 +1798,8 @@ function viewTeacher(app) {
           <label class="field" style="flex:1 1 140px">آخر موعد<input type="date" id="tkDue"></label>
         </div>
         <label class="field">تعليمات للطلاب (اختياري)<input type="text" id="tkNotes" placeholder="مثال: ركّز على أحكام النون الساكنة"></label>
+        <div class="remind-opt"><label class="row small" style="gap:8px"><input type="checkbox" id="tkRemind" ${E ? (E.remindEve ? 'checked' : '') : 'checked'}> <span>⏰ ذكّر الطلاب مساء اليوم السابق للموعد <span class="muted">(الساعة ${esc(remindTimeLabel())}، يحتاج موعداً)</span></span></label>
+          <select id="tkRemindT" aria-label="لمن التذكير"><option value="pending">لمن لم يسلّم فقط</option><option value="all" ${E?.remindTarget === 'all' ? 'selected' : ''}>لكل طلاب الصف</option></select></div>
         <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="tkNotify" checked> <span>${E ? 'أشعر الطلاب بالتعديل <span class="muted">(يُرسل فقط إن تغيّر الموعد أو الآيات)</span>' : 'أرسل إشعاراً للطلاب <span class="muted">(في الجرس داخل الموقع، وعلى جوالات من فعّلها)</span>'}</span></label>
         <div class="row"><button class="btn primary" type="submit">${E ? 'حفظ التعديل' : 'إضافة الواجب'}</button>${E ? '<button class="btn" type="button" id="tkCancel">إلغاء التعديل</button>' : ''}</div>
       </form>
@@ -1651,6 +1818,8 @@ function viewTeacher(app) {
       const btn = e.submitter; btn.disabled = true;
       const r = readRange();
       const t = { title: $('#tkTitle', body).value.trim(), ...r, classId: $('#tkClass', body).value, mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() };
+      t.remindEve = $('#tkRemind', body).checked && !!t.due;
+      t.remindTarget = $('#tkRemindT', body).value;
       const wantNotify = $('#tkNotify', body).checked;
       try {
         if (E) {

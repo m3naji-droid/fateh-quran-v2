@@ -413,3 +413,17 @@ tr.grp td { background: var(--green-2); color: var(--green); padding-block: 8px;
 .retake-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; border: 2px solid var(--gold); background: linear-gradient(160deg, var(--gold-soft), var(--card)); }
 .retake-info { padding: 8px 12px; border-radius: 10px; background: var(--gold-soft); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .gold-pill { background: var(--gold-soft); color: var(--gold); }
+
+/* الإعلانات */
+.ann-bar { display: flex; gap: 12px; align-items: center; padding: 12px 14px; margin-bottom: 10px; border-radius: 14px; border: 2px solid var(--gold); background: linear-gradient(160deg, var(--gold-soft), var(--card)); }
+.ann-ico { font-size: 22px; flex: none; }
+.ann-tx { flex: 1; display: grid; gap: 2px; } .ann-tx span { white-space: pre-wrap; line-height: 1.8; }
+.seg-field { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.seg-field legend { font-weight: 600; margin-bottom: 4px; width: 100%; }
+.seg-field label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.chk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.chk-grid label { display: inline-flex; gap: 6px; align-items: center; }
+.ann-item p { line-height: 1.9; }
+.name-list { margin: 0; padding-inline-start: 20px; max-height: 45vh; overflow: auto; line-height: 2; }
+.remind-opt { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 10px; background: var(--green-2); }
+.remind-opt select { max-width: 200px; }

@@ -1,12 +1,16 @@
 """خادم إشعارات مقرأة الفاتح (Google Cloud Run).
 
-يستقبل من المعلم معرّف تنبيه محفوظ في Firestore (notifs/{id})، فيرسله إشعاراً
-إلى أجهزة طلاب الصف المسجلة في pushTokens عبر Firebase Cloud Messaging.
-نص الإشعار يُقرأ من قاعدة البيانات لا من الطلب، فلا يستطيع أحد إرسال نص من عنده.
+- /send      : يرسل تنبيهاً محفوظاً (notifs/{id} لصف، أو roster/{طالب}/notifs/{id}) إلى أجهزة أصحابه.
+- /announce  : ينشر إعلاناً كتبه المعلم (announcements/{id}) في جرس الطلاب ويرسله إلى جوالاتهم.
+- /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات.
+نص الإشعار يُقرأ دائماً من قاعدة البيانات لا من الطلب، فلا يستطيع أحد إرسال نص من عنده.
 """
 from __future__ import annotations
 
+import datetime as dt
+import hmac
 import os
+from zoneinfo import ZoneInfo
 
 import firebase_admin
 from fastapi import FastAPI, Header, HTTPException
@@ -18,6 +22,8 @@ PROJECT = os.environ.get("FIREBASE_PROJECT", "quran-c16c8")
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS", "https://m3naji-droid.github.io,http://localhost:8000,http://127.0.0.1:8000"
 ).split(",") if o.strip()]
+CRON_SECRET = os.environ.get("CRON_SECRET", "")
+TZ = ZoneInfo(os.environ.get("SCHOOL_TZ", "Asia/Riyadh"))
 
 firebase_admin.initialize_app(options={"projectId": PROJECT})
 db = firestore.client()
@@ -27,6 +33,19 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=
 
 # رموز الأجهزة التي لم تعد صالحة (حُذف التطبيق أو أُلغي الإذن) نحذفها
 DEAD = (messaging.UnregisteredError, messaging.SenderIdMismatchError)
+AR_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+DAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+
+
+def now_iso() -> str:
+    """نفس صيغة toISOString في المتصفح، ليقارن الموقع التواريخ نصياً."""
+    t = dt.datetime.now(dt.timezone.utc)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
+
+
+def where(q, field, op, value):
+    return q.where(filter=firestore.FieldFilter(field, op, value))
 
 
 def teacher_uid(authorization: str | None) -> str:
@@ -42,16 +61,22 @@ def teacher_uid(authorization: str | None) -> str:
     return uid
 
 
-def targets(class_id: str, student: str | None = None) -> list:
-    q = db.collection("pushTokens").where(filter=firestore.FieldFilter("role", "==", "student"))
-    if student:
-        q = q.where(filter=firestore.FieldFilter("studentId", "==", student))
-    elif class_id and class_id != "all":
-        q = q.where(filter=firestore.FieldFilter("classId", "==", class_id))
-    return list(q.stream())
+# ------------------------------------------------------------ الإرسال
+def tokens_for(class_id: str | None = None, students: list[str] | None = None) -> list:
+    """أجهزة الطلاب: لطلاب بأعينهم، أو لصف، أو للجميع."""
+    base = where(db.collection("pushTokens"), "role", "==", "student")
+    if students is not None:
+        out = []
+        ids = sorted(set(students))
+        for i in range(0, len(ids), 30):  # حد «in» في Firestore
+            out += list(where(base, "studentId", "in", ids[i:i + 30]).stream())
+        return out
+    if class_id and class_id != "all":
+        base = where(base, "classId", "==", class_id)
+    return list(base.stream())
 
 
-def send_to(docs: list, n: dict) -> dict:
+def push(docs: list, n: dict) -> dict:
     data = {k: str(n.get(k) or "") for k in ("title", "body", "link", "tag")}
     sent = failed = removed = 0
     for i in range(0, len(docs), 500):
@@ -73,31 +98,173 @@ def send_to(docs: list, n: dict) -> dict:
     return {"sent": sent, "failed": failed, "removed": removed}
 
 
+def add(stats: dict, r: dict) -> dict:
+    return {k: stats.get(k, 0) + r.get(k, 0) for k in ("sent", "failed", "removed")}
+
+
+def notif_ref(notif: str, student: str | None):
+    if student:
+        return db.collection("roster").document(student).collection("notifs").document(notif)
+    return db.collection("notifs").document(notif)
+
+
+# ------------------------------------------------------------ الإعلانات
+def publish_announcement(aid: str) -> dict:
+    """ينشئ تنبيهات الإعلان في جرس الطلاب ويرسل الإشعارات. يعمل مرة واحدة لكل إعلان."""
+    ref = db.collection("announcements").document(aid)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "الإعلان غير موجود.")
+    a = snap.to_dict()
+    if a.get("status") == "sent":
+        return {"sent": 0, "failed": 0, "removed": 0, "already": True}
+    n = {
+        "type": "ann", "annId": aid,
+        "title": "📢 " + (a.get("title") or "إعلان من معلمك"),
+        "body": a.get("body", ""),
+        "link": "./#/student/ann/" + aid, "tag": "ann-" + aid,
+        "createdAt": now_iso(),
+    }
+    t = a.get("target") or {"type": "all"}
+    paths, stats = [], {"sent": 0, "failed": 0, "removed": 0}
+    if t.get("type") == "student" and t.get("studentId"):
+        pn = t["studentId"]
+        r = db.collection("roster").document(pn).collection("notifs").document("ann-" + aid)
+        r.set({**n, "studentId": pn})
+        paths.append(r.path)
+        stats = push(tokens_for(students=[pn]), n)
+    else:
+        classes = ["all"] if t.get("type") != "classes" else (t.get("classIds") or [])
+        for cid in classes:
+            r = db.collection("notifs").document(f"ann-{aid}-{cid}")
+            r.set({**n, "classId": cid})
+            paths.append(r.path)
+            stats = add(stats, push(tokens_for(class_id=cid), n))
+    ref.update({"status": "sent", "sentAt": n["createdAt"], "notifPaths": paths, "push": stats})
+    return stats
+
+
+def resend_announcement(aid: str, students: list[str]) -> dict:
+    a = db.collection("announcements").document(aid).get()
+    if not a.exists:
+        raise HTTPException(404, "الإعلان غير موجود.")
+    a = a.to_dict()
+    n = {"title": "📢 تذكير: " + (a.get("title") or "إعلان من معلمك"), "body": a.get("body", ""),
+         "link": "./#/student/ann/" + aid, "tag": "ann-" + aid}
+    return push(tokens_for(students=students), n) if students else {"sent": 0, "failed": 0, "removed": 0}
+
+
+# ------------------------------------------------------------ تذكيرات الواجبات
+def students_of(class_id: str) -> list[str]:
+    q = db.collection("roster") if class_id in (None, "", "all") else where(db.collection("roster"), "classId", "==", class_id)
+    return [d.id for d in q.stream()]
+
+
+def submitted(pn: str, task_id: str) -> bool:
+    subs = db.collection("roster").document(pn).collection("subs")
+    return any(True for _ in where(subs, "taskId", "==", task_id).limit(1).stream())
+
+
+def day_label(due: str) -> str:
+    try:
+        d = dt.date.fromisoformat(due)
+        return f"{DAYS[d.weekday()]} {d.day} {MONTHS[d.month - 1]}".translate(AR_DIGITS)
+    except Exception:
+        return due
+
+
+def run_reminders(local: dt.datetime) -> list[dict]:
+    """تذكير مساء اليوم السابق لموعد التسليم، في الوقت الذي يضبطه المعلم."""
+    cfg = db.collection("settings").document("notify").get()
+    cfg = cfg.to_dict() if cfg.exists else {}
+    eve = cfg.get("eveTime", "19:00")
+    if local.strftime("%H:%M") < eve:
+        return []
+    tomorrow = (local.date() + dt.timedelta(days=1)).isoformat()
+    done = []
+    for d in where(db.collection("tasks"), "remindEve", "==", True).stream():
+        t = d.to_dict()
+        if t.get("due") != tomorrow or (t.get("remindSent") or {}).get("eve") == t.get("due"):
+            continue
+        cid = t.get("classId") or "all"
+        title = t.get("title") or "واجب"
+        link = "./#/student/task/" + d.id
+        stats = {"sent": 0, "failed": 0, "removed": 0}
+        if t.get("remindTarget") == "all":
+            n = {"type": "remind", "taskId": d.id, "title": f"⏰ تذكير: واجب «{title}» غداً",
+                 "body": f"موعد التسليم {day_label(t['due'])}. لا تؤجّل، وتدرّب قبل التسجيل.",
+                 "link": link, "tag": "remind-" + d.id, "createdAt": now_iso(), "classId": cid}
+            db.collection("notifs").document(f"remind-{d.id}").set(n)
+            stats = push(tokens_for(class_id=cid), n)
+            count = len(students_of(cid))
+        else:
+            pending = [pn for pn in students_of(cid) if not submitted(pn, d.id)]
+            n = {"type": "remind", "taskId": d.id, "title": f"⏰ تذكير: واجب «{title}» غداً",
+                 "body": f"لم تسلّمه بعد. موعد التسليم {day_label(t['due'])}، فلا تؤجّل.",
+                 "link": link, "tag": "remind-" + d.id, "createdAt": now_iso()}
+            for pn in pending:
+                db.collection("roster").document(pn).collection("notifs").document(f"remind-{d.id}").set({**n, "studentId": pn})
+            if pending:
+                stats = push(tokens_for(students=pending), n)
+            count = len(pending)
+        d.reference.update({"remindSent": {"eve": t["due"], "at": now_iso(), "students": count, **stats}})
+        done.append({"task": d.id, "students": count, **stats})
+    return done
+
+
+# ------------------------------------------------------------ الواجهات
 class SendReq(BaseModel):
     notif: str
     student: str | None = None  # تنبيه خاص بطالب واحد (roster/{student}/notifs/{notif})
 
 
+class AnnReq(BaseModel):
+    ann: str
+    resend: list[str] | None = None  # إعادة الإشعار لهؤلاء الطلاب فقط (من لم يقرأ)
+
+
 @app.get("/")
 @app.get("/health")
 def health():
-    return {"ok": True, "project": PROJECT}
+    return {"ok": True, "project": PROJECT, "cron": bool(CRON_SECRET)}
 
 
 @app.post("/send")
 def send(req: SendReq, authorization: str | None = Header(None)):
     teacher_uid(authorization)
-    if req.student:
-        ref = db.collection("roster").document(req.student).collection("notifs").document(req.notif)
-    else:
-        ref = db.collection("notifs").document(req.notif)
+    ref = notif_ref(req.notif, req.student)
     snap = ref.get()
     if not snap.exists:
         raise HTTPException(404, "التنبيه غير موجود.")
     n = snap.to_dict()
     if n.get("pushedAt"):
         return {"sent": 0, "failed": 0, "removed": 0, "already": True}
-    docs = targets(n.get("classId", "all"), req.student)
-    r = send_to(docs, n) if docs else {"sent": 0, "failed": 0, "removed": 0}
+    docs = tokens_for(students=[req.student]) if req.student else tokens_for(class_id=n.get("classId", "all"))
+    r = push(docs, n) if docs else {"sent": 0, "failed": 0, "removed": 0}
     ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
     return r
+
+
+@app.post("/announce")
+def announce(req: AnnReq, authorization: str | None = Header(None)):
+    teacher_uid(authorization)
+    if req.resend is not None:
+        return resend_announcement(req.ann, req.resend)
+    return publish_announcement(req.ann)
+
+
+@app.post("/cron")
+def cron(x_cron_secret: str | None = Header(None)):
+    if not CRON_SECRET or not x_cron_secret or not hmac.compare_digest(x_cron_secret, CRON_SECRET):
+        raise HTTPException(403, "غير مسموح.")
+    now = now_iso()
+    anns = []
+    for d in where(db.collection("announcements"), "status", "==", "scheduled").stream():
+        if (d.to_dict().get("sendAt") or "9999") <= now:
+            try:
+                anns.append({"ann": d.id, **publish_announcement(d.id)})
+            except Exception as e:  # إعلان واحد معطوب لا يوقف الباقي
+                anns.append({"ann": d.id, "error": str(e)[:200]})
+    reminders = run_reminders(dt.datetime.now(TZ))
+    db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
+    return {"announcements": anns, "reminders": reminders}

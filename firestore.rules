@@ -52,6 +52,18 @@ service cloud.firestore {
         && (isTeacher() || isStudent(request.resource.data.studentId));
       allow delete: if isTeacher() || (signedIn() && resource.data.uid == request.auth.uid);
     }
+    // الإعلانات: يكتبها المعلم وينشرها خادم الإشعارات. الطالب يسجّل فقط أنه قرأ
+    match /announcements/{aid} {
+      allow read, write: if isTeacher();
+      match /reads/{pn} {
+        allow read: if isTeacher();
+        allow create: if isStudent(pn);
+      }
+    }
+    // إعدادات المعلم (مثل وقت التذكير)، ويقرؤها الخادم
+    match /settings/{id} {
+      allow read, write: if isTeacher();
+    }
     // عدّاد استهلاك خادم التحليل: يكتبه الخادم وحده (حساب الخدمة يتجاوز القواعد)، ويقرؤه المعلم
     match /usage/{id} {
       allow read: if isTeacher();
