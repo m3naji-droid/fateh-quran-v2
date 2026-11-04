@@ -2,6 +2,7 @@
 import { FIREBASE } from './firebase-config.js';
 
 const FB_VER = '10.12.2';
+export const NOTIF_DAYS = 30; // مدة بقاء التنبيه في جرس الموقع
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const now = () => new Date().toISOString();
 
@@ -116,7 +117,7 @@ const local = {
   async deleteStudent(id) { const r = LS.get('roster', {}); delete r[id]; LS.set('roster', r); },
   // الواجبات
   async listTasks() { return LS.get('tasks', []); },
-  async saveTask(t) { const all = LS.get('tasks', []); const i = all.findIndex((x) => x.id === t.id); if (i >= 0) all[i] = { ...all[i], ...t }; else all.push({ id: uid(), createdAt: now(), ...t }); LS.set('tasks', all); },
+  async saveTask(t) { const all = LS.get('tasks', []); const i = all.findIndex((x) => x.id === t.id); let id = t.id; if (i >= 0) all[i] = { ...all[i], ...t }; else { id = uid(); all.push({ id, createdAt: now(), ...t }); } LS.set('tasks', all); return id; },
   async deleteTask(id) { LS.set('tasks', LS.get('tasks', []).filter((t) => t.id !== id)); },
   // التسليمات
   async addSubmission(pn, sub, audio) {
@@ -142,10 +143,25 @@ const local = {
   // لوحة الشرف
   async getBoard() { return LS.get('board', null); },
   async getAiUsage() { return LS.get('aiUsage', null); },
+  // التنبيهات داخل الموقع (محلياً: في هذا المتصفح فقط، والإشعارات على الجوال تحتاج النسخة السحابية)
+  async addNotif(n) { const all = LS.get('notifs', []); const id = uid(); all.push({ id, createdAt: now(), ...n }); LS.set('notifs', all.slice(-200)); return id; },
+  async listNotifs(classId) { const from = Date.now() - NOTIF_DAYS * 864e5; return LS.get('notifs', []).filter((n) => (n.classId === 'all' || n.classId === classId || classId === '*') && new Date(n.createdAt).getTime() > from); },
+  watchNotifs(classId, cb) { this.listNotifs(classId).then(cb); const h = (e) => { if (e.key === 'fp_notifs') this.listNotifs(classId).then(cb); }; addEventListener('storage', h); return () => removeEventListener('storage', h); },
+  async cleanupNotifs() { const from = Date.now() - NOTIF_DAYS * 864e5; LS.set('notifs', LS.get('notifs', []).filter((n) => new Date(n.createdAt).getTime() > from)); },
+  async pushToken() { return null; },
+  async savePushToken() {},
+  async deletePushToken() {},
+  async listPushTokens() { return []; },
   async setBoard(b) { LS.set('board', b); },
   async saveRanks(ranks) { const r = LS.get('roster', {}); Object.entries(ranks).forEach(([id, v]) => { if (r[id]) r[id].rank = v; }); LS.set('roster', r); },
   async getMyRank(me) { return LS.get('roster', {})[me.id]?.rank || null; },
 };
+
+/** معرّف ثابت لمستند الجهاز من رمز الإشعار (الرمز طويل وفيه رموز لا تصلح معرّفاً) */
+async function tokenId(token) {
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return [...new Uint8Array(h)].slice(0, 20).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 /* ---------------- النسخة السحابية ---------------- */
 async function makeCloud() {
@@ -158,7 +174,7 @@ async function makeCloud() {
   const app = initializeApp(FIREBASE.config);
   const db = FIREBASE.databaseId ? fs.getFirestore(app, FIREBASE.databaseId) : fs.getFirestore(app);
   const auth = au.getAuth(app);
-  const { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, collectionGroup, onSnapshot, query, limit } = fs;
+  const { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, collectionGroup, onSnapshot, query, limit, where } = fs;
   const list = async (path) => (await getDocs(collection(db, path))).docs.map((d) => ({ id: d.id, ...d.data() }));
   const ready = new Promise((res) => { const u = au.onAuthStateChanged(auth, () => { u(); res(); }); });
   let creator = null;
@@ -306,7 +322,7 @@ async function makeCloud() {
     },
     async deleteStudent(id) { await deleteDoc(doc(db, 'cards', id)).catch(() => {}); await deleteDoc(doc(db, 'roster', id)); },
     async listTasks() { await ensureAnon(); return list('tasks'); },
-    async saveTask(t) { const id = t.id || uid(); const { id: _, ...rest } = t; await setDoc(doc(db, 'tasks', id), { createdAt: now(), ...rest }, { merge: true }); },
+    async saveTask(t) { const id = t.id || uid(); const { id: _, ...rest } = t; await setDoc(doc(db, 'tasks', id), t.id ? rest : { createdAt: now(), ...rest }, { merge: true }); return id; },
     async deleteTask(id) { await deleteDoc(doc(db, 'tasks', id)); },
     async addSubmission(pn, sub, audio) {
       await ensureAnon();
@@ -340,6 +356,43 @@ async function makeCloud() {
     async getModel() { await ensureAnon(); try { const d = await getDoc(doc(db, 'model', 'tajweed')); return d.exists() ? d.data() : null; } catch { return null; } },
     async setModel(m) { await setDoc(doc(db, 'model', 'tajweed'), m); },
     // لوحة الشرف: يحسبها المعلم وينشرها (الأسماء والنقاط فقط)، ومرتبة كل طالب في مستنده
+    // التنبيهات: مستند لكل تنبيه موجّه لصف أو للجميع، يقرؤه طلاب الصف ويكتبه المعلم
+    async addNotif(n) { const id = uid(); await setDoc(doc(db, 'notifs', id), { ...n, createdAt: now() }); return id; },
+    async listNotifs(classId) {
+      await ensureAnon();
+      const from = Date.now() - NOTIF_DAYS * 864e5;
+      const q = classId === '*' ? collection(db, 'notifs') : query(collection(db, 'notifs'), where('classId', 'in', [classId, 'all']));
+      return (await getDocs(q)).docs.map((d) => ({ id: d.id, ...d.data() })).filter((n) => new Date(n.createdAt).getTime() > from);
+    },
+    watchNotifs(classId, cb) {
+      const from = () => Date.now() - NOTIF_DAYS * 864e5;
+      let off = () => {};
+      ensureAnon().then(() => {
+        off = onSnapshot(query(collection(db, 'notifs'), where('classId', 'in', [classId, 'all'])),
+          (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((n) => new Date(n.createdAt).getTime() > from())),
+          (e) => console.warn('notifs', e.code));
+      });
+      return () => off();
+    },
+    async cleanupNotifs() {
+      const from = Date.now() - NOTIF_DAYS * 864e5;
+      const old = (await getDocs(collection(db, 'notifs'))).docs.filter((d) => new Date(d.data().createdAt).getTime() < from);
+      for (const d of old) await deleteDoc(d.ref).catch(() => {});
+      return old.length;
+    },
+    // الإشعارات على الجوال (Firebase Cloud Messaging)
+    async pushToken(vapidKey, registration) {
+      const m = await import(`${base}/firebase-messaging.js`);
+      if (!(await m.isSupported())) throw new Error('هذا المتصفح لا يدعم الإشعارات.');
+      return m.getToken(m.getMessaging(app), { vapidKey, serviceWorkerRegistration: registration });
+    },
+    async savePushToken(token, info) {
+      const u = auth.currentUser;
+      if (!u || u.isAnonymous) throw new Error('ادخل بحسابك أولاً.');
+      await setDoc(doc(db, 'pushTokens', await tokenId(token)), { token, uid: u.uid, ...info, updatedAt: now() });
+    },
+    async listPushTokens() { return (await getDocs(collection(db, 'pushTokens'))).docs.map((d) => { const { token, ...rest } = d.data(); return { id: d.id, ...rest }; }); },
+    async deletePushToken(token) { if (token) await deleteDoc(doc(db, 'pushTokens', await tokenId(token))).catch(() => {}); },
     async getAiUsage(month) { const d = await getDoc(doc(db, 'usage', 'ai-' + month)); return d.exists() ? d.data() : null; },
     async getBoard() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'main')); return d.exists() ? d.data() : null; },
     async setBoard(b) { await setDoc(doc(db, 'leaderboard', 'main'), b); },

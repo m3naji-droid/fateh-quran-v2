@@ -374,3 +374,22 @@ tr.picked td { background: var(--green-2); }
 .pw-toggle .chev { flex: 0 0 20px; width: 20px; height: 20px; overflow: visible; color: var(--muted); transition: transform .2s; }
 .pw-toggle .install-ico { flex: 0 0 38px; }
 .pw-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+/* التنبيهات */
+.bell-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; padding-inline: 12px; }
+.bell-btn .bell-n:empty { display: none; }
+.bell-btn .bell-n { position: absolute; top: -6px; inset-inline-start: -6px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: var(--bad); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--card); }
+.bell-btn.has svg { animation: bell-ring 1.2s ease-in-out 2; transform-origin: 50% 10%; }
+@keyframes bell-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(14deg); } 40% { transform: rotate(-12deg); } 60% { transform: rotate(8deg); } 80% { transform: rotate(-4deg); } }
+@media (prefers-reduced-motion: reduce) { .bell-btn.has svg { animation: none; } }
+.notif-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 60vh; overflow: auto; }
+.notif-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.notif-item:hover, .notif-item:focus-visible { border-color: var(--green); }
+.notif-item.new { background: var(--green-2); border-color: var(--green); }
+.notif-ico { flex: 0 0 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--gold-soft); }
+.notif-tx { display: grid; gap: 2px; } .notif-tx span { font-size: 14px; }
+.push-invite { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; border-color: var(--green); background: linear-gradient(160deg, var(--green-2), var(--card)); }
+.push-invite .install-ico { font-size: 18px; }
+.new-pill { background: var(--bad); color: #fff; font-size: 12px; vertical-align: middle; }
+.card.editing { outline: 2px solid var(--gold); }
+.notify-opt input { margin-top: 3px; }

@@ -1,7 +1,7 @@
 // عامل الخدمة: يجعل المقرأة قابلة للتثبيت كتطبيق، ويفتح الصفحة من الذاكرة إن انقطع الاتصال.
 // الشبكة أولاً دائماً لملفات الموقع حتى تصل التحديثات فوراً؛ والذاكرة احتياط فقط.
 // لا يتدخل في طلبات Firebase وخادم التجويد والقرّاء (نطاقات أخرى).
-const CACHE = 'maqraa-v1';
+const CACHE = 'maqraa-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -21,4 +21,36 @@ self.addEventListener('fetch', (e) => {
       })
       .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || (req.mode === 'navigate' ? caches.match('./') : Response.error())))
   );
+});
+
+// ------------------------------------------------ الإشعارات
+// خادم الإشعارات يرسل رسائل بيانات (data) عبر Firebase Cloud Messaging، فنعرضها هنا بأنفسنا.
+self.addEventListener('push', (e) => {
+  let p = {};
+  try { p = e.data ? e.data.json() : {}; } catch { p = { data: { body: e.data && e.data.text() } }; }
+  const d = { ...(p.notification || {}), ...(p.data || {}) };
+  const title = d.title || 'مقرأة الفاتح';
+  e.waitUntil(Promise.all([
+    self.registration.showNotification(title, {
+      body: d.body || '',
+      icon: 'assets/icons/icon-192.png',
+      badge: 'assets/icons/icon-192.png',
+      dir: 'rtl', lang: 'ar',
+      tag: d.tag || undefined,
+      renotify: !!d.tag,
+      data: { link: d.link || './#/student' },
+    }),
+    // إن كان الموقع مفتوحاً: حدّث الجرس
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => cs.forEach((c) => c.postMessage({ type: 'notif' }))),
+  ]));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.link || './#/student', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+    const c = cs.find((x) => x.url.startsWith(self.registration.scope));
+    if (c) return c.focus().then(() => c.navigate ? c.navigate(url) : c.postMessage({ type: 'open', url }));
+    return self.clients.openWindow(url);
+  }));
 });

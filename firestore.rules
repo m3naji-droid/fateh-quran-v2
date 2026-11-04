@@ -40,6 +40,18 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    // التنبيهات: يكتبها المعلم، ويقرؤها الطلاب في جرس الموقع
+    match /notifs/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+    // أجهزة الإشعارات: كل جهاز يسجّل رمزه باسم صاحبه. يقرؤها خادم الإشعارات (يتجاوز القواعد)
+    match /pushTokens/{id} {
+      allow read: if isTeacher() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid
+        && (isTeacher() || isStudent(request.resource.data.studentId));
+      allow delete: if isTeacher() || (signedIn() && resource.data.uid == request.auth.uid);
+    }
     // عدّاد استهلاك خادم التحليل: يكتبه الخادم وحده (حساب الخدمة يتجاوز القواعد)، ويقرؤه المعلم
     match /usage/{id} {
       allow read: if isTeacher();

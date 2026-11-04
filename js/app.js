@@ -3,8 +3,9 @@ import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
-import { TAJWEED_API } from './firebase-config.js';
+import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, pushConfigured } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge } from './leaderboard.js';
@@ -19,7 +20,17 @@ const pref = {
   get(k, d) { try { const v = localStorage.getItem('fp_pref_' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('fp_pref_' + k, JSON.stringify(v)); } catch {} },
 };
-const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('ar', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
+const timeAgo = (iso) => {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!(m >= 0)) return '';
+  if (m < 1) return 'الآن';
+  if (m < 60) return m === 1 ? 'قبل دقيقة' : m === 2 ? 'قبل دقيقتين' : m <= 10 ? `قبل ${ar(m)} دقائق` : `قبل ${ar(m)} دقيقة`;
+  const h = Math.round(m / 60);
+  if (h < 24) return h === 1 ? 'قبل ساعة' : h === 2 ? 'قبل ساعتين' : h <= 10 ? `قبل ${ar(h)} ساعات` : `قبل ${ar(h)} ساعة`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'أمس' : d === 2 ? 'قبل يومين' : d <= 10 ? `قبل ${ar(d)} أيام` : `قبل ${ar(d)} يوماً`;
+};
+const fmtDate = (iso) => { try { return ar(new Date(iso).toLocaleDateString('ar', { day: 'numeric', month: 'short', year: 'numeric' })); } catch { return ''; } };
 const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 const latinDigits = (v) => String(v ?? '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
 const rangeLabel = (s, f, t) => `${surahName(s)} ${f === t ? `(${ar(f)})` : `(${ar(f)}–${ar(t)})`}`;
@@ -604,6 +615,7 @@ function render() {
 }
 addEventListener('hashchange', render);
 registerSW();
+navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'open' && e.data.url) location.href = e.data.url; });
 
 /* ================= الرئيسية ================= */
 function viewHome(app) {
@@ -649,7 +661,7 @@ function mountPractice(host, learn) {
   const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn }); };
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
-  return { destroy: () => comp?.destroy() };
+  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); } };
 }
 function viewPractice(app) {
   const s = session.get();
@@ -701,6 +713,39 @@ function viewStudent(app) {
   studentStartTab = null;
   let data = { tasks: [], subs: [], classes: [] };
   const me = s.student;
+  const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
+  let notifs = [], offNotifs = null;
+  const deep = location.hash.match(/^#\/student\/task\/([\w-]+)/);
+  let openTaskId = deep ? deep[1] : null;
+  if (deep) history.replaceState(null, '', '#/student');
+  const seenKey = 'notifSeen_' + me.id;
+  const unread = () => { const seen = pref.get(seenKey, ''); return notifs.filter((n) => (n.createdAt || '') > seen).length; };
+  function paintBell() {
+    const b = $('#stBell', app); if (!b) return;
+    const n = unread();
+    b.querySelector('.bell-n').textContent = n ? (n > 9 ? '+٩' : ar(n)) : '';
+    b.classList.toggle('has', n > 0);
+    b.setAttribute('aria-label', n ? `التنبيهات: ${ar(n)} جديدة` : 'التنبيهات');
+  }
+  function openBell() {
+    const seen = pref.get(seenKey, '');
+    const L = [...notifs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    pref.set(seenKey, new Date().toISOString());
+    paintBell();
+    openModal(`<div class="stack"><h2>التنبيهات</h2>
+      ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
+        <span class="notif-ico">${n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc(n.title)}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
+      ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
+      $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
+        const n = notifs.find((x) => x.id === b.dataset.nid);
+        closeModal();
+        const t = n?.taskId && data.tasks.find((x) => x.id === n.taskId);
+        if (t) { tab = 'tasks'; openTask(t); } else if (n?.taskId) toast('هذا الواجب لم يعد موجوداً.');
+      }));
+    });
+  }
 
   async function load() {
     app.innerHTML = '<div class="loading">جارٍ تحميل بياناتك…</div>';
@@ -715,7 +760,19 @@ function viewStudent(app) {
       return;
     }
     draw();
+    if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
     announceGrades();
+    if (!offNotifs) offNotifs = store.watchNotifs(me.classId, async (L) => {
+      const first = !notifs.length && !paintBell.done;
+      notifs = L; paintBell(); paintBell.done = true;
+      const onList = $('#stBody', app) && tab === 'tasks';
+      // واجب جديد وصل والطالب على صفحة الواجبات: نحدّث القائمة
+      if (L.some((n) => n.taskId && !data.tasks.some((t) => t.id === n.taskId))) {
+        try { const tasks = await store.listTasks(); data.tasks = tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
+        if ($('#stBody', app) && tab === 'tasks') draw();
+      } else if (onList && first) draw();
+    });
+    refreshPush(owner);
   }
 
   /** عند وصول تقييم جديد من المعلم: احتفال (٨ فأعلى) أو تحفيز، مرة واحدة لكل تقييم */
@@ -750,7 +807,7 @@ function viewStudent(app) {
       <div class="page-head">
         <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1>
           ${me.rankInfo?.month?.stage === 1 ? `<span class="title-pill">${rankBadge(1)} شيخ المرحلة هذا الشهر</span>` : me.rankInfo?.month?.cls === 1 ? `<span class="title-pill">${rankBadge(1)} قارئ الصف هذا الشهر</span>` : ''}</div>
-        <div class="row"><button class="btn gear-btn${tab === 'settings' ? ' on' : ''}" id="stSet" type="button" aria-pressed="${tab === 'settings'}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg> الإعدادات</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
+        <div class="row"><button class="btn bell-btn" id="stBell" type="button" aria-label="التنبيهات"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg><span class="bell-n"></span></button><button class="btn gear-btn${tab === 'settings' ? ' on' : ''}" id="stSet" type="button" aria-pressed="${tab === 'settings'}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg> الإعدادات</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis">
         <div class="kpi"><b>${ar(doneTasks.size)}/${ar(data.tasks.length)}</b><span>واجبات منجزة</span></div>
@@ -762,7 +819,9 @@ function viewStudent(app) {
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>`;
-    $('#stOut', app).onclick = async () => { await store.signOut(); session.set(null); render(); };
+    $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
+    $('#stBell', app).onclick = openBell;
+    paintBell();
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
@@ -781,6 +840,7 @@ function viewStudent(app) {
     body.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">الإعدادات</h2><button class="btn sm" type="button" id="setBack">رجوع إلى واجباتي</button></div>
       <div class="grid2" style="align-items:start">
       <div class="card stack install-card" id="instCard" style="gap:12px"></div>
+      <div class="card stack" id="pushCard" style="gap:12px"></div>
       <form class="card stack" id="pwF" style="gap:12px">
         <button type="button" class="pw-toggle" id="pwTog" aria-expanded="false" aria-controls="pwBox">
           <span class="install-ico"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1zm2 0h6V7a3 3 0 0 0-6 0v3zm3 4a1.5 1.5 0 0 0-1 2.6V18h2v-1.4a1.5 1.5 0 0 0-1-2.6z"/></svg></span>
@@ -821,8 +881,32 @@ function viewStudent(app) {
       btn.disabled = false;
     };
     drawInstall(body);
+    drawPushCard(body);
     offInstall?.();
-    offInstall = onInstallChange(() => { if (tab === 'settings') drawInstall(body); });
+    offInstall = onInstallChange(() => { if (tab === 'settings') { drawInstall(body); drawPushCard(body); } });
+  }
+
+  function drawPushCard(body) {
+    const host = $('#pushCard', body); if (!host) return;
+    const st = pushState(me.id);
+    const msg = {
+      'off-config': '<span class="pill">داخل الموقع</span> تظهر التنبيهات في الجرس 🔔 أعلى الصفحة. الإشعارات على الجوال لم يفعّلها معلمك بعد.',
+      unsupported: '<span class="pill warn">غير مدعوم</span> هذا المتصفح لا يدعم الإشعارات. جرّب Chrome على أندرويد، أو ثبّت المقرأة على الآيفون. تبقى التنبيهات في الجرس 🔔.',
+      'needs-install': '<span class="pill warn">ثبّت أولاً</span> على الآيفون والآيباد تصل الإشعارات بعد تثبيت المقرأة على الشاشة الرئيسية (iOS 16.4 أو أحدث). ثبّتها من البطاقة المجاورة، ثم افتحها من أيقونتها وعُد إلى هنا.',
+      denied: '<span class="pill bad">مرفوضة</span> رفض جهازك الإشعارات لهذا الموقع. لتفعيلها: افتح إعدادات الجوال ← الإشعارات ← مقرأة الفاتح (أو إعدادات الموقع في المتصفح) واسمح بها، ثم حدّث الصفحة.',
+      ready: 'فعّلها ليصلك إشعار لحظة إرسال معلمك واجباً جديداً أو تعديله، حتى والمقرأة مغلقة.',
+      on: '<span class="pill ok">مفعّلة</span> تصلك التنبيهات على هذا الجهاز. لإيقافها اضغط «إيقاف».',
+    }[st];
+    host.innerHTML = `<div class="row" style="gap:10px"><span class="install-ico">🔔</span><h3 style="margin:0">الإشعارات</h3></div>
+      <p class="small" style="margin:0">${msg}</p>
+      ${st === 'ready' ? '<button class="btn primary" type="button" id="pushOn" style="align-self:flex-start">فعّل الإشعارات</button>' : ''}
+      ${st === 'on' ? '<div class="row"><button class="btn" type="button" id="pushTest">جرّب إشعاراً</button><button class="btn ghost" type="button" id="pushOff">إيقاف</button></div>' : ''}`;
+    const on = $('#pushOn', host);
+    if (on) on.onclick = async () => { on.disabled = true; try { await enablePush(owner); toast('تم تفعيل الإشعارات.'); } catch (e) { toast(e.message); } drawPushCard(body); };
+    const off = $('#pushOff', host);
+    if (off) off.onclick = async () => { await disablePush().catch(() => {}); toast('أُوقفت الإشعارات على هذا الجهاز. تبقى التنبيهات في الجرس 🔔.'); drawPushCard(body); };
+    const tst = $('#pushTest', host);
+    if (tst) tst.onclick = () => testNotification().catch((e) => toast(e.message));
   }
 
   function drawInstall(body) {
@@ -873,19 +957,39 @@ function viewStudent(app) {
     comp = mountPractice(body, learn);
   }
 
+  function pushInvite() {
+    const st = pushState(me.id);
+    if (!['ready', 'needs-install'].includes(st) || pref.get('pushInviteOff_' + me.id, false)) return '';
+    return `<div class="card push-invite" id="pushInv"><span class="install-ico">🔔</span>
+      <div class="stack" style="gap:4px;flex:1"><b>${st === 'ready' ? 'فعّل التنبيهات ليصلك كل واجب جديد' : 'ثبّت المقرأة لتصلك التنبيهات'}</b>
+      <span class="small muted">${st === 'ready' ? 'يصلك إشعار على جوالك لحظة إرسال معلمك واجباً، حتى والمقرأة مغلقة.' : 'على الآيفون تصل الإشعارات بعد تثبيت المقرأة على الشاشة الرئيسية فقط.'}</span></div>
+      <div class="row"><button class="btn primary sm" type="button" id="pushInvGo">${st === 'ready' ? 'فعّل التنبيهات' : 'طريقة التثبيت'}</button><button class="btn sm ghost" type="button" id="pushInvNo">لاحقاً</button></div></div>`;
+  }
+  function bindPushInvite(body) {
+    const go = $('#pushInvGo', body); if (!go) return;
+    $('#pushInvNo', body).onclick = () => { pref.set('pushInviteOff_' + me.id, true); $('#pushInv', body)?.remove(); toast('يمكنك تفعيلها لاحقاً من «الإعدادات».'); };
+    go.onclick = async () => {
+      if (pushState(me.id) === 'needs-install') { tab = 'settings'; draw(); return; }
+      go.disabled = true;
+      try { await enablePush(owner); $('#pushInv', body)?.remove(); toast('تم تفعيل التنبيهات على هذا الجهاز.'); }
+      catch (e) { toast(e.message); go.disabled = false; }
+    };
+  }
   function drawTasks(body, done) {
-    if (!data.tasks.length) { body.innerHTML = '<div class="empty">لا توجد واجبات حالياً. يمكنك التدرب على أي سورة من تبويب «تدريب حر».</div>'; return; }
-    body.innerHTML = `<div class="stack">${data.tasks.map((t) => {
+    if (!data.tasks.length) { body.innerHTML = pushInvite() + '<div class="empty">لا توجد واجبات حالياً. يمكنك التدرب على أي سورة من تبويب «تدريب حر».</div>'; bindPushInvite(body); return; }
+    const fresh = new Set(notifs.filter((n) => n.taskId && (n.createdAt || '') > pref.get(seenKey, '')).map((n) => n.taskId));
+    body.innerHTML = pushInvite() + `<div class="stack">${data.tasks.map((t) => {
       const mySubs = data.subs.filter((x) => x.taskId === t.id);
       const best = mySubs.reduce((m, x) => Math.max(m, x.percent ?? -1), -1);
       const overdue = t.due && !done.has(t.id) && new Date(t.due) < new Date(new Date().toDateString());
       return `<div class="card task">
-        <div class="t-main"><h3>${esc(t.title)}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
+        <div class="t-main"><h3>${esc(t.title)}${fresh.has(t.id) && !done.has(t.id) ? ' <span class="pill new-pill">جديد</span>' : ''}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
           <div class="small muted">${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'}${t.due ? ` · التسليم ${fmtDate(t.due)}` : ''}${t.notes ? ` · ${esc(t.notes)}` : ''}</div></div>
         <div class="row">${done.has(t.id) ? `<span class="pill ok">أُرسل${best >= 0 ? ` · ${ar(best)}٪` : ''}</span>` : overdue ? '<span class="pill bad">متأخر</span>' : '<span class="pill warn">لم يُنجز</span>'}
         <button class="btn primary" type="button" data-task="${esc(t.id)}">${done.has(t.id) ? 'تسميع مرة أخرى' : 'ابدأ التسميع'}</button></div></div>`;
     }).join('')}</div>`;
     $$('[data-task]', body).forEach((b) => (b.onclick = () => openTask(data.tasks.find((t) => t.id === b.dataset.task))));
+    bindPushInvite(body);
   }
 
   async function openTask(t) {
@@ -1059,6 +1163,7 @@ function viewTeacher(app) {
   const reload = async (redraw = true) => {
     const [classes, students, tasks] = await Promise.all([store.listClasses(), store.listStudents(), store.listTasks()]);
     D = { ...D, classes: sortClasses(classes), students, tasks };
+    if (!reload.cleaned) { reload.cleaned = true; store.cleanupNotifs().catch(() => {}); }
     if (redraw) drawBody();
   };
   const className = (id) => (id === 'all' ? 'كل الصفوف' : D.classes.find((c) => c.id === id)?.name || '—');
@@ -1316,31 +1421,69 @@ function viewTeacher(app) {
   }
 
   /* --- الواجبات --- */
+  let editTask = null; // الواجب الجاري تعديله
+  const dueText = (d) => { try { return new Date(d + 'T12:00').toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/\d/g, (x) => ar(x)); } catch { return d; } };
+  const taskNotifBody = (t) => `${rangeLabel(t.surah, t.from, t.to)} · ${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'} · ${t.due ? 'التسليم ' + dueText(t.due) : 'بلا موعد محدد'}`;
+  /** يحفظ التنبيه (للجرس) ثم يطلب إرساله إلى الجوالات */
+  async function notifyTask(t, kind, changes = '') {
+    const n = kind === 'new'
+      ? { type: 'task', title: `واجب جديد: ${t.title}`, body: taskNotifBody(t) }
+      : { type: 'task-edit', title: `تعديل على واجب: ${t.title}`, body: `${changes} · ${taskNotifBody(t)}` };
+    const id = await store.addNotif({ ...n, classId: t.classId, taskId: t.id, link: `./#/student/task/${t.id}`, tag: 'task-' + t.id });
+    try {
+      const r = await sendPush(id);
+      return r ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}` : '';
+    } catch (e) { console.warn(e); return `. تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر في الموقع`; }
+  }
   function drawTasks(body) {
     const last = pref.get('lastRange', { surah: 36, from: 1, to: 12 });
+    const E = editTask;
+    const r0 = E ? { surah: E.surah, from: E.from, to: E.to } : last;
     body.innerHTML = `<div class="grid2" style="align-items:start">
-      <form class="card stack" id="tkForm" style="gap:12px">
-        <h3>واجب جديد</h3>
+      <form class="card stack${E ? ' editing' : ''}" id="tkForm" style="gap:12px">
+        <h3>${E ? 'تعديل الواجب' : 'واجب جديد'}</h3>
         <label class="field">العنوان<input type="text" id="tkTitle" required placeholder="مثال: حفظ أول سورة يس"></label>
-        ${rangePicker('tk', last)}
+        ${rangePicker('tk', r0)}
         <div class="row">
           <label class="field" style="flex:1 1 140px">الصف<select id="tkClass"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
           <label class="field" style="flex:1 1 140px">النوع<select id="tkMode"><option value="hifz">تسميع غيباً</option><option value="recite">تلاوة نظراً</option></select></label>
           <label class="field" style="flex:1 1 140px">آخر موعد<input type="date" id="tkDue"></label>
         </div>
         <label class="field">تعليمات للطلاب (اختياري)<input type="text" id="tkNotes" placeholder="مثال: ركّز على أحكام النون الساكنة"></label>
-        <button class="btn primary" type="submit">إضافة الواجب</button>
+        <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="tkNotify" checked> <span>${E ? 'أشعر الطلاب بالتعديل <span class="muted">(يُرسل فقط إن تغيّر الموعد أو الآيات)</span>' : 'أرسل إشعاراً للطلاب <span class="muted">(في الجرس داخل الموقع، وعلى جوالات من فعّلها)</span>'}</span></label>
+        <div class="row"><button class="btn primary" type="submit">${E ? 'حفظ التعديل' : 'إضافة الواجب'}</button>${E ? '<button class="btn" type="button" id="tkCancel">إلغاء التعديل</button>' : ''}</div>
       </form>
       <div class="stack" id="tkList"></div>
     </div>`;
-    const readRange = bindRangePicker(body, 'tk', (r) => { if (!$('#tkTitle', body).dataset.touched) $('#tkTitle', body).value = `${surahName(r.surah)} ${r.from}–${r.to}`; });
-    $('#tkTitle', body).value = `${surahName(last.surah)} ${last.from}–${last.to}`;
+    const readRange = bindRangePicker(body, 'tk', (r) => { if (!$('#tkTitle', body).dataset.touched) $('#tkTitle', body).value = `${surahName(r.surah)} ${ar(r.from)}–${ar(r.to)}`; });
+    if (E) {
+      $('#tkTitle', body).value = E.title; $('#tkTitle', body).dataset.touched = '1';
+      $('#tkClass', body).value = E.classId || 'all'; $('#tkMode', body).value = E.mode || 'hifz';
+      $('#tkDue', body).value = E.due || ''; $('#tkNotes', body).value = E.notes || '';
+      $('#tkCancel', body).onclick = () => { editTask = null; drawTasks(body); };
+    } else $('#tkTitle', body).value = `${surahName(last.surah)} ${ar(last.from)}–${ar(last.to)}`;
     $('#tkTitle', body).oninput = (e) => (e.target.dataset.touched = '1');
     $('#tkForm', body).onsubmit = async (e) => {
       e.preventDefault();
+      const btn = e.submitter; btn.disabled = true;
       const r = readRange();
-      await store.saveTask({ title: $('#tkTitle', body).value.trim(), ...r, classId: $('#tkClass', body).value, mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() });
-      toast('أُضيف الواجب وسيظهر لطلاب الصف.');
+      const t = { title: $('#tkTitle', body).value.trim(), ...r, classId: $('#tkClass', body).value, mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() };
+      const wantNotify = $('#tkNotify', body).checked;
+      try {
+        if (E) {
+          const changes = [];
+          if (t.surah !== E.surah || t.from !== E.from || t.to !== E.to) changes.push('تغيّرت الآيات');
+          if ((t.due || '') !== (E.due || '')) changes.push(t.due ? 'تغيّر موعد التسليم' : 'أُلغي موعد التسليم');
+          await store.saveTask({ id: E.id, ...t });
+          editTask = null;
+          const extra = wantNotify && changes.length ? await notifyTask({ id: E.id, ...t }, 'edit', changes.join(' و')) : '';
+          toast(`حُفظ التعديل${wantNotify && changes.length ? ' وأُرسل التنبيه' + extra : wantNotify ? '. لم يتغير الموعد أو الآيات، فلم يُرسل تنبيه' : ''}.`);
+        } else {
+          const id = await store.saveTask(t);
+          const extra = wantNotify ? await notifyTask({ id, ...t }, 'new') : '';
+          toast(`أُضيف الواجب${wantNotify ? ' ووصل تنبيه لطلاب الصف' + extra : ' دون إشعار'}.`);
+        }
+      } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); btn.disabled = false; return; }
       await reload();
     };
     const L = [...D.tasks].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -1348,12 +1491,13 @@ function viewTeacher(app) {
       const target = D.students.filter((st) => t.classId === 'all' || st.classId === t.classId);
       const doneSet = new Set(D.subs.filter((x) => x.taskId === t.id).map((x) => x.pn));
       const done = target.filter((st) => doneSet.has(st.id)).length;
-      return `<div class="card task"><div class="t-main"><h3>${esc(t.title)}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
+      return `<div class="card task${E && E.id === t.id ? ' editing' : ''}"><div class="t-main"><h3>${esc(t.title)}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
         <div class="small muted">${esc(className(t.classId))} · ${t.mode === 'hifz' ? 'غيباً' : 'نظراً'}${t.due ? ` · حتى ${fmtDate(t.due)}` : ''}</div>
         <div class="progress" style="margin-top:8px;max-width:260px"><i style="width:${target.length ? (done / target.length) * 100 : 0}%"></i></div><div class="small muted">${ar(done)} من ${ar(target.length)} طالباً أرسلوا</div></div>
-        <button class="btn sm danger" type="button" data-del="${esc(t.id)}">حذف</button></div>`;
+        <div class="row"><button class="btn sm" type="button" data-edit="${esc(t.id)}">تعديل</button><button class="btn sm danger" type="button" data-del="${esc(t.id)}">حذف</button></div></div>`;
     }).join('') : '<div class="empty">لم تُنشئ أي واجب بعد. أنشئ الأول من النموذج.</div>';
-    $$('[data-del]', body).forEach((b) => (b.onclick = async () => { if (!(await confirmBox('حذف هذا الواجب؟ تبقى تسليمات الطلاب محفوظة.'))) return; await store.deleteTask(b.dataset.del); await reload(); }));
+    $$('[data-edit]', body).forEach((b) => (b.onclick = () => { editTask = D.tasks.find((t) => t.id === b.dataset.edit); drawTasks(body); $('#tkForm', body).scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#tkTitle', body).focus({ preventScroll: true }); }));
+    $$('[data-del]', body).forEach((b) => (b.onclick = async () => { if (!(await confirmBox('حذف هذا الواجب؟ تبقى تسليمات الطلاب محفوظة.'))) return; if (editTask?.id === b.dataset.del) editTask = null; await store.deleteTask(b.dataset.del); await reload(); }));
   }
 
   /* --- حسابات الطلاب وبطاقات الدخول --- */
@@ -1749,12 +1893,20 @@ function viewTeacher(app) {
         ${store.mode === 'cloud' ? '<p style="margin:0"><span class="pill ok">سحابي</span> البيانات محفوظة في Firebase وتظهر على كل الأجهزة.</p>' : '<p style="margin:0"><span class="pill warn">محلي</span> البيانات محفوظة في هذا المتصفح فقط. للعمل بين أجهزة الطلاب والمعلم فعّل Firebase (راجع ملف README).</p>'}
       </div>
       ${aiEnabled() ? '<div class="card stack usage-card" id="aiUse" style="gap:12px;grid-column:1 / -1"></div>' : ''}
+      <div class="card stack" style="gap:10px"><h3>الإشعارات على الجوال</h3><div id="pushStat" class="small muted">${pushConfigured() && PUSH.url ? 'جارٍ العدّ…' : '<span class="pill warn">غير مفعّلة</span> تظهر التنبيهات للطلاب داخل الموقع فقط. لتفعيل إشعارات الجوال ضع <code>vapidKey</code> و<code>url</code> في ملف js/firebase-config.js (راجع notify-service/README.md).'}</div></div>
       <div class="card stack" style="gap:10px"><h3>خادم تحليل التجويد</h3><div id="aiStatus" class="small muted">${aiEnabled() ? 'جارٍ الفحص…' : 'غير مفعّل. ضع رابط الخادم في ملف js/firebase-config.js (راجع muaalem-space/README.md).'}</div></div>
       ${store.mode === 'cloud' ? `<div class="card stack" style="gap:10px"><h3>نقل بيانات النسخة السابقة</h3>
         <p class="muted small" style="margin:0">ينسخ الطلاب وواجبات سورة يس من «مقرأة الفاتح» القديمة إلى النظام الجديد. التسليمات القديمة لا تُنقل.</p>
         <button class="btn" id="mig" type="button">نقل البيانات القديمة</button></div>` : ''}
     </div>`;
     if (aiEnabled()) drawAiCard(body);
+    if (pushConfigured() && PUSH.url) store.listPushTokens().then((L) => {
+      const el = $('#pushStat', body); if (!el) return;
+      const st = L.filter((x) => x.role === 'student');
+      const by = (k) => st.filter((x) => x.platform === k).length;
+      const people = new Set(st.map((x) => x.studentId)).size;
+      el.innerHTML = `<span class="pill ok">مفعّلة</span> ${ar(people)} طالباً فعّلوها على ${ar(st.length)} جهازاً (أندرويد ${ar(by('android'))}، آيفون ${ar(by('ios'))}، حاسوب ${ar(by('desktop'))}). يفعّلها الطالب من «الإعدادات» في صفحته.`;
+    }).catch((e) => { const el = $('#pushStat', body); if (el) el.textContent = 'تعذر العدّ: ' + (e.code || e.message); });
     if (aiEnabled()) aiHealth().then((h) => { const el = $('#aiStatus', body); if (el) el.innerHTML = h.model_error ? `<span class="pill bad">خطأ</span> ${esc(h.model_error)}` : h.model_ready ? `<span class="pill ok">جاهز</span> النموذج محمّل على ${esc(h.device)}${h.queue ? `، وفي الانتظار ${ar(h.queue)}` : ''}.` : '<span class="pill warn">يستيقظ</span> النموذج قيد التحميل.'; })
       .catch(() => { const el = $('#aiStatus', body); if (el) el.innerHTML = '<span class="pill warn">لا يستجيب</span> قد يكون الخادم نائماً؛ يستيقظ مع أول تحليل خلال دقيقة أو دقيقتين.'; });
     const pickAudio = () => {

@@ -24,3 +24,12 @@ export const TAJWEED_API = {
   // مواصفات نسخة Cloud Run، لحساب الحصة المجانية والتكلفة في عدّاد المعلم. عدّلها إن غيّرتها في Cloud Run.
   instance: { vcpu: 2, gib: 8 },
 };
+
+// الإشعارات على الجوال (Firebase Cloud Messaging)
+// vapidKey: من Firebase ← إعدادات المشروع ← Cloud Messaging ← Web Push certificates
+// url: رابط خادم الإشعارات في Cloud Run (المجلد notify-service)
+// إن بقيا فارغين تعمل التنبيهات داخل الموقع فقط.
+export const PUSH = {
+  vapidKey: '',
+  url: '',
+};
