@@ -30,6 +30,6 @@ export const TAJWEED_API = {
 // url: رابط خادم الإشعارات في Cloud Run (المجلد notify-service)
 // إن بقيا فارغين تعمل التنبيهات داخل الموقع فقط.
 export const PUSH = {
-  vapidKey: '',
+  vapidKey: 'BP9oxEYf-htl3X8gFuI6otv1d_Hl5l28poPU57Vdm_bMXNeN78a4WUWKRTudSOQKsz7g71EoRpsLd8U2XBEmQx4',
   url: '',
 };
