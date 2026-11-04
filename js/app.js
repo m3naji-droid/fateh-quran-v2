@@ -1677,7 +1677,12 @@ function viewTeacher(app) {
     const mk = $('#stMake', body);
     if (mk) mk.onclick = () => makeAccounts(noAccount());
     const paint = (q = '') => {
-      const L = D.students.filter((s) => !q || s.name.includes(q) || s.id.includes(q)).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+      // الترتيب بحسب الصفوف (بترتيب قائمة الصفوف)، ثم بالاسم داخل كل صف
+      const clsIdx = new Map(D.classes.map((c, i) => [c.id, i]));
+      const ci = (s) => (clsIdx.has(s.classId) ? clsIdx.get(s.classId) : 1e9);
+      const L = D.students.filter((s) => !q || s.name.includes(q) || s.id.includes(q)).sort((a, b) => ci(a) - ci(b) || a.name.localeCompare(b.name, 'ar'));
+      const groups = [];
+      L.forEach((st) => { const g = groups[groups.length - 1]; if (g && g.id === (clsIdx.has(st.classId) ? st.classId : '_')) g.list.push(st); else groups.push({ id: clsIdx.has(st.classId) ? st.classId : '_', list: [st] }); });
       const accPill = (s) => !hasAcc(s) ? '<span class="pill warn">بلا حساب</span>' : s.pwChanged ? '<span class="pill mute">غيّر كلمة سره</span>' : '<span class="pill ok">جاهز</span>';
       const ids = new Set(D.students.map((x) => x.id));
       [...selStu].forEach((k) => { if (!ids.has(k)) selStu.delete(k); });
@@ -1687,10 +1692,17 @@ function viewTeacher(app) {
         <button class="btn sm gold" type="button" id="bsSCards">بطاقات المحدد</button>
         <button class="btn sm" type="button" id="bsSClr">إلغاء التحديد</button></div>` : '';
       $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th class="sel"><input type="checkbox" id="bsSAll" aria-label="تحديد كل الطلاب الظاهرين"></th><th>الاسم</th><th>الصف</th><th>الحساب</th><th>تسميع</th><th></th></tr></thead><tbody>
-        ${L.map((s) => `<tr class="${selStu.has(s.id) ? 'picked' : ''}"><td class="sel"><input type="checkbox" data-ss="${esc(s.id)}" ${selStu.has(s.id) ? 'checked' : ''} aria-label="تحديد"></td><td>${esc(s.name)}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+        ${groups.map((g) => `<tr class="grp"><td class="sel"><input type="checkbox" data-sg="${esc(g.id)}" ${g.list.every((x) => selStu.has(x.id)) ? 'checked' : ''} aria-label="تحديد طلاب الصف"></td><td colspan="5"><b>${esc(g.id === '_' ? 'بلا صف' : className(g.id))}</b> <span class="muted small">· ${nWord(g.list.length, 'طالب واحد', 'طالبان', 'طلاب', 'طالباً')}</span></td></tr>
+        ${g.list.map((s) => `<tr class="${selStu.has(s.id) ? 'picked' : ''}"><td class="sel"><input type="checkbox" data-ss="${esc(s.id)}" ${selStu.has(s.id) ? 'checked' : ''} aria-label="تحديد"></td><td>${esc(s.name)}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
         <td>${accPill(s)}</td><td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td>
-        <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
+        <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
       $$('[data-ss]', body).forEach((c) => (c.onchange = () => { c.checked ? selStu.add(c.dataset.ss) : selStu.delete(c.dataset.ss); paint(q); }));
+      $$('[data-sg]', body).forEach((c) => {
+        const g = groups.find((x) => x.id === c.dataset.sg);
+        const n = g.list.filter((x) => selStu.has(x.id)).length;
+        c.indeterminate = n > 0 && n < g.list.length;
+        c.onchange = () => { g.list.forEach((x) => (c.checked ? selStu.add(x.id) : selStu.delete(x.id))); paint(q); };
+      });
       const sAll = $('#bsSAll', body);
       if (sAll) {
         headBox(sAll, L.map((x) => x.id), selStu);

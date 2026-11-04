@@ -401,3 +401,4 @@ tr.picked td { background: var(--green-2); }
 #refreshBtn.spin svg { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 360px) { .brand span { display: none; } }
+tr.grp td { background: var(--green-2); color: var(--green); padding-block: 8px; border-top: 2px solid var(--green); }
