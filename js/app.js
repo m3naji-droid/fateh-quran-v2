@@ -835,7 +835,7 @@ function viewStudent(app) {
   let openRetakeId = deep && deep[1] === 'retake' ? deep[2] : null;
   let openTaskId = deep && deep[1] === 'task' ? deep[2] : null;
   let openSubId = deep && deep[1] === 'grade' ? deep[2] : null;
-  if (/^#\/student\/practice/.test(location.hash)) { tab = 'practice'; history.replaceState(null, '', '#/student'); }
+  if (/^#\/student\/(practice|honor)/.test(location.hash)) { tab = location.hash.includes('honor') ? 'honor' : 'practice'; history.replaceState(null, '', '#/student'); }
   if (deep) history.replaceState(null, '', '#/student');
   if (openSubId) tab = 'history';
   const seenKey = 'notifSeen_' + me.id;
@@ -909,8 +909,8 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
@@ -919,6 +919,8 @@ function viewStudent(app) {
         if (n?.type === 'grade') { openSub(n.subId); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
         if (n?.type === 'month') { openMonth(n); return; }
+        if (n?.type === 'board') { tab = 'honor'; draw(); return; }
+        if (n?.type === 'streak') { tab = 'practice'; draw(); return; }
         if (n?.type === 'retake') { store.listRetakes(me.id).then((L) => { data.retakes = L; startRetake(n.retakeId); }).catch(() => startRetake(n.retakeId)); return; }
         const t = n?.taskId && data.tasks.find((x) => x.id === n.taskId);
         if (t) { tab = 'tasks'; openTask(t); } else if (n?.taskId) toast('هذا الواجب لم يعد موجوداً.');
@@ -1693,6 +1695,9 @@ function viewTeacher(app) {
           <h3 style="margin-top:6px">🔥 حافظ على سلسلتك</h3>
           <p class="small" style="margin:0">يصل لمن سمّع أو تدرّب يومين متتاليين فأكثر ولم ينشط اليوم بعد: «لديك ٥ أيام متتالية، لا تقطعها!»</p>
           <div class="row"><select id="stkT" style="max-width:220px">${[['off', 'متوقف'], ['10:00', '١٠:٠٠ صباحاً'], ['12:00', '١٢:٠٠ ظهراً'], ['14:00', '٢:٠٠ عصراً'], ['16:00', '٤:٠٠ عصراً'], ['18:00', '٦:٠٠ مساءً'], ['20:00', '٨:٠٠ مساءً'], ['21:00', '٩:٠٠ مساءً']].map(([v, l]) => `<option value="${v}" ${(notifySettings.streakTime || '12:00') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn" type="button" id="stkSave">حفظ</button></div>
+          <h3 style="margin-top:6px">🏆 لوحة الشرف</h3>
+          <p class="small" style="margin:0">مرة يومياً يُبشَّر من دخل الخمسة الأوائل في صفه أو على المرحلة، أو صعد إلى المركز الأول، أو تقدّم صفه في التحدي (إشعار واحد في اليوم على الأكثر).</p>
+          <div class="row"><select id="bdT" style="max-width:220px">${[['off', 'متوقف'], ['18:00', '٦:٠٠ مساءً'], ['19:30', '٧:٣٠ مساءً'], ['20:30', '٨:٣٠ مساءً'], ['21:30', '٩:٣٠ مساءً']].map(([v, l]) => `<option value="${v}" ${(notifySettings.boardTime || '20:30') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn" type="button" id="bdSave">حفظ</button></div>
           <div class="small muted" id="cronStat"></div>
         </div>
         <div class="stack" id="anList"><div class="loading">جارٍ تحميل الإعلانات…</div></div>
@@ -1706,6 +1711,10 @@ function viewTeacher(app) {
     $('#evSave', body).onclick = async () => {
       const v = $('#evT', body).value || '19:00';
       try { await store.setNotifySettings({ eveTime: v }); notifySettings.eveTime = v; toast(`سيصل تذكير الواجبات الساعة ${remindTimeLabel()} من اليوم السابق للموعد.`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    };
+    $('#bdSave', body).onclick = async () => {
+      const v = $('#bdT', body).value;
+      try { await store.setNotifySettings({ boardTime: v }); notifySettings.boardTime = v; toast(v === 'off' ? 'أُوقفت إشعارات لوحة الشرف.' : `تُفحص لوحة الشرف يومياً الساعة ${$('#bdT', body).selectedOptions[0].textContent}.`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
     };
     $('#stkSave', body).onclick = async () => {
       const v = $('#stkT', body).value;

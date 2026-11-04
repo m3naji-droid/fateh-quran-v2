@@ -264,6 +264,71 @@ def run_streaks(local: dt.datetime, cfg: dict) -> dict | None:
     return {"reminded": len(reminded), **stats}
 
 
+# ------------------------------------------------------------ لوحة الشرف
+def num(v) -> str:
+    v = round(float(v or 0), 1)
+    return (str(int(v)) if v == int(v) else str(v).replace(".", "٫")).translate(AR_DIGITS)
+
+
+def run_board(local: dt.datetime, cfg: dict) -> dict | None:
+    """مرة يومياً: يقارن ترتيب اليوم بترتيب الأمس، ويرسل لكل طالب إشعاراً واحداً على الأكثر بأهم تقدّم له."""
+    at = cfg.get("boardTime", "20:30")
+    today = local.date().isoformat()
+    snap_ref = db.collection("settings").document("boardSnap")
+    snap = snap_ref.get()
+    snap = snap.to_dict() if snap.exists else {}
+    if at == "off" or local.strftime("%H:%M") < at or snap.get("day") == today:
+        return None
+    board = db.collection("leaderboard").document("main").get()
+    board = board.to_dict() if board.exists else {}
+    month = board.get("month") or {}
+    ym = month.get("ym")
+    classes = [c.get("id") for c in (month.get("classes") or []) if (c.get("score") or 0) > 0]
+    class_pos = {cid: i + 1 for i, cid in enumerate(classes)}
+    roster = list(db.collection("roster").stream())
+    cur = {}
+    for st in roster:
+        r = ((st.to_dict() or {}).get("rank") or {}).get("month") or {}
+        cur[st.id] = {"cls": r.get("cls"), "stage": r.get("stage"), "points": r.get("points", 0), "classId": st.get("classId")}
+    new_snap = {"day": today, "ym": ym, "students": {k: {"cls": v["cls"], "stage": v["stage"]} for k, v in cur.items()}, "classes": class_pos, "at": now_iso()}
+    # شهر جديد أو أول تشغيل: نحفظ الترتيب فقط، حتى لا يصل للجميع «دخلت الخمسة الأوائل» في أول يوم
+    if not ym or snap.get("ym") != ym:
+        snap_ref.set(new_snap)
+        return {"baseline": True}
+    prev, prev_cls = snap.get("students") or {}, snap.get("classes") or {}
+    improved = {cid: p for cid, p in class_pos.items() if p < (prev_cls.get(cid) or 99)}
+    sent = []
+    for pn, c in cur.items():
+        p = prev.get(pn) or {}
+        was = lambda k, top: (p.get(k) or 99) <= top
+        n = None
+        if c["stage"] == 1 and not was("stage", 1):
+            n = ("👑 أنت الآن شيخ المرحلة!", f"تصدّرت كل صفوف المرحلة هذا الشهر بـ{num(c['points'])} نقطة. حافظ على مكانك!")
+        elif c["cls"] == 1 and not was("cls", 1):
+            n = ("🏆 أنت الآن قارئ الصف!", f"المركز الأول في صفك هذا الشهر بـ{num(c['points'])} نقطة. واصل يا بطل!")
+        elif c["stage"] and c["stage"] <= 5 and not was("stage", 5):
+            n = ("🌟 دخلت الخمسة الأوائل على المرحلة", f"أنت في المركز {num(c['stage'])} على المرحلة كلها هذا الشهر. خطوة نحو القمة!")
+        elif c["cls"] and c["cls"] <= 5 and not was("cls", 5):
+            n = ("🎉 دخلت الخمسة الأوائل في صفك", f"أنت في المركز {num(c['cls'])} في صفك هذا الشهر. واصل لتصل إلى الأول!")
+        elif c["classId"] in improved:
+            pos = improved[c["classId"]]
+            n = ("🏁 صفك يتصدّر تحدي الصفوف!" if pos == 1 else "🏁 صفك تقدّم في تحدي الصفوف",
+                 "كل واجب منك يرفع صفك، فحافظوا على الصدارة!" if pos == 1 else f"صعد صفك إلى المركز {num(pos)} هذا الشهر. كل واجب منك يرفعه أكثر!")
+        if n:
+            sent.append((pn, n))
+    stats = {"sent": 0, "failed": 0, "removed": 0}
+    toks = {}
+    for t in tokens_for(students=[pn for pn, _ in sent]) if sent else []:
+        toks.setdefault(t.get("studentId"), []).append(t)
+    for pn, (title, body) in sent:
+        nt = {"type": "board", "title": title, "body": body, "link": "./#/student/honor", "tag": "board-" + today, "createdAt": now_iso(), "studentId": pn}
+        db.collection("roster").document(pn).collection("notifs").document("board-" + today).set(nt)
+        if toks.get(pn):
+            stats = add(stats, push(toks[pn], nt))
+    snap_ref.set(new_snap)
+    return {"notified": len(sent), **stats}
+
+
 # ------------------------------------------------------------ الواجهات
 class SendReq(BaseModel):
     notif: str
@@ -346,5 +411,9 @@ def cron(x_cron_secret: str | None = Header(None)):
         streaks = run_streaks(local, cfg)
     except Exception as e:
         streaks = {"error": str(e)[:200]}
+    try:
+        board = run_board(local, cfg)
+    except Exception as e:
+        board = {"error": str(e)[:200]}
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
-    return {"announcements": anns, "reminders": reminders, "streaks": streaks}
+    return {"announcements": anns, "reminders": reminders, "streaks": streaks, "board": board}
