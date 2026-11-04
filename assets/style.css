@@ -368,3 +368,9 @@ tr.picked td { background: var(--green-2); }
 .install-steps li::before { content: counter(st, arabic-indic); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--green); color: #fff; font-weight: 700; font-size: 14px; }
 .gear-btn { display: inline-flex; align-items: center; gap: 6px; }
 .gear-btn.on { background: var(--green-2); border-color: var(--green); color: var(--green); }
+.pw-toggle { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 10px; width: 100%; border-radius: 10px; }
+.pw-toggle:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; }
+.pw-tt { flex: 1; display: grid; gap: 2px; } .pw-tt b { font-size: 1.1rem; }
+.pw-toggle .chev { flex: 0 0 20px; width: 20px; height: 20px; overflow: visible; color: var(--muted); transition: transform .2s; }
+.pw-toggle .install-ico { flex: 0 0 38px; }
+.pw-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }

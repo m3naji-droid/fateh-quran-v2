@@ -782,18 +782,30 @@ function viewStudent(app) {
       <div class="grid2" style="align-items:start">
       <div class="card stack install-card" id="instCard" style="gap:12px"></div>
       <form class="card stack" id="pwF" style="gap:12px">
-        <h3>كلمة السر</h3>
-        <p class="small muted" style="margin:0">حسابك: <b>${esc(me.name)}</b>${cls ? ` · ${esc(cls.name)}` : ''}</p>
-        <label class="field">كلمة السر الحالية<input type="password" id="pwC" autocomplete="current-password" inputmode="numeric" required></label>
-        <label class="field">كلمة السر الجديدة (٦ خانات على الأقل)<input type="password" id="pwN" autocomplete="new-password" minlength="6" required></label>
-        <label class="field">أعد كتابة الجديدة<input type="password" id="pwN2" autocomplete="new-password" minlength="6" required></label>
-        <label class="row small" style="gap:6px"><input type="checkbox" id="pwShow"> إظهار كلمات السر</label>
-        <div id="pwErr" class="notice" hidden></div>
-        <p class="small muted" style="margin:0">احفظ كلمتك الجديدة جيداً ولا تعطها لأحد. إن نسيتها فاطلب من معلمك كلمة سر جديدة.</p>
-        <button class="btn primary" type="submit">حفظ كلمة السر</button>
+        <button type="button" class="pw-toggle" id="pwTog" aria-expanded="false" aria-controls="pwBox">
+          <span class="install-ico"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1zm2 0h6V7a3 3 0 0 0-6 0v3zm3 4a1.5 1.5 0 0 0-1 2.6V18h2v-1.4a1.5 1.5 0 0 0-1-2.6z"/></svg></span>
+          <span class="pw-tt"><b>تغيير كلمة السر</b><small class="muted">حسابك: ${esc(me.name)}${cls ? ` · ${esc(cls.name)}` : ''}</small></span>
+          <svg class="chev" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div id="pwBox" class="stack" style="gap:12px" hidden>
+          <label class="field">كلمة السر الحالية<input type="password" id="pwC" autocomplete="current-password" inputmode="numeric" required></label>
+          <label class="field">كلمة السر الجديدة (٦ خانات على الأقل)<input type="password" id="pwN" autocomplete="new-password" minlength="6" required></label>
+          <label class="field">أعد كتابة الجديدة<input type="password" id="pwN2" autocomplete="new-password" minlength="6" required></label>
+          <label class="row small" style="gap:6px"><input type="checkbox" id="pwShow"> إظهار كلمات السر</label>
+          <div id="pwErr" class="notice" hidden></div>
+          <p class="small muted" style="margin:0">احفظ كلمتك الجديدة جيداً ولا تعطها لأحد. إن نسيتها فاطلب من معلمك كلمة سر جديدة.</p>
+          <div class="row"><button class="btn primary" type="submit">حفظ كلمة السر</button><button class="btn" type="button" id="pwCancel">إلغاء</button></div>
+        </div>
       </form>
     </div>`;
     $('#setBack', body).onclick = () => { tab = 'tasks'; draw(); };
+    const pwOpen = (open) => {
+      const box = $('#pwBox', body), tog = $('#pwTog', body);
+      box.hidden = !open; tog.setAttribute('aria-expanded', open);
+      if (open) $('#pwC', body).focus(); else { $('#pwF', body).reset(); $('#pwErr', body).hidden = true; ['#pwC', '#pwN', '#pwN2'].forEach((q) => ($(q, body).type = 'password')); }
+    };
+    $('#pwTog', body).onclick = () => pwOpen($('#pwBox', body).hidden);
+    $('#pwCancel', body).onclick = () => pwOpen(false);
     $('#pwShow', body).onchange = (e) => ['#pwC', '#pwN', '#pwN2'].forEach((q) => ($(q, body).type = e.target.checked ? 'text' : 'password'));
     $('#pwF', body).onsubmit = async (e) => {
       e.preventDefault();
@@ -804,7 +816,7 @@ function viewStudent(app) {
       if (n1 !== n2) { err.hidden = false; err.textContent = 'الكلمتان الجديدتان غير متطابقتين.'; return; }
       if (n1 === cur) { err.hidden = false; err.textContent = 'اختر كلمة سر مختلفة عن الحالية.'; return; }
       btn.disabled = true;
-      try { await store.changePassword(me, cur, n1); $('#pwF', body).reset(); toast('تم تغيير كلمة السر.'); }
+      try { await store.changePassword(me, cur, n1); pwOpen(false); toast('تم تغيير كلمة السر.'); }
       catch (x) { err.hidden = false; err.textContent = x.message; }
       btn.disabled = false;
     };
