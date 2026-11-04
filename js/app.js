@@ -5,10 +5,11 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendAnnouncement, pushConfigured } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
-import { computeBoard, boardHtml, rankBadge } from './leaderboard.js';
+import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle } from './leaderboard.js';
+import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -46,6 +47,13 @@ function openModal(html, onMount) {
   $('#modalBody').innerHTML = html;
   $('#modal').hidden = false;
   onMount && onMount($('#modalBody'));
+}
+/** ينفّذ fn حين تكون النافذة المنبثقة مغلقة (لا تتراكب نافذتان) */
+function whenModalFree(fn) {
+  const m = $('#modal');
+  if (m.hidden) return fn();
+  const ob = new MutationObserver(() => { if (m.hidden) { ob.disconnect(); setTimeout(fn, 250); } });
+  ob.observe(m, { attributes: true, attributeFilter: ['hidden'] });
 }
 function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal' || e.target.closest('[data-close]')) closeModal(); });
@@ -821,7 +829,8 @@ function viewStudent(app) {
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month)\/([\w-]+)/);
+  let openMonthYm = deep && deep[1] === 'month' ? deep[2] : null;
   let openAnnId = deep && deep[1] === 'ann' ? deep[2] : null;
   let openRetakeId = deep && deep[1] === 'retake' ? deep[2] : null;
   let openTaskId = deep && deep[1] === 'task' ? deep[2] : null;
@@ -868,6 +877,31 @@ function viewStudent(app) {
       <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row"><button class="btn primary" type="button" data-close>فهمت</button></div></div>`);
     ackAnn(aid);
   }
+  /** نافذة «نتائج شهرك» (تظهر تلقائياً مرة واحدة، وتُفتح من الجرس) */
+  function openMonth(n) {
+    if (!n) return;
+    const seen = new Set(pref.get('monthSeen_' + me.id, [])); seen.add(n.ym); pref.set('monthSeen_' + me.id, [...seen].slice(-24));
+    const r = n.r || {}, w = n.win, cp = n.classPos;
+    const tile = (label, val, sub = '') => `<div><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+    openModal(`<div class="stack month-modal">
+      <h2>نتائج شهرك · ${esc(n.label || '')}</h2>
+      ${w ? `<div class="month-win"><div class="mw-badge">${rankBadge(w.rank)}</div><div><b>${esc(w.key === 'stage1' ? 'شيخ المرحلة' : w.key === 'cls1' ? 'قارئ الصف' : w.title)}</b><span>${esc(w.line)}. ما شاء الله تبارك الله!</span></div></div>` : `<p style="margin:0">${esc(n.body || '')}</p>`}
+      <div class="usage-grid">
+        ${tile('ترتيبك في الصف', r.cls ? `${ar(r.cls)} من ${ar(r.clsOf)}` : '—')}
+        ${tile('على المرحلة', r.stage ? `${ar(r.stage)} من ${ar(r.stageOf)}` : '—')}
+        ${tile('نقاطك', fmt10(r.points || 0), 'مجموع أفضل درجاتك في الواجبات')}
+        ${tile('أطول سلسلة', `🔥 ${ar(n.streak || 0)}`, ((k) => (k === 0 ? 'لا أيام بعد' : k === 1 ? 'يوم واحد' : k === 2 ? 'يومان متتاليان' : k <= 10 ? 'أيام متتالية' : 'يوماً متتالياً'))(n.streak || 0))}
+        ${cp && cp.pos ? tile('صفك في التحدي', `${ar(cp.pos)} من ${ar(cp.of)}`, esc(n.className || '')) : ''}
+      </div>
+      ${w ? `<div class="row"><button class="btn gold" type="button" id="cfPng">🏅 حمّل شهادتك (صورة)</button><button class="btn" type="button" id="cfPdf">PDF</button></div>` : ''}
+      <div class="row"><button class="btn primary" type="button" data-close>${w ? 'الحمد لله' : 'سأجتهد بإذن الله'}</button></div></div>`, (m) => {
+      if (!w) return;
+      const cert = { ym: n.ym, name: me.name, title: w.title, line: w.line, rank: w.rank, month: n.label, points: r.points, className: n.className, teacher: n.teacher, date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+      $('#cfPng', m).onclick = (e) => { e.currentTarget.disabled = true; downloadCertificatePNG(cert).catch((x) => toast(x.message)).finally(() => (e.currentTarget.disabled = false)); };
+      $('#cfPdf', m).onclick = (e) => { const b = e.currentTarget; b.disabled = true; downloadCertificatesPDF([cert], `certificate-${n.ym}.pdf`).catch((x) => toast(x.message)).finally(() => (b.disabled = false)); };
+    });
+    if (w) setTimeout(() => confetti(), 150);
+  }
   function openBell() {
     const seen = pref.get(seenKey, '');
     const L = [...notifs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -875,8 +909,8 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
@@ -884,6 +918,7 @@ function viewStudent(app) {
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
+        if (n?.type === 'month') { openMonth(n); return; }
         if (n?.type === 'retake') { store.listRetakes(me.id).then((L) => { data.retakes = L; startRetake(n.retakeId); }).catch(() => startRetake(n.retakeId)); return; }
         const t = n?.taskId && data.tasks.find((x) => x.id === n.taskId);
         if (t) { tab = 'tasks'; openTask(t); } else if (n?.taskId) toast('هذا الواجب لم يعد موجوداً.');
@@ -909,7 +944,7 @@ function viewStudent(app) {
     if (openRetakeId) { const id = openRetakeId; openRetakeId = null; if ((data.retakes || []).some((r) => r.id === id)) { startRetake(id); return; } }
     openSubId = null; // درجة من إشعار: نفتح «سجل التسميع» ويعرض announceGrades الاحتفال
     announceGrades();
-    if ($('#modal').hidden) celebrateStreak();
+    whenModalFree(() => { if ($('#stBody', app)) celebrateStreak(); });
     if (!offNotifs) offNotifs = store.watchNotifs(me.classId, async (L) => {
       // درجة جديدة وصلت والصفحة مفتوحة: نحدّث التسليمات ونعرض الاحتفال
       if (L.some((n) => n.type === 'retake' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
@@ -923,6 +958,10 @@ function viewStudent(app) {
       const first = !notifs.length && !paintBell.done;
       notifs = L; paintBell(); paintBell.done = true; paintAnnBar();
       if (openAnnId && anns().some((n) => n.annId === openAnnId)) { const id = openAnnId; openAnnId = null; openAnn(id); }
+      const months = L.filter((n) => n.type === 'month');
+      const mDeep = openMonthYm && months.find((n) => n.ym === openMonthYm);
+      if (mDeep) { openMonthYm = null; openMonth(mDeep); }
+      else if ($('#stBody', app)) { const seen = new Set(pref.get('monthSeen_' + me.id, [])); const fresh = months.find((n) => !seen.has(n.ym)); if (fresh && !openMonth.pending) { openMonth.pending = true; whenModalFree(() => { openMonth.pending = false; if ($('#stBody', app) && !new Set(pref.get('monthSeen_' + me.id, [])).has(fresh.ym)) openMonth(fresh); }); } }
       const onList = $('#stBody', app) && tab === 'tasks';
       // واجب جديد وصل والطالب على صفحة الواجبات: نحدّث القائمة
       if (L.some((n) => n.taskId && !data.tasks.some((t) => t.id === n.taskId))) {
@@ -1336,7 +1375,7 @@ function viewTeacher(app) {
       return;
     }
     unsub?.();
-    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
+    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
   }
   const reload = async (redraw = true) => {
@@ -1354,6 +1393,7 @@ function viewTeacher(app) {
         <div class="row"><a class="btn" href="#/practice">معاينة التدريب</a><button class="btn" id="tOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div id="dbWarn"></div>
+      <div id="monthBar"></div>
       <div class="kpis" id="tKpis"></div>
       <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
@@ -2249,8 +2289,103 @@ function viewTeacher(app) {
   }
   function drawHonorT(body) {
     const { board } = computeBoard(D.subs, D.students, D.classes);
-    mountBoard(body, { ...board, at: null }, { classes: D.classes, pickClass: true });
+    const months = [...new Set(D.subs.map((x) => (x.createdAt || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+    const cur = new Date().toISOString().slice(0, 7);
+    body.innerHTML = `<div class="card stack month-card" style="gap:10px;margin-bottom:16px">
+        <div class="row" style="justify-content:space-between"><h3>📅 نتائج الشهر والشهادات</h3><span class="small muted" id="mStat"></span></div>
+        <p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>
+        <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}</div>
+      </div><div id="hbBoard"></div>`;
+    mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
+    const pick = $('#mPick', body);
+    if (pick) {
+      const stat = () => store.getMonthResult(pick.value).then((r) => { const el = $('#mStat', body); if (el) el.innerHTML = r ? `<span class="pill ok">أُعلنت ${esc(fmtDate(r.announcedAt))}</span>` : '<span class="pill warn">لم تُعلن بعد</span>'; }).catch(() => {});
+      pick.onchange = stat; stat();
+      $('#mGo', body).onclick = () => openMonthReview(pick.value);
+    }
     schedulePublish();
+  }
+
+  /* --- نتائج الشهر --- */
+  const monthLabel = (ym) => { const [y, m] = ym.split('-').map(Number); return ar(new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('ar', { month: 'long', year: 'numeric' })); };
+  const prevYm = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); };
+  async function checkMonthBar() {
+    const ym = prevYm();
+    const host = $('#monthBar', app); if (!host) return;
+    if (!D.subs.some((x) => (x.createdAt || '').slice(0, 7) === ym)) { host.innerHTML = ''; return; }
+    let r = null; try { r = await store.getMonthResult(ym); } catch {}
+    if (r || pref.get('monthBarOff_' + ym, false)) { host.innerHTML = ''; return; }
+    host.innerHTML = `<div class="month-bar"><span>📅 <b>نتائج شهر ${esc(monthLabel(ym))} جاهزة.</b> راجعها ثم أعلنها لتصل الإشعارات والشهادات للطلاب.</span>
+      <span class="row" style="gap:6px"><button class="btn sm primary" type="button" id="mbGo">راجع وأعلن</button><button class="btn sm ghost" type="button" id="mbNo">لاحقاً</button></span></div>`;
+    $('#mbGo', host).onclick = () => openMonthReview(ym);
+    $('#mbNo', host).onclick = () => { pref.set('monthBarOff_' + ym, true); host.innerHTML = ''; };
+  }
+  function certFor(res, st, r) {
+    const w = monthTitle(r); if (!w) return null;
+    return { ym: res.ym, name: st.name, title: w.title, line: w.line, rank: w.rank, month: monthLabel(res.ym), points: r.points, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+  }
+  async function openMonthReview(ym) {
+    const res = computeMonth(D.subs, D.students, D.classes, ym);
+    const ungraded = D.subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym && x.taskId && !x.teacher).length;
+    let done = null; try { done = await store.getMonthResult(ym); } catch {}
+    const isCur = ym === new Date().toISOString().slice(0, 7);
+    const winners = D.students.map((st) => certFor(res, st, res.ranks[st.id])).filter(Boolean);
+    const row = (x, i) => `<li><span class="mr-n">${ar(i + 1)}</span><span>${esc(x.name)}</span><b class="num">${fmt10(x.points)}</b></li>`;
+    openModal(`<div class="stack month-review">
+      <h2>📅 نتائج شهر ${esc(monthLabel(ym))}</h2>
+      ${isCur ? '<div class="notice">هذا الشهر لم ينتهِ بعد. الأفضل إعلان نتائجه في أول الشهر القادم.</div>' : ''}
+      ${ungraded ? `<div class="notice">يوجد ${ar(ungraded)} من تسليمات هذا الشهر لم تقيّمها بعد، فتُحسب بدرجتها الآلية. قيّمها أولاً إن أردت.</div>` : ''}
+      ${done ? `<div class="pill ok" style="align-self:flex-start">أُعلنت هذه النتائج ${esc(fmtDate(done.announcedAt))}</div>` : ''}
+      <div class="mr-grid">
+        <div class="card"><h3>👑 شيخ المرحلة</h3><ol class="mr-list">${res.stage.map(row).join('') || '<li class="muted">لا نقاط</li>'}</ol></div>
+        <div class="card"><h3>🏁 تحدي الصفوف</h3><ol class="mr-list">${res.challenge.map((c, i) => `<li><span class="mr-n">${ar(i + 1)}</span><span>${esc(c.name)}</span><b class="num">${fmt10(c.score)}</b></li>`).join('')}</ol></div>
+        ${D.classes.filter((c) => (res.byClass[c.id] || []).length).map((c) => `<div class="card"><h3>🏆 قارئ ${esc(c.name)}</h3><ol class="mr-list">${res.byClass[c.id].map(row).join('')}</ol></div>`).join('')}
+      </div>
+      <p class="small muted" style="margin:0">سيصل لكل طالب إشعار بنتيجته الخاصة (ترتيبه في صفه وعلى المرحلة، ونقاطه، وأطول سلسلة له). الفائزون (${ar(winners.length)}) يحصلون على شهادة تقدير يحمّلونها من حسابهم.</p>
+      <div class="row">
+        <button class="btn primary" type="button" id="mrGo" ${done ? 'disabled' : ''}>📣 أعلن النتائج وأرسل الإشعارات</button>
+        <button class="btn gold" type="button" id="mrCerts" ${winners.length ? '' : 'disabled'}>شهادات الفائزين (PDF)</button>
+      </div></div>`, (m) => {
+      $('#mrCerts', m).onclick = async (e) => {
+        const b = e.currentTarget; b.disabled = true; b.textContent = 'جارٍ التجهيز…';
+        try { await downloadCertificatesPDF(winners, `maqraa-certificates-${ym}.pdf`, (i, n) => (b.textContent = `جارٍ التجهيز ${ar(i)} من ${ar(n)}…`)); toast('حُمّلت الشهادات.'); }
+        catch (x) { toast('تعذر التجهيز: ' + x.message); }
+        b.disabled = false; b.textContent = 'شهادات الفائزين (PDF)';
+      };
+      $('#mrGo', m).onclick = () => announceMonth(res, ym);
+    });
+  }
+  /** أطول سلسلة للطالب في الشهر */
+  async function bestStreak(st, ym) {
+    let act = [];
+    try { act = await store.listActivity(st.id, ym + '-01'); } catch {}
+    const days = new Set([...act.map((a) => a.d), ...D.subs.filter((x) => x.pn === st.id && x.createdAt).map((x) => riyadhDay(new Date(x.createdAt)))].filter((d) => d && d.slice(0, 7) === ym));
+    let best = 0;
+    days.forEach((d) => { if (!days.has(addDays(d, -1))) { let n = 0, k = d; while (days.has(k)) { n++; k = addDays(k, 1); } best = Math.max(best, n); } });
+    return best;
+  }
+  async function announceMonth(res, ym) {
+    if (!(await confirmBox(`إعلان نتائج شهر ${monthLabel(ym)} لكل الطلاب (${ar(D.students.length)})؟ يصل لكل طالب إشعار بنتيجته.`, 'أعلن النتائج'))) return;
+    const label = monthLabel(ym), items = [];
+    const { ok, fail } = await runBulk('إعلان نتائج الشهر', D.students, async (st) => {
+      const r = res.ranks[st.id] || { points: 0 };
+      const w = monthTitle(r);
+      const streak = await bestStreak(st, ym);
+      const cp = res.classPos[st.classId] || null;
+      const title = w ? (w.key === 'stage1' ? `👑 مبارك! أنت شيخ المرحلة لشهر ${label}` : w.key === 'cls1' ? `🏆 مبارك! أنت قارئ الصف لشهر ${label}` : `🏅 مبارك! ${w.title} لشهر ${label}`) : `📊 نتائج شهر ${label}`;
+      const body = w ? `${w.line} بـ${fmt10(r.points)} نقطة. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.`
+        : r.points > 0 ? `ترتيبك ${ar(r.cls)} في صفك بـ${fmt10(r.points)} نقطة. الشهر الجديد فرصة جديدة، وكل واجب ترفع به ترتيبك.`
+        : 'لم تُحسب لك نقاط هذا الشهر. ابدأ الشهر الجديد بواجب واحد، وستجد اسمك في لوحة الشرف بإذن الله.';
+      const id = 'month-' + ym;
+      await store.addStudentNotifId(st.id, id, { type: 'month', ym, label, title, body, link: './#/student/month/' + ym, tag: id, r: { points: r.points, cls: r.cls || null, clsOf: r.clsOf || null, stage: r.stage || null, stageOf: r.stageOf || null }, classPos: cp, streak, win: w, teacher: s.name || '', className: className(st.classId) });
+      items.push({ notif: id, student: st.id });
+    });
+    await store.saveMonthResult(ym, { ym, label, stage: res.stage, byClass: res.byClass, challenge: res.challenge, announcedAt: new Date().toISOString(), teacher: s.name || '', students: ok });
+    let pushed = null;
+    try { for (let i = 0; i < items.length; i += 200) { const r = await sendPushBatch(items.slice(i, i + 200)); if (r) pushed = { sent: (pushed?.sent || 0) + r.sent }; } } catch (e) { console.warn(e); }
+    toast(`أُعلنت نتائج ${label} لـ${nWord(ok, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}${pushed ? `، ووصل إشعار إلى ${ar(pushed.sent)} جهازاً` : ''}${fail ? `، وتعذر ${ar(fail)}` : ''}.`);
+    checkMonthBar();
+    if (tab === 'honor') drawBody();
   }
 
   /* --- عدّاد خادم التجويد --- */

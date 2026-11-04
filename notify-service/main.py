@@ -270,6 +270,10 @@ class SendReq(BaseModel):
     student: str | None = None  # تنبيه خاص بطالب واحد (roster/{student}/notifs/{notif})
 
 
+class BatchReq(BaseModel):
+    items: list[dict]  # [{"notif": id, "student": pn}] تنبيهات خاصة بطلاب (مثل نتائج الشهر)
+
+
 class AnnReq(BaseModel):
     ann: str
     resend: list[str] | None = None  # إعادة الإشعار لهؤلاء الطلاب فقط (من لم يقرأ)
@@ -295,6 +299,25 @@ def send(req: SendReq, authorization: str | None = Header(None)):
     r = push(docs, n) if docs else {"sent": 0, "failed": 0, "removed": 0}
     ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
     return r
+
+
+@app.post("/send-batch")
+def send_batch(req: BatchReq, authorization: str | None = Header(None)):
+    teacher_uid(authorization)
+    items = [i for i in req.items if i.get("notif") and i.get("student")][:1000]
+    toks = {}
+    for t in tokens_for(students=[i["student"] for i in items]) if items else []:
+        toks.setdefault(t.get("studentId"), []).append(t)
+    stats = {"sent": 0, "failed": 0, "removed": 0}
+    for i in items:
+        ref = notif_ref(i["notif"], i["student"])
+        snap = ref.get()
+        if not snap.exists or snap.to_dict().get("pushedAt"):
+            continue
+        r = push(toks.get(i["student"], []), snap.to_dict()) if toks.get(i["student"]) else {"sent": 0, "failed": 0, "removed": 0}
+        ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
+        stats = add(stats, r)
+    return stats
 
 
 @app.post("/announce")

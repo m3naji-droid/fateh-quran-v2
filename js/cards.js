@@ -1,12 +1,12 @@
 // بطاقات دخول الطلاب: ٨ بطاقات في صفحة A4، كل بطاقة فيها رمز QR للموقع وملاحظات واسم الطالب وكلمة سره.
 // الرسم على canvas مباشرة (لا لقطة HTML) حتى تتصل الحروف العربية بشكل صحيح في PDF.
 
-const LIBS = {
+export const LIBS = {
   qr: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
   pdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
 };
 const loaded = {};
-function loadScript(src) {
+export function loadScript(src) {
   if (!loaded[src]) {
     loaded[src] = new Promise((res, rej) => {
       const s = document.createElement('script');

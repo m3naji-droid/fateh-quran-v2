@@ -60,6 +60,11 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // نتائج الشهور المعلنة (الأوائل فقط، بلا درجات بقية الطلاب)
+    match /results/{ym} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
     // إعدادات المعلم (مثل وقت التذكير)، ويقرؤها الخادم
     match /settings/{id} {
       allow read, write: if isTeacher();

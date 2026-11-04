@@ -436,3 +436,15 @@ tr.grp.open .grp-chev { transform: none; }
 .streak-pill { display: inline-block; padding: 1px 8px; border-radius: 99px; background: #fff1e0; color: #c2560c; font-size: 12px; font-weight: 700; }
 .streak-cele { text-align: center; align-items: center; }
 .streak-num { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; font-size: 42px; font-weight: 800; color: #fff; background: radial-gradient(circle at 30% 30%, #ffb347, #e8590c); box-shadow: 0 8px 24px rgba(232, 89, 12, .35); }
+
+/* نتائج الشهر */
+.month-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 14px; margin-bottom: 12px; border-radius: 12px; background: var(--gold-soft); border: 1px solid var(--gold); }
+.month-card { border: 1px solid var(--gold); }
+.mr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; max-height: 50vh; overflow: auto; }
+.mr-grid .card { padding: 12px; } .mr-grid h3 { font-size: 15px; margin: 0 0 6px; }
+.mr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }
+.mr-list li { display: flex; gap: 8px; align-items: center; } .mr-list li span:nth-child(2) { flex: 1; }
+.mr-n { width: 22px; height: 22px; border-radius: 50%; background: var(--green-2); color: var(--green); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.month-win { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 14px; background: linear-gradient(160deg, var(--gold-soft), var(--card)); border: 2px solid var(--gold); }
+.month-win > div:last-child { display: grid; gap: 2px; } .month-win b { font-size: 20px; color: var(--gold); }
+.mw-badge .rank-badge { width: 64px; height: 64px; }

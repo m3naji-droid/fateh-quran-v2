@@ -80,6 +80,19 @@ export async function sendAnnouncement(annId, resend = null) {
   return res.json();
 }
 
+/** إرسال تنبيهات خاصة بعدة طلاب دفعة واحدة: items = [{notif, student}] */
+export async function sendPushBatch(items) {
+  if (!PUSH.url || store.mode !== 'cloud' || !items.length) return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/send-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) { let m = ''; try { m = (await res.json()).detail; } catch {} throw new Error(m || 'تعذر الإرسال (' + res.status + ').'); }
+  return res.json();
+}
+
 /** يطلب من خادم الإشعارات إرسال تنبيه محفوظ إلى أجهزة صفه. يعيد {sent, failed} أو null إن لم يُعدّ الخادم */
 export async function sendPush(notifId, student = null) {
   if (!PUSH.url || store.mode !== 'cloud') return null;

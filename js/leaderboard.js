@@ -182,3 +182,35 @@ export function boardHtml(p, opts = {}) {
     <p>في كل واجب تُحسب أفضل محاولة لك فقط: درجة المعلم إن قيّمها، وإلا الدرجة الآلية (من ١٠). نقاطك مجموع درجات واجباتك، فالإتقان والإنجاز معاً يرفعانك. ونقاط الصف مجموع نقاط كل طلابه، فكل واجب متقن من أي طالب يرفع صفه.</p>
   </details>`;
 }
+
+/** نتائج شهر محدد (YYYY-MM) للإعلان: الخمسة الأوائل في كل صف وفي المرحلة، وتحدي الصفوف، ومرتبة كل طالب */
+export function computeMonth(subs, students, classes, ym) {
+  const p = period(students, subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym), classes);
+  const list = p._list;
+  const allClasses = classes.map((c) => {
+    const m = list.filter((s) => s.classId === c.id);
+    return { id: c.id, name: c.name, score: round1(m.reduce((n, s) => n + s.points, 0)), active: m.filter((s) => s.points > 0).length, students: m.length };
+  }).filter((c) => c.students).sort((a, b) => b.score - a.score || b.active - a.active);
+  const classPos = {};
+  allClasses.forEach((c, i) => { classPos[c.id] = { pos: c.score > 0 ? i + 1 : null, of: allClasses.length, score: c.score }; });
+  const ranks = {};
+  list.forEach((s, i) => {
+    const cls = list.filter((x) => x.classId === s.classId);
+    ranks[s.id] = { points: s.points, tasks: s.tasks, stage: s.points > 0 ? i + 1 : null, stageOf: list.length, cls: s.points > 0 ? cls.findIndex((x) => x.id === s.id) + 1 : null, clsOf: cls.length };
+  });
+  const [y, m] = ym.split('-').map(Number);
+  const label = new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('ar', { month: 'long', year: 'numeric' });
+  delete p._list;
+  return { ym, label, ...p, challenge: allClasses.slice(0, TOP), classPos, ranks };
+}
+
+/** لقب الطالب في نتائج الشهر (للفائزين فقط) */
+export function monthTitle(r) {
+  if (!r) return null;
+  const ord = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس'];
+  if (r.stage === 1) return { key: 'stage1', title: 'شيخ المرحلة', line: 'المركز الأول على المرحلة كلها', rank: 1, scope: 'stage' };
+  if (r.cls === 1) return { key: 'cls1', title: 'قارئ الصف', line: 'المركز الأول في صفه', rank: 1, scope: 'cls' };
+  if (r.stage && r.stage <= TOP) return { key: 'stage', title: `المركز ${ord[r.stage]} على المرحلة`, line: `المركز ${ord[r.stage]} على المرحلة كلها`, rank: r.stage, scope: 'stage' };
+  if (r.cls && r.cls <= TOP) return { key: 'cls', title: `المركز ${ord[r.cls]} في الصف`, line: `المركز ${ord[r.cls]} في صفه`, rank: r.cls, scope: 'cls' };
+  return null;
+}
