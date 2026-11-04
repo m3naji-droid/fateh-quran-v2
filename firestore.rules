@@ -71,16 +71,31 @@ service cloud.firestore {
 
       match /subs/{sid} {
         allow read: if isTeacher() || isStudent(pn);
+        // محاولة واحدة لكل واجب: معرّف التسليم ثابت (t_رقم الواجب، أو r_رقم طلب الإعادة)،
+        // فإن وُجد من قبل صار الحفظ تعديلاً، والتعديل ممنوع على الطالب
         allow create: if isStudent(pn)
           && request.resource.data.pn == pn
-          && request.resource.data.teacher == null;
-        allow update, delete: if isTeacher();
+          && request.resource.data.teacher == null
+          && (request.resource.data.get('taskId', null) == null
+            || (request.resource.data.get('retakeId', null) == null && sid == 't_' + request.resource.data.taskId)
+            || (request.resource.data.get('retakeId', null) != null && sid == 'r_' + request.resource.data.retakeId
+                && exists(/databases/$(database)/documents/roster/$(pn)/retakes/$(request.resource.data.retakeId))));
+        // الطالب يضيف نتيجة تحليل التجويد الآلي فقط، وقبل تقييم المعلم
+        allow update: if isTeacher()
+          || (isStudent(pn) && resource.data.get('teacher', null) == null
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ai']));
+        allow delete: if isTeacher();
 
         match /audio/{aid} {
           allow read: if isTeacher() || isStudent(pn);
           allow create: if isStudent(pn) && request.resource.data.b64.size() < 1000000;
           allow update, delete: if isTeacher();
         }
+      }
+      // طلبات إعادة التسميع: يكتبها المعلم، ويقرؤها الطالب
+      match /retakes/{rid} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow write: if isTeacher();
       }
       // تنبيهات خاصة بالطالب (مثل وصول درجته): لا يقرؤها غيره
       match /notifs/{nid} {

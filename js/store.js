@@ -2,6 +2,7 @@
 import { FIREBASE } from './firebase-config.js';
 
 const FB_VER = '10.12.2';
+const ONCE_MSG = 'سبق أن أرسلت هذا الواجب. لكل واجب محاولة واحدة، ويمكن لمعلمك أن يطلب منك إعادته.';
 export const NOTIF_DAYS = 30; // مدة بقاء التنبيه في جرس الموقع
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const now = () => new Date().toISOString();
@@ -120,9 +121,10 @@ const local = {
   async saveTask(t) { const all = LS.get('tasks', []); const i = all.findIndex((x) => x.id === t.id); let id = t.id; if (i >= 0) all[i] = { ...all[i], ...t }; else { id = uid(); all.push({ id, createdAt: now(), ...t }); } LS.set('tasks', all); return id; },
   async deleteTask(id) { LS.set('tasks', LS.get('tasks', []).filter((t) => t.id !== id)); },
   // التسليمات
-  async addSubmission(pn, sub, audio) {
-    const id = uid();
+  async addSubmission(pn, sub, audio, fixedId) {
+    const id = fixedId || uid();
     const all = LS.get('subs', []);
+    if (fixedId && all.some((s) => s.id === id && s.pn === pn)) throw new Error(ONCE_MSG);
     all.push({ ...sub, id, pn, createdAt: now(), hasAudio: !!audio, audioBytes: audio ? Math.ceil(audio.size * 4 / 3) : 0 });
     LS.set('subs', all);
     if (audio) await idbPut(id, audio);
@@ -138,6 +140,10 @@ const local = {
     try { const db = await idb(); await new Promise((res) => { const tx = db.transaction('audio', 'readwrite'); tx.objectStore('audio').delete(id); tx.oncomplete = res; tx.onerror = res; }); } catch {}
     await this.updateSubmission(pn, id, { hasAudio: false, audioBytes: 0, audioDeletedAt: now() });
   },
+  async updateOwnAi(pn, id, ai) { await this.updateSubmission(pn, id, { ai }); },
+  // طلبات إعادة التسميع
+  async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
+  async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
   async getModel() { return LS.get('model', null); },
   async setModel(m) { LS.set('model', m); },
   // لوحة الشرف
@@ -325,18 +331,34 @@ async function makeCloud() {
     async listTasks() { await ensureAnon(); return list('tasks'); },
     async saveTask(t) { const id = t.id || uid(); const { id: _, ...rest } = t; await setDoc(doc(db, 'tasks', id), t.id ? rest : { createdAt: now(), ...rest }, { merge: true }); return id; },
     async deleteTask(id) { await deleteDoc(doc(db, 'tasks', id)); },
-    async addSubmission(pn, sub, audio) {
+    async addSubmission(pn, sub, audio, fixedId) {
       await ensureAnon();
-      const id = uid();
+      const id = fixedId || uid();
       let audioDoc = null;
       if (audio) {
         const b64 = await blobToB64(audio);
         if (b64.length < 950000) audioDoc = { b64, mime: audio.type };
       }
-      await setDoc(doc(db, 'roster', pn, 'subs', id), { ...sub, pn, createdAt: now(), hasAudio: !!audioDoc, audioBytes: audioDoc ? audioDoc.b64.length : 0 });
-      if (audioDoc) await setDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'), audioDoc);
+      try {
+        // الصوت أولاً: إن تعذر رفعه لا يُحسب التسليم، فيستطيع الطالب الإرسال مرة أخرى
+        if (audioDoc) {
+          try { await setDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'), audioDoc); }
+          catch (e) {
+            // الصوت مرفوع من محاولة سابقة انقطعت قبل حفظ التسليم: نكمل الحفظ
+            if (!(fixedId && e.code === 'permission-denied')) throw e;
+            if ((await getDoc(doc(db, 'roster', pn, 'subs', id))).exists()) throw e;
+          }
+        }
+        await setDoc(doc(db, 'roster', pn, 'subs', id), { ...sub, pn, createdAt: now(), hasAudio: !!audioDoc, audioBytes: audioDoc ? audioDoc.b64.length : 0 });
+      } catch (e) {
+        if (fixedId && e.code === 'permission-denied') throw new Error(ONCE_MSG);
+        throw e;
+      }
       return id;
     },
+    async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
+    async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
+    async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },
     async studentSubmissions(pn) { await ensureAnon(); return list(`roster/${pn}/subs`); },
     async allSubmissions() { return (await getDocs(query(collectionGroup(db, 'subs'), limit(10000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     watchSubmissions(cb, onErr) {

@@ -146,6 +146,7 @@ function bindRangePicker(root, prefix, onChange) {
 const MIC_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>';
 const STOP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
 
+const ONE_SHOT_NOTE = 'ملاحظة: لك محاولة واحدة لتسجيل الآيات، لا تستعجل، تدرّب جيداً قبل التسجيل، ولا تخف إن حدث خطأ في التسجيل سيرسل لك المعلم طلباً لإعادة التسجيل.';
 function mountRecite(root, opts) {
   const { surah, from, to } = opts;
   let mode = opts.mode || 'recite'; // recite | hifz
@@ -191,6 +192,7 @@ function mountRecite(root, opts) {
     </div>
     <aside class="side">
       <div class="card mic-panel" id="rcMicCard">
+        ${opts.oneShot ? `<div class="one-shot"><b>محاولة واحدة</b><span>${ONE_SHOT_NOTE}</span>${opts.onPractice ? '<button class="btn sm" type="button" id="rcPractice">تدرّب على المقطع أولاً</button>' : ''}</div>` : ''}
         <div id="rcNotice"></div>
         <button class="mic" id="rcMic" type="button" aria-label="ابدأ التسميع">${MIC_SVG}</button>
         <div class="timer" id="rcTimer">00:00</div>
@@ -361,24 +363,41 @@ function mountRecite(root, opts) {
       showResult();
     }
   }
-  $('#rcMic', root).onclick = () => (sess?.active ? finishRec() : startRec());
+  let sent = false; // في وضع المحاولة الواحدة: أُرسل التسليم
+  $('#rcMic', root).onclick = async () => {
+    if (sess?.active) return finishRec();
+    if (opts.oneShot) {
+      if (sent) return toast('أرسلت محاولتك لهذا الواجب. انتظر تقييم معلمك.');
+      if (!(await confirmBox('هذه محاولتك الوحيدة لهذا الواجب، وستُرسل للمعلم تلقائياً عند إيقاف التسجيل. هل أنت مستعد؟', 'ابدأ التسجيل'))) return;
+    }
+    startRec();
+  };
+  const pr = $('#rcPractice', root);
+  if (pr) pr.onclick = () => opts.onPractice();
 
   function showResult() {
     const box = $('#rcResult', root);
     const audioUrl = lastBlob ? URL.createObjectURL(lastBlob) : '';
-    const submitBtn = opts.onSubmit ? `<button class="btn primary" id="rcSubmit" type="button">إرسال للمعلم</button>` : '';
+    // المحاولة الواحدة: التسجيل الصامت أو القصير جداً لا يُحسب، وما عداه يُرسل تلقائياً
+    const oneShot = !!opts.oneShot;
+    const counts = !!lastBlob && lastDuration >= 3;
+    const submitBtn = opts.onSubmit && !oneShot ? `<button class="btn primary" id="rcSubmit" type="button">إرسال للمعلم</button>` : '';
+    const retryBtn = !oneShot || !counts ? '<button class="btn" id="rcRetry" type="button">إعادة المحاولة</button>' : '';
+    const sendBox = oneShot && counts ? '<div class="send-state" id="rcSendState">جارٍ إرسال تسميعك إلى المعلم…</div>' : '';
     if (!last) {
       box.innerHTML = `<div class="card stack" style="gap:10px">
+        ${sendBox}
         <h3>${hasRecognition ? 'لم نسمع تلاوة واضحة' : 'تم التسجيل'}</h3>
-        <p class="muted small" style="margin:0">${hasRecognition ? 'تأكد من السماح للميكروفون، واقرأ بصوت أعلى قليلاً في مكان هادئ.' : 'لا يدعم متصفحك التصحيح الآلي؛ يمكنك إرسال التسجيل ليقيّمه المعلم.'}</p>
+        <p class="muted small" style="margin:0">${oneShot && !counts ? 'التسجيل قصير جداً أو صامت، فلم يُحسب محاولة. تأكد من السماح للميكروفون ثم أعد المحاولة.' : hasRecognition ? 'تأكد من السماح للميكروفون، واقرأ بصوت أعلى قليلاً في مكان هادئ.' : 'لا يدعم متصفحك التصحيح الآلي؛ يمكنك إرسال التسجيل ليقيّمه المعلم.'}</p>
         ${audioUrl ? `<audio controls src="${audioUrl}" style="width:100%"></audio>` : ''}
-        <div class="row">${lastBlob && opts.onSubmit ? submitBtn : ''}<button class="btn" id="rcRetry" type="button">إعادة المحاولة</button></div></div>`;
+        <div class="row">${lastBlob && opts.onSubmit ? submitBtn : ''}${retryBtn}</div></div>`;
     } else {
       const sc = score(last, lastDuration);
       const mist = [];
       last.status.forEach((s, i) => { if (s === 'wrong' || s === 'missing') mist.push(i); });
       const color = sc.percent >= 85 ? 'var(--ok)' : sc.percent >= 60 ? 'var(--warn)' : 'var(--bad)';
       box.innerHTML = `<div class="card stack" style="gap:14px">
+        ${sendBox}
         ${cheerHtml(sc.outOf10)}
         <div class="score-ring" style="--p:${sc.percent};--c:${color}"><div><div><b>${ar(sc.percent)}٪</b><br><span class="small muted">${sc.grade}</span></div></div></div>
         <div class="stats">
@@ -393,7 +412,7 @@ function mountRecite(root, opts) {
         ${audioUrl ? `<div><b class="small">تسجيلك</b><audio controls src="${audioUrl}" style="width:100%"></audio></div>` : ''}
         ${L ? `<div class="learn-note">الدرجة المتوقعة من معلمك: <b>${ar(predict(L.model, { surah, from, to, percent: sc.percent, wpm: sc.wpm }, L.rates))} / ١٠</b><br><span class="small">تقدير يتعلمه النظام من تقييمات المعلم السابقة، والدرجة النهائية للمعلم.</span></div>` : ''}
         <div class="small muted">التصحيح الآلي يقيس صحة الكلمات والحفظ. أحكام التجويد والمخارج يقيّمها المعلم بالاستماع.</div>
-        <div class="row">${submitBtn}<button class="btn" id="rcRetry" type="button">إعادة المحاولة</button></div>
+        <div class="row">${submitBtn}${retryBtn}</div>
       </div>`;
       $$('[data-play]', box).forEach((b) => (b.onclick = () => playRange(+b.dataset.play, +b.dataset.play)));
       if (sc.outOf10 >= 8) confetti();
@@ -401,13 +420,36 @@ function mountRecite(root, opts) {
       opts.onResult && opts.onResult(buildSubmission());
     }
     if (lastBlob && aiEnabled()) mountAi(box);
-    $('#rcRetry', box).onclick = () => { aiCtl?.abort(); aiRes = null; wEls.forEach((el) => el.classList.remove('tjai')); box.innerHTML = ''; wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed')); if (mode === 'hifz') text.classList.add('hide'); $('#rcTimer', root).textContent = '00:00'; $('#rcProg', root).style.width = '0'; $('#rcStatus', root).textContent = 'جاهز. اضغط الزر وابدأ.'; };
+    const rr = $('#rcRetry', box);
+    if (rr) rr.onclick = () => { aiCtl?.abort(); aiRes = null; wEls.forEach((el) => el.classList.remove('tjai')); box.innerHTML = ''; wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed')); if (mode === 'hifz') text.classList.add('hide'); $('#rcTimer', root).textContent = '00:00'; $('#rcProg', root).style.width = '0'; $('#rcStatus', root).textContent = 'جاهز. اضغط الزر وابدأ.'; };
+    if (oneShot && counts) autoSend(box);
     const sb = $('#rcSubmit', box);
     if (sb) sb.onclick = async () => {
       sb.disabled = true; sb.textContent = 'جارٍ الإرسال…';
       try { await opts.onSubmit(buildSubmission(), lastBlob); }
       catch (e) { console.error(e); toast('تعذر الإرسال: ' + (e.message || e)); sb.disabled = false; sb.textContent = 'إرسال للمعلم'; }
     };
+  }
+
+  let sentId = null;
+  async function autoSend(box) {
+    const st = $('#rcSendState', box);
+    const sub = buildSubmission(), blob = lastBlob;
+    const attempt = async () => {
+      st.className = 'send-state'; st.textContent = 'جارٍ إرسال تسميعك إلى المعلم…';
+      try {
+        sentId = await opts.onSubmit(sub, blob);
+        sent = true;
+        st.className = 'send-state ok'; st.innerHTML = '✓ أُرسل تسميعك إلى المعلم. جزاك الله خيراً، وانتظر تقييمه.';
+        if (aiRes && opts.onAi) opts.onAi(sentId, aiRes).catch(() => {});
+      } catch (e) {
+        st.className = 'send-state bad';
+        st.innerHTML = `${esc(e.message || 'تعذر الإرسال.')} ${/سبق/.test(e.message || '') ? '' : '<button class="btn sm" type="button" id="rcResend">أعد الإرسال</button>'}`;
+        const b = $('#rcResend', st); if (b) b.onclick = attempt;
+        if (/سبق/.test(e.message || '')) sent = true;
+      }
+    };
+    attempt();
   }
 
   function mountAi(box) {
@@ -423,10 +465,11 @@ function mountRecite(root, opts) {
     const start = async () => {
       if (!(await ensureAiNotice())) return;
       aiCtl = new AbortController();
-      card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="small" id="aiProg">جارٍ التحضير…</div><div class="progress"><i class="indet"></i></div>${opts.onSubmit ? '<p class="small muted" style="margin:0">يمكنك الإرسال الآن؛ إن لم ينتهِ التحليل فسيُجريه المعلم لاحقاً.</p>' : ''}`;
+      card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="small" id="aiProg">جارٍ التحضير…</div><div class="progress"><i class="indet"></i></div>${opts.oneShot ? '<p class="small muted" style="margin:0">أُرسل تسميعك، وتُضاف نتيجة التحليل إليه عند انتهائه.</p>' : opts.onSubmit ? '<p class="small muted" style="margin:0">يمكنك الإرسال الآن؛ إن لم ينتهِ التحليل فسيُجريه المعلم لاحقاً.</p>' : ''}`;
       try {
         aiRes = await aiAnalyze(lastBlob, { surah, from, to }, (t) => { const el = $('#aiProg', card); if (el) el.textContent = t; }, aiCtl.signal);
         renderAi(card);
+        if (sentId && opts.onAi) opts.onAi(sentId, aiRes).catch((e) => console.warn('ai save', e));
       } catch (e) {
         if (aiCtl.signal.aborted) return;
         card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="notice">${esc(e.message)}</div><button class="btn" type="button" id="aiGo">أعد المحاولة</button>`;
@@ -730,11 +773,18 @@ function viewStudent(app) {
   let comp = null;
   let tab = studentStartTab || 'tasks';
   studentStartTab = null;
-  let data = { tasks: [], subs: [], classes: [] };
+  let data = { tasks: [], subs: [], classes: [], retakes: [] };
   const me = s.student;
+  const openRetakes = () => (data.retakes || []).filter((r) => !data.subs.some((x) => x.retakeId === r.id)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  function startRetake(rid) {
+    const r = (data.retakes || []).find((x) => x.id === rid);
+    if (!r) return toast('طلب الإعادة غير موجود.');
+    openTask(data.tasks.find((t) => t.id === r.taskId) || null, r);
+  }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/(task|grade)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake)\/([\w-]+)/);
+  let openRetakeId = deep && deep[1] === 'retake' ? deep[2] : null;
   let openTaskId = deep && deep[1] === 'task' ? deep[2] : null;
   let openSubId = deep && deep[1] === 'grade' ? deep[2] : null;
   if (deep) history.replaceState(null, '', '#/student');
@@ -762,7 +812,7 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-ico">${n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
         <span class="notif-tx"><b>${esc((n.title || '').replace(/^🎉\s*/, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
@@ -770,6 +820,7 @@ function viewStudent(app) {
         const n = notifs.find((x) => x.id === b.dataset.nid);
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
+        if (n?.type === 'retake') { store.listRetakes(me.id).then((L) => { data.retakes = L; startRetake(n.retakeId); }).catch(() => startRetake(n.retakeId)); return; }
         const t = n?.taskId && data.tasks.find((x) => x.id === n.taskId);
         if (t) { tab = 'tasks'; openTask(t); } else if (n?.taskId) toast('هذا الواجب لم يعد موجوداً.');
       }));
@@ -780,9 +831,10 @@ function viewStudent(app) {
     app.innerHTML = '<div class="loading">جارٍ تحميل بياناتك…</div>';
     if (!(await store.isStudentAuthed(me))) { session.set(null); studentLogin(app, 'انتهت جلسة الدخول. اختر صفك واسمك واكتب كلمة السر من جديد.'); return; }
     try {
-      const [tasks, subs, classes, rank] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null)]);
+      const [tasks, subs, classes, rank, retakes] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null), store.listRetakes(me.id).catch(() => [])]);
+      data.retakes = retakes;
       me.rankInfo = rank;
-      data = { tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
+      data = { retakes, tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
     } catch (e) {
       console.error(e);
       app.innerHTML = `<div class="empty">تعذر تحميل البيانات: ${esc(e.message)}</div>`;
@@ -790,10 +842,15 @@ function viewStudent(app) {
     }
     draw();
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
+    if (openRetakeId) { const id = openRetakeId; openRetakeId = null; if ((data.retakes || []).some((r) => r.id === id)) { startRetake(id); return; } }
     openSubId = null; // درجة من إشعار: نفتح «سجل التسميع» ويعرض announceGrades الاحتفال
     announceGrades();
     if (!offNotifs) offNotifs = store.watchNotifs(me.classId, async (L) => {
       // درجة جديدة وصلت والصفحة مفتوحة: نحدّث التسليمات ونعرض الاحتفال
+      if (L.some((n) => n.type === 'retake' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
+        try { data.retakes = await store.listRetakes(me.id); } catch {}
+        if ($('#stBody', app) && tab === 'tasks') draw();
+      }
       if (L.some((n) => n.type === 'grade' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
         try { data.subs = (await store.studentSubmissions(me.id)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
         if ($('#stBody', app)) { draw(); announceGrades(); }
@@ -1000,6 +1057,15 @@ function viewStudent(app) {
       <span class="small muted">${st === 'ready' ? 'يصلك إشعار على جوالك لحظة إرسال معلمك واجباً، حتى والمقرأة مغلقة.' : 'على الآيفون تصل الإشعارات بعد تثبيت المقرأة على الشاشة الرئيسية فقط.'}</span></div>
       <div class="row"><button class="btn primary sm" type="button" id="pushInvGo">${st === 'ready' ? 'فعّل التنبيهات' : 'طريقة التثبيت'}</button><button class="btn sm ghost" type="button" id="pushInvNo">لاحقاً</button></div></div>`;
   }
+  function retakeCards() {
+    const L = openRetakes();
+    if (!L.length) return '';
+    return `<div class="stack" style="gap:10px;margin-bottom:12px">${L.map((r) => `<div class="card retake-card">
+      <div class="t-main"><b>🔁 معلمك يطلب إعادة التسميع</b><h3 style="margin:4px 0 0">${esc(r.taskTitle || 'تسميع')}</h3><div class="t-range">${esc(rangeLabel(r.surah, r.from, r.to))}</div>
+      ${r.notes ? `<p class="small" style="margin:6px 0 0">«${esc(r.notes)}»</p>` : ''}
+      <div class="small muted">${r.due ? `أعده قبل ${fmtDate(r.due)}` : 'بلا موعد محدد'}</div></div>
+      <div class="row"><button class="btn primary" type="button" data-retake="${esc(r.id)}">أعد التسميع</button></div></div>`).join('')}</div>`;
+  }
   function bindPushInvite(body) {
     const go = $('#pushInvGo', body); if (!go) return;
     $('#pushInvNo', body).onclick = () => { pref.set('pushInviteOff_' + me.id, true); $('#pushInv', body)?.remove(); toast('يمكنك تفعيلها لاحقاً من «الإعدادات».'); };
@@ -1011,9 +1077,9 @@ function viewStudent(app) {
     };
   }
   function drawTasks(body, done) {
-    if (!data.tasks.length) { body.innerHTML = pushInvite() + '<div class="empty">لا توجد واجبات حالياً. يمكنك التدرب على أي سورة من تبويب «تدريب حر».</div>'; bindPushInvite(body); return; }
+    if (!data.tasks.length) { body.innerHTML = pushInvite() + retakeCards() + '<div class="empty">لا توجد واجبات حالياً. يمكنك التدرب على أي سورة من تبويب «تدريب حر».</div>'; $$('[data-retake]', body).forEach((b) => (b.onclick = () => startRetake(b.dataset.retake))); bindPushInvite(body); return; }
     const fresh = new Set(notifs.filter((n) => n.taskId && (n.createdAt || '') > pref.get(seenKey, '')).map((n) => n.taskId));
-    body.innerHTML = pushInvite() + `<div class="stack">${data.tasks.map((t) => {
+    body.innerHTML = pushInvite() + retakeCards() + `<div class="stack">${data.tasks.map((t) => {
       const mySubs = data.subs.filter((x) => x.taskId === t.id);
       const best = mySubs.reduce((m, x) => Math.max(m, x.percent ?? -1), -1);
       const overdue = t.due && !done.has(t.id) && new Date(t.due) < new Date(new Date().toDateString());
@@ -1021,31 +1087,42 @@ function viewStudent(app) {
         <div class="t-main"><h3>${esc(t.title)}${fresh.has(t.id) && !done.has(t.id) ? ' <span class="pill new-pill">جديد</span>' : ''}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
           <div class="small muted">${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'}${t.due ? ` · التسليم ${fmtDate(t.due)}` : ''}${t.notes ? ` · ${esc(t.notes)}` : ''}</div></div>
         <div class="row">${done.has(t.id) ? `<span class="pill ok">أُرسل${best >= 0 ? ` · ${ar(best)}٪` : ''}</span>` : overdue ? '<span class="pill bad">متأخر</span>' : '<span class="pill warn">لم يُنجز</span>'}
-        <button class="btn primary" type="button" data-task="${esc(t.id)}">${done.has(t.id) ? 'تسميع مرة أخرى' : 'ابدأ التسميع'}</button></div></div>`;
+        ${done.has(t.id) ? `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>` : `<button class="btn primary" type="button" data-task="${esc(t.id)}">ابدأ التسميع</button>`}</div></div>`;
     }).join('')}</div>`;
     $$('[data-task]', body).forEach((b) => (b.onclick = () => openTask(data.tasks.find((t) => t.id === b.dataset.task))));
+    $$('[data-prac]', body).forEach((b) => (b.onclick = () => { const t = data.tasks.find((x) => x.id === b.dataset.prac); pendingPractice = { surah: t.surah, from: t.from, to: t.to, mode: t.mode }; tab = 'practice'; draw(); }));
+    $$('[data-retake]', body).forEach((b) => (b.onclick = () => startRetake(b.dataset.retake)));
     bindPushInvite(body);
   }
 
-  async function openTask(t) {
+  /** واجب أو طلب إعادة: محاولة واحدة تُرسل تلقائياً */
+  async function openTask(t, rt = null) {
     comp?.destroy();
+    const sid = rt ? 'r_' + rt.id : 't_' + t.id;
+    const already = rt ? data.subs.some((x) => x.retakeId === rt.id) : data.subs.some((x) => x.taskId === t.id && !x.retakeId);
     let learn = null;
     try {
       const model = await store.getModel();
       const rates = studentRates(model, data.subs);
       learn = { model, rates, weak: weakRules(model, data.subs, 3) };
     } catch {}
-    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="tkBack" type="button">→ رجوع للواجبات</button><h1>${esc(t.title)}</h1>
-      <p class="muted" style="margin:4px 0 0">${t.notes ? esc(t.notes) : 'اقرأ المقطع كاملاً ثم أرسل تسجيلك للمعلم.'}</p></div></div><div id="tkBody"></div>`;
-    $('#tkBack', app).onclick = () => { comp?.destroy(); draw(); };
+    const range = rt ? { surah: rt.surah, from: rt.from, to: rt.to } : { surah: t.surah, from: t.from, to: t.to };
+    const note = rt ? (rt.notes ? `ملاحظة معلمك: ${rt.notes}` : 'معلمك يطلب منك إعادة هذا المقطع.') : (t.notes || 'اقرأ المقطع كاملاً، ويُرسل تسجيلك للمعلم تلقائياً عند الإيقاف.');
+    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="tkBack" type="button">→ رجوع للواجبات</button><h1>${rt ? 'إعادة: ' : ''}${esc(t?.title || rt?.taskTitle || 'تسميع')}</h1>
+      <p class="muted" style="margin:4px 0 0">${rt ? esc(rangeLabel(range.surah, range.from, range.to)) + ' · ' : ''}${esc(note)}</p></div></div><div id="tkBody"></div>`;
+    $('#tkBack', app).onclick = () => { comp?.destroy(); comp = null; load(); };
+    if (already) { $('#tkBody', app).innerHTML = `<div class="empty">أرسلت محاولتك لهذا ${rt ? 'الطلب' : 'الواجب'}. لكل ${rt ? 'طلب' : 'واجب'} محاولة واحدة، ويمكن لمعلمك أن يطلب منك إعادته.</div>`; return; }
     const cls = data.classes.find((c) => c.id === me.classId);
     comp = mountRecite($('#tkBody', app), {
-      surah: t.surah, from: t.from, to: t.to, mode: t.mode, learn,
+      ...range, mode: rt?.mode || t?.mode, learn, oneShot: true,
+      onPractice: () => { comp?.destroy(); comp = null; pendingPractice = { ...range, mode: rt?.mode || t?.mode }; tab = 'practice'; draw(); },
       onSubmit: async (sub, blob) => {
-        await store.addSubmission(me.id, { ...sub, taskId: t.id, taskTitle: t.title, studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null }, blob);
-        toast('تم إرسال التسميع إلى المعلم. جزاك الله خيراً.');
-        await load();
+        const extra = rt ? { retakeId: rt.id, retakeOf: rt.subId || null } : {};
+        const id = await store.addSubmission(me.id, { ...sub, ...range, taskId: t?.id || rt?.taskId || null, taskTitle: t?.title || rt?.taskTitle || '', studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null, ...extra }, blob, sid);
+        data.subs.unshift({ ...sub, id, pn: me.id, taskId: t?.id || rt?.taskId, ...extra, createdAt: new Date().toISOString() });
+        return id;
       },
+      onAi: (id, ai) => store.updateOwnAi(me.id, id, ai),
     });
   }
 
@@ -1278,7 +1355,7 @@ function viewTeacher(app) {
       [...selSubs].forEach((k) => { if (!all.has(k)) selSubs.delete(k); });
       $('#subList', body).innerHTML = (selSubs.size ? `<div class="bulk"><b>المحدد: ${ar(selSubs.size)}</b><button class="btn sm danger" type="button" id="bsDel">حذف المحدد</button><button class="btn sm" type="button" id="bsClr">إلغاء التحديد</button></div>` : '')
         + (L.length ? `<div class="table-wrap"><table><thead><tr><th class="sel"><input type="checkbox" id="bsAll" aria-label="تحديد كل التسليمات الظاهرة"></th><th>الطالب</th><th>الصف</th><th>الواجب / المقطع</th><th>التاريخ</th><th>الدقة الآلية</th><th>المدة</th><th>تقييمك</th></tr></thead><tbody>
-        ${L.map((x) => `<tr class="click ${selSubs.has(subKey(x)) ? 'picked' : ''}" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td class="sel"><input type="checkbox" data-sk="${esc(subKey(x))}" ${selSubs.has(subKey(x)) ? 'checked' : ''} aria-label="تحديد"></td><td><b>${esc(x.studentName)}</b><div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
+        ${L.map((x) => `<tr class="click ${selSubs.has(subKey(x)) ? 'picked' : ''}" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td class="sel"><input type="checkbox" data-sk="${esc(subKey(x))}" ${selSubs.has(subKey(x)) ? 'checked' : ''} aria-label="تحديد"></td><td><b>${esc(x.studentName)}</b>${x.retakeId ? ' <span class="pill gold-pill">إعادة</span>' : ''}${x.retakeRequested && !D.subs.some((y) => y.retakeId === x.retakeRequested.id) ? ' <span class="pill mute">طُلبت إعادته</span>' : ''}<div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
         <td>${esc(x.taskTitle || 'تدريب')}<div class="small muted">${esc(rangeLabel(x.surah, x.from, x.to))}</div></td><td class="num">${fmtDate(x.createdAt)}</td>
         <td>${x.percent == null ? '<span class="pill mute">يدوي</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td><td class="num">${fmtTime(x.duration || 0)}</td>
         <td>${x.teacher ? `<span class="pill ok">${ar(x.teacher.total)}/١٠</span>` : '<span class="pill warn">بانتظارك</span>'}</td></tr>`).join('')}
@@ -1331,6 +1408,8 @@ function viewTeacher(app) {
       <div class="stack">
         <div><h2>${esc(x.studentName)} <span class="muted small num">${esc(x.pn)}</span></h2>
         <p class="muted" style="margin:4px 0 0">${esc(x.taskTitle || 'تدريب')} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)} · ${x.mode === 'hifz' ? 'غيباً' : 'نظراً'}</p></div>
+        ${(() => { const prev = x.retakeOf && D.subs.find((y) => y.id === x.retakeOf && y.pn === x.pn); return x.retakeId ? `<div class="retake-info">🔁 هذا التسليم <b>إعادة</b> طلبتها${prev ? ` لتسليم ${fmtDate(prev.createdAt)}${prev.teacher ? ` (درجته ${fmt10(prev.teacher.total)} من ١٠)` : ''} <button class="btn sm" type="button" id="sbPrev">افتح التسليم السابق للمقارنة</button>` : '.'}</div>` : ''; })()}
+        ${x.retakeRequested ? `<div class="retake-info">🔁 طلبت من الطالب إعادة ${esc(rangeLabel(x.retakeRequested.surah, x.retakeRequested.from, x.retakeRequested.to))} بتاريخ ${fmtDate(x.retakeRequested.at)}.</div>` : ''}
         <div class="row">${x.percent != null ? `<span class="pill ${pctClass(x.percent)}">الدقة الآلية ${ar(x.percent)}٪</span><span class="pill mute">صحيحة ${ar(x.counts?.correct || 0)} · خطأ ${ar(x.counts?.wrong || 0)} · محذوفة ${ar(x.counts?.missing || 0)}</span>` : '<span class="pill mute">بدون تصحيح آلي</span>'}<span class="pill mute">المدة ${fmtTime(x.duration || 0)}</span></div>
         <div id="sbAudio">${x.hasAudio ? '<button class="btn" id="sbLoad" type="button">تشغيل تسجيل الطالب</button>' : '<span class="muted small">لا يوجد تسجيل صوتي.</span>'}</div>
         ${risky.length ? `<div class="learn-note">استمع أولاً إلى المواضع المسطّرة: هي الأرجح أن يخطئ فيها هذا الطالب${weak.length ? `، فقد أخطأ سابقاً في ${weak.map((w) => `«${esc(ruleName(w.r))}»`).join(' و')}` : ''}.</div>` : ''}
@@ -1348,7 +1427,7 @@ function viewTeacher(app) {
           <label class="row small" style="gap:6px"><input type="checkbox" id="gTjDone" ${x.tjDone !== false ? 'checked' : ''}> استمعت وحددت أخطاء التجويد في هذا المقطع (إن لم تحدد شيئاً فهذا يعني أن التجويد سليم)</label>
           <label class="field">ملاحظات للطالب<textarea id="gN" placeholder="مثال: انتبه للإخفاء في «من قبل»، وأطل المد المتصل.">${esc(t.notes || '')}</textarea></label>
           <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="gNotify" checked> <span>أشعر الطالب بدرجته <span class="muted">${x.teacher ? '(يُرسل فقط إن تغيّرت الدرجة)' : '(في الجرس داخل الموقع، وعلى جواله إن فعّلها)'}</span></span></label>
-          <div class="row"><button class="btn primary" type="submit">حفظ التقييم</button><button class="btn danger" type="button" id="sbDel">حذف التسليم</button></div>
+          <div class="row"><button class="btn primary" type="submit">حفظ التقييم</button><button class="btn gold" type="button" id="sbRetake">🔁 اطلب إعادة</button><button class="btn danger" type="button" id="sbDel">حذف التسليم</button></div>
         </form>
       </div>`, (m) => {
       const lb = $('#sbLoad', m);
@@ -1434,6 +1513,9 @@ function viewTeacher(app) {
           drawBody();
         } catch (err) { toast('تعذر الحفظ: ' + err.message); }
       };
+      const pv = $('#sbPrev', m);
+      if (pv) pv.onclick = () => openSubmission(D.subs.find((y) => y.id === x.retakeOf && y.pn === x.pn));
+      $('#sbRetake', m).onclick = () => openRetakeForm(x, $('#gN', m).value.trim());
       $('#sbDel', m).onclick = async () => {
         if (!(await confirmBox(`حذف تسليم ${x.studentName}؟ لا يمكن التراجع.`))) return;
         await store.deleteSubmission(x.pn, x.id);
@@ -1463,6 +1545,51 @@ function viewTeacher(app) {
   let editTask = null; // الواجب الجاري تعديله
   const dueText = (d) => { try { return new Date(d + 'T12:00').toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/\d/g, (x) => ar(x)); } catch { return d; } };
   const taskNotifBody = (t) => `${rangeLabel(t.surah, t.from, t.to)} · ${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'} · ${t.due ? 'التسليم ' + dueText(t.due) : 'بلا موعد محدد'}`;
+  /** طلب إعادة تسميع لتسليم: المقطع كله أو آيات منه، مع ملاحظة وموعد اختياري */
+  function openRetakeForm(x, notes0 = '') {
+    const n = ayahCount(x.surah);
+    const opt = (sel) => Array.from({ length: x.to - x.from + 1 }, (_, k) => x.from + k).map((a) => `<option value="${a}" ${a === sel ? 'selected' : ''}>${ar(a)}</option>`).join('');
+    openModal(`<form id="rtF" class="stack" style="gap:12px">
+      <h2>🔁 طلب إعادة تسميع</h2>
+      <p class="muted" style="margin:0">${esc(x.studentName)} · ${esc(x.taskTitle || 'تسميع')} · سورة ${esc(surahName(x.surah))}</p>
+      <div class="row">
+        <label class="field" style="flex:1 1 120px">من الآية<select id="rtF1">${opt(x.from)}</select></label>
+        <label class="field" style="flex:1 1 120px">إلى الآية<select id="rtT1">${opt(x.to)}</select></label>
+        <label class="field" style="flex:1 1 160px">أعده قبل (اختياري)<input type="date" id="rtDue"></label>
+      </div>
+      <p class="small muted" style="margin:0">اترك الآيات كما هي لإعادة المقطع كله، أو ضيّقها إلى المواضع التي أخطأ فيها.</p>
+      <label class="field">ملاحظة للطالب<textarea id="rtN" placeholder="مثال: أعد الآيات ٥–٨ وانتبه للإخفاء.">${esc(notes0)}</textarea></label>
+      <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="rtNotify" checked> <span>أشعر الطالب بالطلب</span></label>
+      <div class="row"><button class="btn primary" type="submit">أرسل الطلب</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      const F = $('#rtF1', m), T = $('#rtT1', m);
+      F.onchange = () => { if (+T.value < +F.value) T.value = F.value; };
+      T.onchange = () => { if (+T.value < +F.value) F.value = T.value; };
+      $('#rtF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = e.submitter; btn.disabled = true;
+        const r = { subId: x.id, taskId: x.taskId || null, taskTitle: x.taskTitle || rangeLabel(x.surah, x.from, x.to), surah: x.surah, from: +F.value, to: +T.value, mode: x.mode || 'recite', notes: $('#rtN', m).value.trim(), due: $('#rtDue', m).value || '' };
+        try {
+          const id = await store.addRetake(x.pn, r);
+          const req = { id, surah: r.surah, from: r.from, to: r.to, at: new Date().toISOString() };
+          await store.updateSubmission(x.pn, x.id, { retakeRequested: req });
+          x.retakeRequested = req;
+          closeModal();
+          let msg = `أُرسل طلب الإعادة إلى ${x.studentName}.`;
+          if ($('#rtNotify', m)?.checked !== false) {
+            const nid = await store.addStudentNotif(x.pn, {
+              type: 'retake', retakeId: id, title: '🔁 طلب إعادة تسميع',
+              body: `معلمك يطلب إعادة «${r.taskTitle}»: ${rangeLabel(r.surah, r.from, r.to)}${r.due ? ` قبل ${dueText(r.due)}` : ''}.${r.notes ? ' ومعه ملاحظة لك.' : ''}`,
+              link: `./#/student/retake/${id}`, tag: 'retake-' + id,
+            });
+            try { const p = await sendPush(nid, x.pn); if (p && p.sent) msg += ' ووصل الإشعار إلى جواله.'; } catch (err) { console.warn(err); }
+          }
+          toast(msg);
+          if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
+          drawBody();
+        } catch (err) { toast('تعذر إرسال الطلب: ' + (err.code || err.message)); btn.disabled = false; }
+      };
+    });
+  }
   /** إشعار الطالب بدرجته (خاص به وحده) */
   async function notifyGrade(x, teacher, prevTotal) {
     const g = teacher.total, title = x.taskTitle || rangeLabel(x.surah, x.from, x.to);

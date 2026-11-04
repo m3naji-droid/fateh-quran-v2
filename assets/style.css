@@ -402,3 +402,14 @@ tr.picked td { background: var(--green-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 360px) { .brand span { display: none; } }
 tr.grp td { background: var(--green-2); color: var(--green); padding-block: 8px; border-top: 2px solid var(--green); }
+
+/* المحاولة الواحدة وطلبات الإعادة */
+.one-shot { display: grid; gap: 6px; text-align: start; padding: 10px 12px; margin-bottom: 12px; border-radius: 12px; background: var(--gold-soft); border: 1px solid var(--gold); font-size: 14px; line-height: 1.8; }
+.one-shot b { color: var(--gold); }
+.one-shot .btn { justify-self: start; }
+.send-state { padding: 10px 12px; border-radius: 10px; background: var(--green-2); font-weight: 600; }
+.send-state.ok { background: var(--ok-bg); color: var(--ok); }
+.send-state.bad { background: var(--bad-bg); color: var(--bad); }
+.retake-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; border: 2px solid var(--gold); background: linear-gradient(160deg, var(--gold-soft), var(--card)); }
+.retake-info { padding: 8px 12px; border-radius: 10px; background: var(--gold-soft); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.gold-pill { background: var(--gold-soft); color: var(--gold); }
