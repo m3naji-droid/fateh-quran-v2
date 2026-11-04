@@ -68,13 +68,13 @@ export async function testNotification() {
 }
 
 /** يطلب من خادم الإشعارات إرسال تنبيه محفوظ إلى أجهزة صفه. يعيد {sent, failed} أو null إن لم يُعدّ الخادم */
-export async function sendPush(notifId) {
+export async function sendPush(notifId, student = null) {
   if (!PUSH.url || store.mode !== 'cloud') return null;
   const token = await store.idToken();
   const res = await fetch(PUSH.url.replace(/\/$/, '') + '/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-    body: JSON.stringify({ notif: notifId }),
+    body: JSON.stringify(student ? { notif: notifId, student } : { notif: notifId }),
   });
   if (!res.ok) { let m = ''; try { m = (await res.json()).detail; } catch {} throw new Error(m || 'تعذر إرسال الإشعار (' + res.status + ').'); }
   return res.json();

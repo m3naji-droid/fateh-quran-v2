@@ -42,9 +42,11 @@ def teacher_uid(authorization: str | None) -> str:
     return uid
 
 
-def targets(class_id: str) -> list:
+def targets(class_id: str, student: str | None = None) -> list:
     q = db.collection("pushTokens").where(filter=firestore.FieldFilter("role", "==", "student"))
-    if class_id and class_id != "all":
+    if student:
+        q = q.where(filter=firestore.FieldFilter("studentId", "==", student))
+    elif class_id and class_id != "all":
         q = q.where(filter=firestore.FieldFilter("classId", "==", class_id))
     return list(q.stream())
 
@@ -73,6 +75,7 @@ def send_to(docs: list, n: dict) -> dict:
 
 class SendReq(BaseModel):
     notif: str
+    student: str | None = None  # تنبيه خاص بطالب واحد (roster/{student}/notifs/{notif})
 
 
 @app.get("/")
@@ -84,14 +87,17 @@ def health():
 @app.post("/send")
 def send(req: SendReq, authorization: str | None = Header(None)):
     teacher_uid(authorization)
-    ref = db.collection("notifs").document(req.notif)
+    if req.student:
+        ref = db.collection("roster").document(req.student).collection("notifs").document(req.notif)
+    else:
+        ref = db.collection("notifs").document(req.notif)
     snap = ref.get()
     if not snap.exists:
         raise HTTPException(404, "التنبيه غير موجود.")
     n = snap.to_dict()
     if n.get("pushedAt"):
         return {"sent": 0, "failed": 0, "removed": 0, "already": True}
-    docs = targets(n.get("classId", "all"))
+    docs = targets(n.get("classId", "all"), req.student)
     r = send_to(docs, n) if docs else {"sent": 0, "failed": 0, "removed": 0}
     ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
     return r

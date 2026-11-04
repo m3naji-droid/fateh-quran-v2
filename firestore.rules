@@ -82,6 +82,11 @@ service cloud.firestore {
           allow update, delete: if isTeacher();
         }
       }
+      // تنبيهات خاصة بالطالب (مثل وصول درجته): لا يقرؤها غيره
+      match /notifs/{nid} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow write: if isTeacher();
+      }
     }
     // استعلام المعلم عن كل التسليمات
     match /{path=**}/subs/{sid} {

@@ -145,8 +145,9 @@ const local = {
   async getAiUsage() { return LS.get('aiUsage', null); },
   // التنبيهات داخل الموقع (محلياً: في هذا المتصفح فقط، والإشعارات على الجوال تحتاج النسخة السحابية)
   async addNotif(n) { const all = LS.get('notifs', []); const id = uid(); all.push({ id, createdAt: now(), ...n }); LS.set('notifs', all.slice(-200)); return id; },
-  async listNotifs(classId) { const from = Date.now() - NOTIF_DAYS * 864e5; return LS.get('notifs', []).filter((n) => (n.classId === 'all' || n.classId === classId || classId === '*') && new Date(n.createdAt).getTime() > from); },
-  watchNotifs(classId, cb) { this.listNotifs(classId).then(cb); const h = (e) => { if (e.key === 'fp_notifs') this.listNotifs(classId).then(cb); }; addEventListener('storage', h); return () => removeEventListener('storage', h); },
+  async addStudentNotif(pn, n) { return this.addNotif({ ...n, classId: 'stu:' + pn, studentId: pn }); },
+  async listNotifs(classId, pn) { const from = Date.now() - NOTIF_DAYS * 864e5; return LS.get('notifs', []).filter((n) => (n.classId === 'all' || n.classId === classId || (pn && n.classId === 'stu:' + pn) || classId === '*') && new Date(n.createdAt).getTime() > from); },
+  watchNotifs(classId, cb, pn) { this.listNotifs(classId, pn).then(cb); const h = (e) => { if (e.key === 'fp_notifs') this.listNotifs(classId, pn).then(cb); }; addEventListener('storage', h); return () => removeEventListener('storage', h); },
   async cleanupNotifs() { const from = Date.now() - NOTIF_DAYS * 864e5; LS.set('notifs', LS.get('notifs', []).filter((n) => new Date(n.createdAt).getTime() > from)); },
   async pushToken() { return null; },
   async savePushToken() {},
@@ -358,21 +359,27 @@ async function makeCloud() {
     // لوحة الشرف: يحسبها المعلم وينشرها (الأسماء والنقاط فقط)، ومرتبة كل طالب في مستنده
     // التنبيهات: مستند لكل تنبيه موجّه لصف أو للجميع، يقرؤه طلاب الصف ويكتبه المعلم
     async addNotif(n) { const id = uid(); await setDoc(doc(db, 'notifs', id), { ...n, createdAt: now() }); return id; },
+    async addStudentNotif(pn, n) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'notifs', id), { ...n, studentId: pn, createdAt: now() }); return id; },
     async listNotifs(classId) {
       await ensureAnon();
       const from = Date.now() - NOTIF_DAYS * 864e5;
       const q = classId === '*' ? collection(db, 'notifs') : query(collection(db, 'notifs'), where('classId', 'in', [classId, 'all']));
       return (await getDocs(q)).docs.map((d) => ({ id: d.id, ...d.data() })).filter((n) => new Date(n.createdAt).getTime() > from);
     },
-    watchNotifs(classId, cb) {
+    watchNotifs(classId, cb, pn) {
       const from = () => Date.now() - NOTIF_DAYS * 864e5;
-      let off = () => {};
+      const parts = { cls: [], mine: [] };
+      const emit = () => cb([...parts.cls, ...parts.mine].filter((n) => new Date(n.createdAt).getTime() > from()));
+      const offs = [];
       ensureAnon().then(() => {
-        off = onSnapshot(query(collection(db, 'notifs'), where('classId', 'in', [classId, 'all'])),
-          (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((n) => new Date(n.createdAt).getTime() > from())),
-          (e) => console.warn('notifs', e.code));
+        offs.push(onSnapshot(query(collection(db, 'notifs'), where('classId', 'in', [classId, 'all'])),
+          (snap) => { parts.cls = snap.docs.map((d) => ({ id: d.id, ...d.data() })); emit(); },
+          (e) => console.warn('notifs', e.code)));
+        if (pn) offs.push(onSnapshot(collection(db, 'roster', pn, 'notifs'),
+          (snap) => { parts.mine = snap.docs.map((d) => ({ id: d.id, ...d.data(), mine: true })); emit(); },
+          (e) => console.warn('my notifs', e.code)));
       });
-      return () => off();
+      return () => offs.forEach((f) => f());
     },
     async cleanupNotifs() {
       const from = Date.now() - NOTIF_DAYS * 864e5;

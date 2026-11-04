@@ -486,6 +486,15 @@ function cheerHtml(score10, { who = 'auto' } = {}) {
     <blockquote>«${esc(hadith.text)}» <small>${esc(hadith.src)}</small></blockquote></div>`;
 }
 
+/* عبارة تشجيع قصيرة تناسب الإشعار */
+function gradeCheer(g) {
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  if (g >= 9.5) return pick(['ما شاء الله! إتقان كامل، بارك الله فيك.', 'تبارك الله! تلاوة تسرّ القلب، زادك الله نوراً.']);
+  if (g >= 8) return pick(['ما شاء الله، تلاوة متقنة! واصل يا بطل.', 'أحسنت! رفع الله قدرك بالقرآن.', 'بارك الله فيك، هذا إتقان يُفتخر به.']);
+  if (g >= 6) return pick(['أنت قريب من الإتقان، راجع ملاحظات معلمك وأعد المحاولة.', 'أنت قريب من ٨، والمحاولة القادمة أفضل بإذن الله.']);
+  return pick(['كل محاولة تقرّبك من الإتقان، ولك أجران على اجتهادك.', 'لا تستسلم! الحفظ يثبت بالتكرار، وأنت على الطريق.']);
+}
+
 /* مساحة قاعدة البيانات: تقدير من حجم التسجيلات ومستندات التسليمات */
 const DB_QUOTA = 1024 ** 3; // الحصة المجانية في Firestore: ١ GB
 const fmtBytes = (b) => (b >= 1024 ** 3 ? `${ar((b / 1024 ** 3).toFixed(2).replace('.', '٫'))} GB` : b >= 1024 ** 2 ? `${ar(Math.round(b / 1024 ** 2))} MB` : `${ar(Math.max(1, Math.round(b / 1024)))} KB`);
@@ -725,9 +734,11 @@ function viewStudent(app) {
   const me = s.student;
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/task\/([\w-]+)/);
-  let openTaskId = deep ? deep[1] : null;
+  const deep = location.hash.match(/^#\/student\/(task|grade)\/([\w-]+)/);
+  let openTaskId = deep && deep[1] === 'task' ? deep[2] : null;
+  let openSubId = deep && deep[1] === 'grade' ? deep[2] : null;
   if (deep) history.replaceState(null, '', '#/student');
+  if (openSubId) tab = 'history';
   const seenKey = 'notifSeen_' + me.id;
   const unread = () => { const seen = pref.get(seenKey, ''); return notifs.filter((n) => (n.createdAt || '') > seen).length; };
   function paintBell() {
@@ -737,6 +748,13 @@ function viewStudent(app) {
     b.classList.toggle('has', n > 0);
     b.setAttribute('aria-label', n ? `التنبيهات: ${ar(n)} جديدة` : 'التنبيهات');
   }
+  async function openSub(subId) {
+    try { data.subs = (await store.studentSubmissions(me.id)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
+    tab = 'history'; draw();
+    const i = data.subs.findIndex((x) => x.id === subId);
+    const row = i >= 0 && $(`tr[data-i="${i}"]`, app);
+    if (row) row.click(); else toast('هذا التسليم لم يعد موجوداً.');
+  }
   function openBell() {
     const seen = pref.get(seenKey, '');
     const L = [...notifs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -744,13 +762,14 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc(n.title)}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^🎉\s*/, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
         const n = notifs.find((x) => x.id === b.dataset.nid);
         closeModal();
+        if (n?.type === 'grade') { openSub(n.subId); return; }
         const t = n?.taskId && data.tasks.find((x) => x.id === n.taskId);
         if (t) { tab = 'tasks'; openTask(t); } else if (n?.taskId) toast('هذا الواجب لم يعد موجوداً.');
       }));
@@ -771,8 +790,14 @@ function viewStudent(app) {
     }
     draw();
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
+    openSubId = null; // درجة من إشعار: نفتح «سجل التسميع» ويعرض announceGrades الاحتفال
     announceGrades();
     if (!offNotifs) offNotifs = store.watchNotifs(me.classId, async (L) => {
+      // درجة جديدة وصلت والصفحة مفتوحة: نحدّث التسليمات ونعرض الاحتفال
+      if (L.some((n) => n.type === 'grade' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
+        try { data.subs = (await store.studentSubmissions(me.id)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
+        if ($('#stBody', app)) { draw(); announceGrades(); }
+      }
       const first = !notifs.length && !paintBell.done;
       notifs = L; paintBell(); paintBell.done = true;
       const onList = $('#stBody', app) && tab === 'tasks';
@@ -781,7 +806,7 @@ function viewStudent(app) {
         try { const tasks = await store.listTasks(); data.tasks = tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
         if ($('#stBody', app) && tab === 'tasks') draw();
       } else if (onList && first) draw();
-    });
+    }, me.id);
     refreshPush(owner);
   }
 
@@ -1322,6 +1347,7 @@ function viewTeacher(app) {
           </div>
           <label class="row small" style="gap:6px"><input type="checkbox" id="gTjDone" ${x.tjDone !== false ? 'checked' : ''}> استمعت وحددت أخطاء التجويد في هذا المقطع (إن لم تحدد شيئاً فهذا يعني أن التجويد سليم)</label>
           <label class="field">ملاحظات للطالب<textarea id="gN" placeholder="مثال: انتبه للإخفاء في «من قبل»، وأطل المد المتصل.">${esc(t.notes || '')}</textarea></label>
+          <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="gNotify" checked> <span>أشعر الطالب بدرجته <span class="muted">${x.teacher ? '(يُرسل فقط إن تغيّرت الدرجة)' : '(في الجرس داخل الموقع، وعلى جواله إن فعّلها)'}</span></span></label>
           <div class="row"><button class="btn primary" type="submit">حفظ التقييم</button><button class="btn danger" type="button" id="sbDel">حذف التسليم</button></div>
         </form>
       </div>`, (m) => {
@@ -1394,8 +1420,11 @@ function viewTeacher(app) {
         if (isNaN(v)) return toast('اكتب الدرجة من ١٠.');
         const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 2) / 2)), notes: $('#gN', m).value.trim(), suggested, at: new Date().toISOString() };
         const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked, ...(aiRes ? { ai: aiRes } : {}) };
+        const prevTotal = x.teacher ? x.teacher.total : null;
+        const wantNotify = $('#gNotify', m).checked && prevTotal !== teacher.total;
         try {
           await store.updateSubmission(x.pn, x.id, patch);
+          if (wantNotify) notifyGrade(x, teacher, prevTotal).then((r) => r && toast(r)).catch((err) => console.warn(err));
           Object.assign(x, patch);
           closeModal();
           if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
@@ -1434,6 +1463,21 @@ function viewTeacher(app) {
   let editTask = null; // الواجب الجاري تعديله
   const dueText = (d) => { try { return new Date(d + 'T12:00').toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/\d/g, (x) => ar(x)); } catch { return d; } };
   const taskNotifBody = (t) => `${rangeLabel(t.surah, t.from, t.to)} · ${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'} · ${t.due ? 'التسليم ' + dueText(t.due) : 'بلا موعد محدد'}`;
+  /** إشعار الطالب بدرجته (خاص به وحده) */
+  async function notifyGrade(x, teacher, prevTotal) {
+    const g = teacher.total, title = x.taskTitle || rangeLabel(x.surah, x.from, x.to);
+    const n = {
+      type: 'grade', score: g, subId: x.id,
+      title: prevTotal != null ? 'عدّل معلمك درجتك' : g >= 8 ? '🎉 وصل تقييم معلمك' : 'وصل تقييم معلمك',
+      body: `${prevTotal != null ? 'صارت درجتك' : 'درجتك'} ${fmt10(g)} من ١٠ في «${title}». ${gradeCheer(g)}${teacher.notes ? ' ومعلمك كتب لك ملاحظة.' : ''}`,
+      link: `./#/student/grade/${x.id}`, tag: 'grade-' + x.id,
+    };
+    const id = await store.addStudentNotif(x.pn, n);
+    try {
+      const r = await sendPush(id, x.pn);
+      return r && r.sent ? `وصل إشعار الدرجة إلى جوال ${x.studentName || 'الطالب'}.` : '';
+    } catch (e) { return `تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر للطالب في الموقع.`; }
+  }
   /** يحفظ التنبيه (للجرس) ثم يطلب إرساله إلى الجوالات */
   async function notifyTask(t, kind, changes = '') {
     const n = kind === 'new'
