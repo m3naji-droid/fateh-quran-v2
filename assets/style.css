@@ -427,3 +427,9 @@ tr.grp td { background: var(--green-2); color: var(--green); padding-block: 8px;
 .name-list { margin: 0; padding-inline-start: 20px; max-height: 45vh; overflow: auto; line-height: 2; }
 .remind-opt { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 10px; background: var(--green-2); }
 .remind-opt select { max-width: 200px; }
+tr.grp { cursor: pointer; user-select: none; }
+tr.grp:hover td, tr.grp:focus-visible td { background: color-mix(in srgb, var(--green-2) 70%, var(--green) 12%); }
+tr.grp:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.grp-chev { display: inline-block; transition: transform .2s; transform: rotate(90deg); }
+tr.grp.open .grp-chev { transform: none; }
+.grp-hint { float: inline-end; }
