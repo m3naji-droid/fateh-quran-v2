@@ -244,6 +244,11 @@ details summary { cursor: pointer; font-weight: 600; }
   .nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; flex: 1; }
   .nav a { padding: 6px 8px; white-space: nowrap; font-size: 14px; }
   .sheet { padding: 22px 14px; }
+  .topbar-in { gap: 6px; }
+  .topbar .icon-btn { width: 32px; height: 32px; }
+  .nav { gap: 2px; }
+  .nav a { padding: 5px 7px; font-size: 13.5px; }
+  .nav a[href="#/"] { display: none; } /* الشعار نفسه رابط للرئيسية */
 }
 
 /* أخطاء التجويد التي حددها المعلم، والمواضع المتوقعة */
@@ -393,3 +398,6 @@ tr.picked td { background: var(--green-2); }
 .new-pill { background: var(--bad); color: #fff; font-size: 12px; vertical-align: middle; }
 .card.editing { outline: 2px solid var(--gold); }
 .notify-opt input { margin-top: 3px; }
+#refreshBtn.spin svg { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 360px) { .brand span { display: none; } }

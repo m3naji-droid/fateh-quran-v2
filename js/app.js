@@ -90,6 +90,16 @@ $('#aboutLink').onclick = (e) => { e.preventDefault(); openAbout(); };
 /* الوضع الليلي */
 function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
 applyTheme(pref.get('theme', null));
+// تحديث يدوي: مهم في وضع التطبيق المثبّت (لا يوجد فيه زر تحديث للمتصفح)
+$('#refreshBtn').onclick = async () => {
+  const b = $('#refreshBtn'); b.classList.add('spin'); b.disabled = true;
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update();
+    if (self.caches) for (const k of await caches.keys()) await caches.delete(k);
+  } catch {}
+  location.reload();
+};
 $('#themeBtn').onclick = () => {
   const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   const t = dark ? 'light' : 'dark';

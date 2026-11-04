@@ -1,7 +1,7 @@
 // عامل الخدمة: يجعل المقرأة قابلة للتثبيت كتطبيق، ويفتح الصفحة من الذاكرة إن انقطع الاتصال.
 // الشبكة أولاً دائماً لملفات الموقع حتى تصل التحديثات فوراً؛ والذاكرة احتياط فقط.
 // لا يتدخل في طلبات Firebase وخادم التجويد والقرّاء (نطاقات أخرى).
-const CACHE = 'maqraa-v2';
+const CACHE = 'maqraa-v3';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -14,7 +14,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   e.respondWith(
-    fetch(req)
+    // يتحقق من الخادم كل مرة فتصل التحديثات فوراً (طلب الصفحة نفسها يُعاد بنائه برابطه)
+    fetch(req.mode === 'navigate' ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : new Request(req, { cache: 'no-cache' }))
       .then((res) => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
