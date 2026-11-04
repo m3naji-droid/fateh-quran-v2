@@ -104,6 +104,13 @@ service cloud.firestore {
           allow update, delete: if isTeacher();
         }
       }
+      // سجل النشاط اليومي للسلسلة (تاريخ وعدد فقط، بلا صوت): يكتبه الطالب لنفسه
+      match /activity/{day} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create, update: if isStudent(pn)
+          && request.resource.data.keys().hasOnly(['d', 'practice', 'tasks', 'sec', 'at'])
+          && request.resource.data.d == day;
+      }
       // طلبات إعادة التسميع: يكتبها المعلم، ويقرؤها الطالب
       match /retakes/{rid} {
         allow read: if isTeacher() || isStudent(pn);

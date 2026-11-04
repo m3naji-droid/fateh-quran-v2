@@ -141,6 +141,9 @@ const local = {
     await this.updateSubmission(pn, id, { hasAudio: false, audioBytes: 0, audioDeletedAt: now() });
   },
   async updateOwnAi(pn, id, ai) { await this.updateSubmission(pn, id, { ai }); },
+  // سجل النشاط اليومي (للسلسلة)
+  async logActivity(pn, day, kind, sec) { const a = LS.get('activity', {}); const k = pn + '|' + day; const cur = a[k] || { d: day, practice: 0, tasks: 0, sec: 0 }; cur[kind === 'task' ? 'tasks' : 'practice']++; cur.sec += Math.round(sec || 0); cur.at = now(); a[k] = cur; LS.set('activity', a); },
+  async listActivity(pn, fromDay) { return Object.entries(LS.get('activity', {})).filter(([k, v]) => k.startsWith(pn + '|') && v.d >= fromDay).map(([, v]) => v); },
   // طلبات إعادة التسميع
   async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
   async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
@@ -373,6 +376,13 @@ async function makeCloud() {
       }
       return id;
     },
+    async logActivity(pn, day, kind, sec) {
+      const ref = doc(db, 'roster', pn, 'activity', day);
+      const cur = await getDoc(ref).catch(() => null);
+      const v = cur?.exists() ? cur.data() : { d: day, practice: 0, tasks: 0, sec: 0 };
+      await setDoc(ref, { d: day, practice: (v.practice || 0) + (kind === 'task' ? 0 : 1), tasks: (v.tasks || 0) + (kind === 'task' ? 1 : 0), sec: (v.sec || 0) + Math.round(sec || 0), at: now() });
+    },
+    async listActivity(pn, fromDay) { await ensureAnon(); return (await getDocs(query(collection(db, 'roster', pn, 'activity'), where('d', '>=', fromDay)))).docs.map((d) => d.data()); },
     async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
     async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
     async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },

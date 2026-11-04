@@ -352,6 +352,7 @@ function mountRecite(root, opts) {
     mic.disabled = false; mic.classList.remove('rec'); mic.innerHTML = MIC_SVG; mic.style.removeProperty('--lvl');
     finishing = false;
     lastBlob = blob; lastDuration = duration; lastTranscript = transcript;
+    if (opts.onActivity && duration >= 60) opts.onActivity(duration); // تدريب دقيقة فأكثر يُحسب في السلسلة
     if (transcript) {
       last = align(words, transcript);
       paint(last, false);
@@ -528,6 +529,18 @@ function cheerHtml(score10, { who = 'auto' } = {}) {
     <div>${who === 'teacher' ? 'درجتك من معلمك' : 'درجتك الآن'} <b>${fmt10(score10)} من ١٠</b>، وتحتاج <b>${fmt10(gap)}</b> ${gap > 2 ? 'درجات' : 'درجة'} فقط لتصل إلى ٨. ${who === 'teacher' ? 'اقرأ ملاحظات معلمك وتدرّب عليها.' : 'راجع المواضع المظللة ثم أعد المحاولة.'}</div>
     <blockquote>«${esc(hadith.text)}» <small>${esc(hadith.src)}</small></blockquote></div>`;
 }
+
+/* السلسلة: الأيام بتوقيت الرياض */
+const riyadhDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(d);
+const addDays = (day, n) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+/** طول السلسلة: الأيام المتتالية حتى اليوم (أو حتى أمس إن لم ينشط اليوم بعد) */
+function streakOf(days) {
+  const today = riyadhDay();
+  let d = days.has(today) ? today : addDays(today, -1), n = 0;
+  while (days.has(d)) { n++; d = addDays(d, -1); }
+  return { days: n, today: days.has(today), start: addDays(d, 1) };
+}
+const STREAK_MILESTONES = [[30, '🏆 شهر كامل!', 'ثلاثون يوماً متتالية مع القرآن. هذا ثبات الكبار، بارك الله فيك وجعله حجة لك.'], [14, '🌟 أسبوعان متتاليان!', 'أربعة عشر يوماً بلا انقطاع. أنت تبني عادة عظيمة، فواصل.'], [7, '🔥 أسبوع كامل!', 'سبعة أيام متتالية مع القرآن. «أحب الأعمال إلى الله أدومها وإن قلّ».']];
 
 /* عبارة تشجيع قصيرة تناسب الإشعار */
 function gradeCheer(g) {
@@ -714,17 +727,17 @@ function viewHome(app) {
 
 /* ================= التدريب الحر (للطلاب المسجلين والمعلم فقط) ================= */
 let pendingPractice = null;
-function mountPractice(host, learn) {
+function mountPractice(host, learn, onActivity) {
   const init = pendingPractice || pref.get('lastRange', { surah: 36, from: 1, to: 12 });
   pendingPractice = null;
   host.innerHTML = `<p class="muted" style="margin:0 0 12px">اختر أي مقطع ثم اضغط زر الميكروفون وابدأ القراءة. التدريب لا يُرسل للمعلم.</p>
     <div class="card" style="margin-bottom:16px">${rangePicker('pr', init)}</div>
     <div id="prBody"></div>`;
   let comp = null;
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn }); };
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn, onActivity }); };
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
-  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); } };
+  return { destroy: () => comp?.destroy() };
 }
 function viewPractice(app) {
   const s = session.get();
@@ -774,8 +787,32 @@ function viewStudent(app) {
   let comp = null;
   let tab = studentStartTab || 'tasks';
   studentStartTab = null;
-  let data = { tasks: [], subs: [], classes: [], retakes: [] };
+  let data = { tasks: [], subs: [], classes: [], retakes: [], activity: [] };
   const me = s.student;
+  const activeDays = () => new Set([...(data.activity || []).map((a) => a.d), ...data.subs.map((x) => (x.createdAt ? riyadhDay(new Date(x.createdAt)) : ''))].filter(Boolean));
+  function logAct(kind, sec) {
+    const day = riyadhDay();
+    const before = streakOf(activeDays()).days;
+    const a = (data.activity || []).find((x) => x.d === day);
+    if (a) a[kind === 'task' ? 'tasks' : 'practice']++; else (data.activity = data.activity || []).push({ d: day, practice: kind === 'task' ? 0 : 1, tasks: kind === 'task' ? 1 : 0 });
+    store.logActivity(me.id, day, kind, sec).catch((e) => console.warn('activity', e));
+    const st = streakOf(activeDays());
+    const k = $('#kpiStreak', app); if (k) k.innerHTML = `<b>🔥 ${ar(st.days)}</b><span>أيام متتالية</span>`;
+    if (st.days > before && before > 0 && !celebrateStreak()) toast(`🔥 سلسلتك الآن ${ar(st.days)} أيام متتالية. أحسنت!`);
+  }
+  /** احتفال عند ٧ و١٤ و٣٠ يوماً (مرة لكل سلسلة) */
+  function celebrateStreak() {
+    const st = streakOf(activeDays());
+    const m = STREAK_MILESTONES.find(([n]) => st.days >= n);
+    if (!m) return false;
+    const key = 'streakCele_' + me.id, done = new Set(pref.get(key, []));
+    const id = `${m[0]}@${st.start}`;
+    if (done.has(id)) return false;
+    done.add(id); pref.set(key, [...done].slice(-50));
+    openModal(`<div class="stack streak-cele"><div class="streak-num">${ar(st.days)}</div><h2>${m[1]}</h2><p style="margin:0">${m[2]}</p><div class="row"><button class="btn primary" type="button" data-close>الحمد لله</button></div></div>`);
+    setTimeout(() => confetti(), 150);
+    return true;
+  }
   const openRetakes = () => (data.retakes || []).filter((r) => !data.subs.some((x) => x.retakeId === r.id)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   function startRetake(rid) {
     const r = (data.retakes || []).find((x) => x.id === rid);
@@ -789,6 +826,7 @@ function viewStudent(app) {
   let openRetakeId = deep && deep[1] === 'retake' ? deep[2] : null;
   let openTaskId = deep && deep[1] === 'task' ? deep[2] : null;
   let openSubId = deep && deep[1] === 'grade' ? deep[2] : null;
+  if (/^#\/student\/practice/.test(location.hash)) { tab = 'practice'; history.replaceState(null, '', '#/student'); }
   if (deep) history.replaceState(null, '', '#/student');
   if (openSubId) tab = 'history';
   const seenKey = 'notifSeen_' + me.id;
@@ -857,10 +895,10 @@ function viewStudent(app) {
     app.innerHTML = '<div class="loading">جارٍ تحميل بياناتك…</div>';
     if (!(await store.isStudentAuthed(me))) { session.set(null); studentLogin(app, 'انتهت جلسة الدخول. اختر صفك واسمك واكتب كلمة السر من جديد.'); return; }
     try {
-      const [tasks, subs, classes, rank, retakes] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null), store.listRetakes(me.id).catch(() => [])]);
+      const [tasks, subs, classes, rank, retakes, activity] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null), store.listRetakes(me.id).catch(() => []), store.listActivity(me.id, addDays(riyadhDay(), -400)).catch(() => [])]);
       data.retakes = retakes;
       me.rankInfo = rank;
-      data = { retakes, tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
+      data = { retakes, activity, tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
     } catch (e) {
       console.error(e);
       app.innerHTML = `<div class="empty">تعذر تحميل البيانات: ${esc(e.message)}</div>`;
@@ -871,6 +909,7 @@ function viewStudent(app) {
     if (openRetakeId) { const id = openRetakeId; openRetakeId = null; if ((data.retakes || []).some((r) => r.id === id)) { startRetake(id); return; } }
     openSubId = null; // درجة من إشعار: نفتح «سجل التسميع» ويعرض announceGrades الاحتفال
     announceGrades();
+    if ($('#modal').hidden) celebrateStreak();
     if (!offNotifs) offNotifs = store.watchNotifs(me.classId, async (L) => {
       // درجة جديدة وصلت والصفحة مفتوحة: نحدّث التسليمات ونعرض الاحتفال
       if (L.some((n) => n.type === 'retake' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
@@ -919,9 +958,7 @@ function viewStudent(app) {
     const graded = data.subs.filter((x) => x.percent != null);
     const avg = graded.length ? Math.round(graded.reduce((n, x) => n + x.percent, 0) / graded.length) : null;
     const doneTasks = new Set(data.subs.map((x) => x.taskId).filter(Boolean));
-    const days = new Set(data.subs.map((x) => (x.createdAt || '').slice(0, 10)));
-    let streak = 0;
-    for (let d = new Date(); ; d.setDate(d.getDate() - 1)) { if (days.has(d.toISOString().slice(0, 10))) streak++; else if (streak || d.toDateString() !== new Date().toDateString()) break; }
+    const streak = streakOf(activeDays()).days;
     app.innerHTML = `
       <div class="page-head">
         <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1>
@@ -932,7 +969,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(doneTasks.size)}/${ar(data.tasks.length)}</b><span>واجبات منجزة</span></div>
         <div class="kpi"><b>${avg == null ? '—' : ar(avg) + '٪'}</b><span>متوسط دقة الحفظ</span></div>
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
-        <div class="kpi"><b>${ar(streak)}</b><span>أيام متتالية</span></div>
+        <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
       <div id="annBar"></div>
       <div class="tabs" role="tablist">
@@ -1074,7 +1111,7 @@ function viewStudent(app) {
     } catch {}
     if (tab !== 'practice') return;
     comp?.destroy();
-    comp = mountPractice(body, learn);
+    comp = mountPractice(body, learn, (sec) => logAct('practice', sec));
   }
 
   function pushInvite() {
@@ -1148,6 +1185,7 @@ function viewStudent(app) {
         const extra = rt ? { retakeId: rt.id, retakeOf: rt.subId || null } : {};
         const id = await store.addSubmission(me.id, { ...sub, ...range, taskId: t?.id || rt?.taskId || null, taskTitle: t?.title || rt?.taskTitle || '', studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null, ...extra }, blob, sid);
         data.subs.unshift({ ...sub, id, pn: me.id, taskId: t?.id || rt?.taskId, ...extra, createdAt: new Date().toISOString() });
+        logAct('task', sub.duration || 0);
         return id;
       },
       onAi: (id, ai) => store.updateOwnAi(me.id, id, ai),
@@ -1191,7 +1229,7 @@ function viewStudent(app) {
   }
 
   load();
-  return { destroy: () => comp?.destroy() };
+  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); } };
 }
 
 async function studentLogin(app, msg = '') {
@@ -1612,6 +1650,9 @@ function viewTeacher(app) {
         <div class="card stack" style="gap:10px"><h3>⏰ تذكير الواجبات</h3>
           <p class="small" style="margin:0">في كل واجب له موعد، يمكنك تفعيل تذكير مساء اليوم السابق للموعد (من نموذج الواجب). اختر هنا ساعة التذكير:</p>
           <div class="row"><input type="time" id="evT" value="${esc(notifySettings.eveTime || '19:00')}" style="max-width:150px"><button class="btn" type="button" id="evSave">حفظ</button></div>
+          <h3 style="margin-top:6px">🔥 حافظ على سلسلتك</h3>
+          <p class="small" style="margin:0">يصل لمن سمّع أو تدرّب يومين متتاليين فأكثر ولم ينشط اليوم بعد: «لديك ٥ أيام متتالية، لا تقطعها!»</p>
+          <div class="row"><select id="stkT" style="max-width:220px">${[['off', 'متوقف'], ['10:00', '١٠:٠٠ صباحاً'], ['12:00', '١٢:٠٠ ظهراً'], ['14:00', '٢:٠٠ عصراً'], ['16:00', '٤:٠٠ عصراً'], ['18:00', '٦:٠٠ مساءً'], ['20:00', '٨:٠٠ مساءً'], ['21:00', '٩:٠٠ مساءً']].map(([v, l]) => `<option value="${v}" ${(notifySettings.streakTime || '12:00') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn" type="button" id="stkSave">حفظ</button></div>
           <div class="small muted" id="cronStat"></div>
         </div>
         <div class="stack" id="anList"><div class="loading">جارٍ تحميل الإعلانات…</div></div>
@@ -1625,6 +1666,10 @@ function viewTeacher(app) {
     $('#evSave', body).onclick = async () => {
       const v = $('#evT', body).value || '19:00';
       try { await store.setNotifySettings({ eveTime: v }); notifySettings.eveTime = v; toast(`سيصل تذكير الواجبات الساعة ${remindTimeLabel()} من اليوم السابق للموعد.`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    };
+    $('#stkSave', body).onclick = async () => {
+      const v = $('#stkT', body).value;
+      try { await store.setNotifySettings({ streakTime: v }); notifySettings.streakTime = v; toast(v === 'off' ? 'أُوقف تذكير السلسلة.' : `سيصل تذكير السلسلة يومياً الساعة ${$('#stkT', body).selectedOptions[0].textContent}.`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
     };
     $('#anForm', body).onsubmit = async (e) => {
       e.preventDefault();
@@ -2036,7 +2081,7 @@ function viewTeacher(app) {
         <button class="btn sm" type="button" id="bsSClr">إلغاء التحديد</button></div>` : '';
       $('#stList', body).innerHTML = L.length ? `<div class="table-wrap"><table><thead><tr><th class="sel"><input type="checkbox" id="bsSAll" aria-label="تحديد كل الطلاب الظاهرين"></th><th>الاسم</th><th>الصف</th><th>الحساب</th><th>تسميع</th><th></th></tr></thead><tbody>
         ${groups.map((g) => { const open = !!q || openGroups.has(g.id); return `<tr class="grp${open ? ' open' : ''}" data-grp="${esc(g.id)}" tabindex="0" aria-expanded="${open}"><td class="sel"><input type="checkbox" data-sg="${esc(g.id)}" ${g.list.every((x) => selStu.has(x.id)) ? 'checked' : ''} aria-label="تحديد طلاب الصف"></td><td colspan="5"><span class="grp-chev" aria-hidden="true">▾</span> <b>${esc(g.id === '_' ? 'بلا صف' : className(g.id))}</b> <span class="muted small">· ${nWord(g.list.length, 'طالب واحد', 'طالبان', 'طلاب', 'طالباً')}${!open && g.list.some((x) => selStu.has(x.id)) ? ` · المحدد ${ar(g.list.filter((x) => selStu.has(x.id)).length)}` : ''}</span><span class="small muted grp-hint">${open ? 'اضغط للإخفاء' : 'اضغط لعرض الطلاب'}</span></td></tr>
-        ${!open ? '' : g.list.map((s) => `<tr class="${selStu.has(s.id) ? 'picked' : ''}"><td class="sel"><input type="checkbox" data-ss="${esc(s.id)}" ${selStu.has(s.id) ? 'checked' : ''} aria-label="تحديد"></td><td>${esc(s.name)}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+        ${!open ? '' : g.list.map((s) => `<tr class="${selStu.has(s.id) ? 'picked' : ''}"><td class="sel"><input type="checkbox" data-ss="${esc(s.id)}" ${selStu.has(s.id) ? 'checked' : ''} aria-label="تحديد"></td><td>${esc(s.name)}${s.streak && s.streak.days >= 2 && s.streak.on >= addDays(riyadhDay(), -1) ? ` <span class="streak-pill" title="أيام متتالية من التسميع والتدريب">🔥 ${ar(s.streak.days)}</span>` : ''}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
         <td>${accPill(s)}</td><td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td>
         <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}`; }).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
       $$('[data-ss]', body).forEach((c) => (c.onchange = () => { c.checked ? selStu.add(c.dataset.ss) : selStu.delete(c.dataset.ss); paint(q); }));

@@ -173,10 +173,14 @@ def day_label(due: str) -> str:
         return due
 
 
-def run_reminders(local: dt.datetime) -> list[dict]:
+def notify_cfg() -> dict:
+    c = db.collection("settings").document("notify").get()
+    return c.to_dict() if c.exists else {}
+
+
+def run_reminders(local: dt.datetime, cfg: dict | None = None) -> list[dict]:
     """تذكير مساء اليوم السابق لموعد التسليم، في الوقت الذي يضبطه المعلم."""
-    cfg = db.collection("settings").document("notify").get()
-    cfg = cfg.to_dict() if cfg.exists else {}
+    cfg = notify_cfg() if cfg is None else cfg
     eve = cfg.get("eveTime", "19:00")
     if local.strftime("%H:%M") < eve:
         return []
@@ -210,6 +214,54 @@ def run_reminders(local: dt.datetime) -> list[dict]:
         d.reference.update({"remindSent": {"eve": t["due"], "at": now_iso(), "students": count, **stats}})
         done.append({"task": d.id, "students": count, **stats})
     return done
+
+
+# ------------------------------------------------------------ حافظ على سلسلتك
+def active_days(pn: str, since: str) -> set[str]:
+    days = set()
+    for d in where(db.collection("roster").document(pn).collection("activity"), "d", ">=", since).stream():
+        days.add(d.get("d"))
+    return days
+
+
+def run_streaks(local: dt.datetime, cfg: dict) -> dict | None:
+    """مرة يومياً في الساعة التي يختارها المعلم: يحسب سلسلة كل طالب، ويذكّر من له يومان فأكثر ولم ينشط اليوم."""
+    at = cfg.get("streakTime", "12:00")
+    today = local.date().isoformat()
+    state_ref = db.collection("settings").document("streak")
+    state = state_ref.get()
+    if at == "off" or local.strftime("%H:%M") < at or (state.exists and state.to_dict().get("day") == today):
+        return None
+    yesterday = (local.date() - dt.timedelta(days=1)).isoformat()
+    since = (local.date() - dt.timedelta(days=60)).isoformat()
+    reminded = []
+    for st in db.collection("roster").stream():
+        pn = st.id
+        days = active_days(pn, since)
+        # أيام التسليمات تُحسب أيضاً (ومنها ما سبق سجل النشاط)
+        for sub in st.reference.collection("subs").stream():
+            c = sub.get("createdAt")
+            try:
+                days.add(dt.datetime.fromisoformat(str(c).replace("Z", "+00:00")).astimezone(TZ).date().isoformat())
+            except Exception:
+                pass
+        n, d = 0, (local.date() if today in days else local.date() - dt.timedelta(days=1))
+        while d.isoformat() in days:
+            n += 1
+            d -= dt.timedelta(days=1)
+        st.reference.update({"streak": {"days": n, "on": today if today in days else yesterday, "at": now_iso()}})
+        if today not in days and n >= 2:
+            reminded.append((pn, n))
+    stats = {"sent": 0, "failed": 0, "removed": 0}
+    for pn, n in reminded:
+        unit = "يومان" if n == 2 else f"{n} أيام".translate(AR_DIGITS) if n <= 10 else f"{n} يوماً".translate(AR_DIGITS)
+        nt = {"type": "streak", "title": "🔥 حافظ على سلسلتك",
+              "body": f"لديك {unit} متتالية مع القرآن. سمّع أو تدرّب دقيقة واحدة اليوم حتى لا تنقطع!",
+              "link": "./#/student/practice", "tag": "streak-" + today, "createdAt": now_iso(), "studentId": pn}
+        db.collection("roster").document(pn).collection("notifs").document("streak-" + today).set(nt)
+        stats = add(stats, push(tokens_for(students=[pn]), nt))
+    state_ref.set({"day": today, "reminded": len(reminded), **stats, "at": now_iso()})
+    return {"reminded": len(reminded), **stats}
 
 
 # ------------------------------------------------------------ الواجهات
@@ -265,6 +317,11 @@ def cron(x_cron_secret: str | None = Header(None)):
                 anns.append({"ann": d.id, **publish_announcement(d.id)})
             except Exception as e:  # إعلان واحد معطوب لا يوقف الباقي
                 anns.append({"ann": d.id, "error": str(e)[:200]})
-    reminders = run_reminders(dt.datetime.now(TZ))
+    local, cfg = dt.datetime.now(TZ), notify_cfg()
+    reminders = run_reminders(local, cfg)
+    try:
+        streaks = run_streaks(local, cfg)
+    except Exception as e:
+        streaks = {"error": str(e)[:200]}
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
-    return {"announcements": anns, "reminders": reminders}
+    return {"announcements": anns, "reminders": reminders, "streaks": streaks}
