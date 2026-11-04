@@ -31,5 +31,5 @@ export const TAJWEED_API = {
 // إن بقيا فارغين تعمل التنبيهات داخل الموقع فقط.
 export const PUSH = {
   vapidKey: 'BP9oxEYf-htl3X8gFuI6otv1d_Hl5l28poPU57Vdm_bMXNeN78a4WUWKRTudSOQKsz7g71EoRpsLd8U2XBEmQx4',
-  url: '',
+  url: 'https://fateh-notify-960354071194.europe-west1.run.app',
 };
