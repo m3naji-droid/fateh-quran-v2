@@ -1362,7 +1362,13 @@ function viewStudent(app) {
 async function studentLogin(app, msg = '') {
   app.innerHTML = '<div class="loading">جارٍ التحميل…</div>';
   let classes = [];
-  try { classes = sortClasses(await store.listClasses()); } catch (e) { app.innerHTML = `<div class="empty">تعذر تحميل الصفوف: ${esc(e.message)}</div>`; return; }
+  try { classes = sortClasses(await store.listClasses()); } catch (e) {
+    console.warn(e);
+    const why = e?.code === 'permission-denied' || e?.code === 'unauthenticated' ? 'لم يكتمل الاتصال الآمن بقاعدة البيانات.' : e?.code === 'unavailable' || !navigator.onLine ? 'يبدو أن الاتصال بالإنترنت ضعيف أو مقطوع.' : 'حدث خطأ مؤقت.';
+    app.innerHTML = `<div class="empty stack" style="align-items:center">تعذر تحميل الصفوف. ${why}<button class="btn primary" type="button" id="slRetry">إعادة المحاولة</button></div>`;
+    $('#slRetry', app).onclick = () => studentLogin(app, msg);
+    return;
+  }
   const rem = remember.get('student');
   const last = rem ? { classId: rem.classId, id: rem.id } : pref.get('lastLogin', {});
   app.innerHTML = `<div class="card auth stack">

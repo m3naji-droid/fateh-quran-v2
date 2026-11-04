@@ -220,8 +220,20 @@ async function makeCloud() {
 
   async function ensureAnon() {
     await ready;
-    if (!auth.currentUser) {
-      try { await au.signInAnonymously(auth); } catch (e) { console.warn('anon auth', e.code); }
+    // الزائر يحتاج دخولاً مجهولاً لقراءة الصفوف؛ قد يتعثر أحياناً (شبكة ضعيفة)، فنعيد المحاولة
+    for (let i = 0; i < 3 && !auth.currentUser; i++) {
+      try { await au.signInAnonymously(auth); } catch (e) { console.warn('anon auth', e.code); await new Promise((r) => setTimeout(r, 600 * (i + 1))); }
+    }
+  }
+  // عند رفض الصلاحية (جلسة قديمة انتهت أو لم يكتمل الدخول بعد): نجدد الجلسة ثم نعيد الطلب مرة واحدة
+  async function authed(fn) {
+    await ensureAnon();
+    try { return await fn(); } catch (e) {
+      if (e?.code !== 'permission-denied' && e?.code !== 'unauthenticated') throw e;
+      try { if (auth.currentUser) await auth.currentUser.getIdToken(true); } catch { try { await au.signOut(auth); } catch {} }
+      if (!auth.currentUser) await ensureAnon();
+      await new Promise((r) => setTimeout(r, 400));
+      return fn();
     }
   }
 
@@ -256,8 +268,7 @@ async function makeCloud() {
 
     /* ---- حسابات الطلاب: لكل طالب حساب في Firebase Authentication (كلمة السر لا تُحفظ في قاعدة البيانات) ---- */
     async listDirectory(classId) {
-      await ensureAnon();
-      const d = await getDoc(doc(db, 'directory', classId));
+      const d = await authed(() => getDoc(doc(db, 'directory', classId)));
       return d.exists() ? (d.data().students || []).map(({ id, name, email }) => ({ id, name, hasAccount: !!email })).sort(byName) : [];
     },
     async studentSignIn(classId, id, password) {
@@ -348,7 +359,7 @@ async function makeCloud() {
         await setDoc(doc(db, 'directory', cid), { students: arr, at: now() });
       }
     },
-    async listClasses() { await ensureAnon(); return list('classes'); },
+    async listClasses() { return authed(() => list('classes')); },
     async saveClass(c) { const id = c.id || uid(); await setDoc(doc(db, 'classes', id), { name: c.name, createdAt: c.createdAt || now() }, { merge: true }); },
     async deleteClass(id) { await deleteDoc(doc(db, 'classes', id)); },
     async listStudents() { return list('roster'); },
@@ -360,7 +371,7 @@ async function makeCloud() {
       }
     },
     async deleteStudent(id) { await deleteDoc(doc(db, 'cards', id)).catch(() => {}); await deleteDoc(doc(db, 'roster', id)); },
-    async listTasks() { await ensureAnon(); return list('tasks'); },
+    async listTasks() { return authed(() => list('tasks')); },
     async saveTask(t) { const id = t.id || uid(); const { id: _, ...rest } = t; await setDoc(doc(db, 'tasks', id), t.id ? rest : { createdAt: now(), ...rest }, { merge: true }); return id; },
     async deleteTask(id) { await deleteDoc(doc(db, 'tasks', id)); },
     async addSubmission(pn, sub, audio, fixedId) {
