@@ -147,6 +147,12 @@ const local = {
   // طلبات إعادة التسميع
   async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
   async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
+  // رأيك يهمنا: ملاحظات الطلاب وردود المعلم
+  async addFeedback(pn, f) { const all = LS.get('feedback', []); const id = uid(); all.push({ ...f, id, pn, createdAt: now() }); LS.set('feedback', all); return id; },
+  async listMyFeedback(pn) { return LS.get('feedback', []).filter((x) => x.pn === pn); },
+  async listAllFeedback() { return LS.get('feedback', []); },
+  async updateFeedback(pn, id, patch) { const all = LS.get('feedback', []); const i = all.findIndex((x) => x.id === id && x.pn === pn); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('feedback', all); } },
+  async deleteFeedback(pn, id) { LS.set('feedback', LS.get('feedback', []).filter((x) => !(x.id === id && x.pn === pn))); },
   async getModel() { return LS.get('model', null); },
   async setModel(m) { LS.set('model', m); },
   // لوحة الشرف
@@ -392,6 +398,11 @@ async function makeCloud() {
     async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
     async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
     async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },
+    async addFeedback(pn, f) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'feedback', id), { ...f, pn, createdAt: now() }); return id; },
+    async listMyFeedback(pn) { await ensureAnon(); return list(`roster/${pn}/feedback`); },
+    async listAllFeedback() { return (await getDocs(query(collectionGroup(db, 'feedback'), limit(2000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
+    async updateFeedback(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'feedback', id), patch); },
+    async deleteFeedback(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'feedback', id)); },
     async studentSubmissions(pn) { await ensureAnon(); return list(`roster/${pn}/subs`); },
     async allSubmissions() { return (await getDocs(query(collectionGroup(db, 'subs'), limit(10000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     watchSubmissions(cb, onErr) {

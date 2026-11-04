@@ -5,7 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle } from './leaderboard.js';
@@ -28,6 +28,9 @@ const remember = {
   set(k, data, pw) { pref.set('rem_' + k, { ...data, p: btoa(unescape(encodeURIComponent(pw))) }); },
   clear(k) { try { localStorage.removeItem('fp_pref_rem_' + k); } catch {} },
 };
+// رأيك يهمنا: أنواع الملاحظات
+const FB_KINDS = { comment: ['💬', 'تعليق'], complaint: ['⚠️', 'شكوى'], suggest: ['💡', 'اقتراح'], note: ['📝', 'ملاحظة'] };
+const fbKindChip = (k) => `<span class="fb-kind fb-${k}">${FB_KINDS[k]?.[0] || '💬'} ${FB_KINDS[k]?.[1] || 'ملاحظة'}</span>`;
 const rememberBox = (id, on) => `<label class="row small remember" style="gap:8px;cursor:pointer"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> تذكّر كلمة السر على هذا الجهاز</label>`;
 const timeAgo = (iso) => {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -839,7 +842,9 @@ function viewStudent(app) {
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb)\/([\w-]+)/);
+  let openFbId = deep && deep[1] === 'fb' ? deep[2] : null;
+  let myFb = [];
   let openMonthYm = deep && deep[1] === 'month' ? deep[2] : null;
   let openAnnId = deep && deep[1] === 'ann' ? deep[2] : null;
   let openRetakeId = deep && deep[1] === 'retake' ? deep[2] : null;
@@ -912,6 +917,56 @@ function viewStudent(app) {
     });
     if (w) setTimeout(() => confetti(), 150);
   }
+  /* --- رأيك يهمنا --- */
+  function paintFbCta() {
+    const b = $('#stFb', app); if (!b) return;
+    const n = myFb.filter((x) => x.reply && !x.replySeen).length;
+    b.querySelector('.fb-n').textContent = n ? ` · ${n === 1 ? 'ردّ جديد' : ar(n) + ' ردود جديدة'}` : '';
+    b.classList.toggle('has', n > 0);
+  }
+  function openFeedback(focusId = null) {
+    const mine = [...myFb].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const fresh = new Set(mine.filter((x) => x.reply && !x.replySeen).map((x) => x.id));
+    const item = (x) => `<li class="fb-item${x.id === focusId ? ' focus' : ''}" id="fb-${esc(x.id)}">
+      <div class="row" style="justify-content:space-between;gap:8px">${fbKindChip(x.kind)}<small class="muted">${esc(timeAgo(x.createdAt))}</small></div>
+      <p class="fb-text">${esc(x.text)}</p>
+      ${x.reply ? `<div class="fb-reply${fresh.has(x.id) ? ' new' : ''}"><b>ردّ المعلم${fresh.has(x.id) ? ' <span class="pill">جديد</span>' : ''}</b><p>${esc(x.reply)}</p><small class="muted">${esc(timeAgo(x.repliedAt))}</small></div>` : '<small class="muted">✓ وصلت إلى المعلم</small>'}</li>`;
+    openModal(`<div class="stack fb-modal">
+      <h2>💬 رأيك يهمنا</h2>
+      <p class="muted" style="margin:0">ملاحظتك مهمة لتطوير الموقع. تصل إلى المعلم باسمك وصفّك، وقد يردّ عليك هنا.</p>
+      <form id="fbF" class="stack" style="gap:12px">
+        <div class="fb-kinds" role="radiogroup" aria-label="نوع الملاحظة">${Object.entries(FB_KINDS).map(([k, [i, l]], n) => `<label><input type="radio" name="fbK" value="${k}" ${n === 0 ? 'checked' : ''}><span>${i} ${l}</span></label>`).join('')}</div>
+        <label class="field">اكتب ملاحظتك<textarea id="fbT" rows="4" maxlength="1000" required placeholder="مثلاً: أقترح إضافة… / واجهت مشكلة عند…"></textarea></label>
+        <div class="row" style="justify-content:space-between"><small class="muted" id="fbC">٠ / ١٠٠٠</small><button class="btn primary" type="submit">إرسال</button></div>
+        <div id="fbErr" class="notice" hidden></div>
+      </form>
+      ${mine.length ? `<h3 style="margin:8px 0 0">ملاحظاتي السابقة</h3><ul class="fb-list">${mine.map(item).join('')}</ul>` : ''}
+    </div>`, (m) => {
+      const T = $('#fbT', m);
+      T.oninput = () => ($('#fbC', m).textContent = `${ar(T.value.length)} / ١٠٠٠`);
+      if (focusId) setTimeout(() => $('#fb-' + CSS.escape(focusId), m)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 200);
+      else setTimeout(() => T.focus(), 100);
+      $('#fbF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = e.submitter, err = $('#fbErr', m), text = T.value.trim();
+        err.hidden = true;
+        if (text.length < 3) { err.hidden = false; err.textContent = 'اكتب ملاحظتك أولاً.'; return; }
+        btn.disabled = true;
+        const cls = data.classes.find((c) => c.id === me.classId);
+        const f = { name: me.name, classId: me.classId || '', className: cls?.name || '', kind: $('input[name=fbK]:checked', m).value, text };
+        try {
+          const id = await store.addFeedback(me.id, f);
+          myFb.push({ ...f, id, pn: me.id, createdAt: new Date().toISOString() });
+          notifyFeedback(me.id, id).catch(() => {});
+          closeModal(); paintFbCta();
+          toast('شكراً لك! وصلت ملاحظتك إلى المعلم 🌟');
+        } catch (x) { err.hidden = false; err.textContent = 'تعذر الإرسال: ' + (x.code || x.message); btn.disabled = false; }
+      };
+    });
+    // تسجيل قراءة الردود الجديدة
+    mine.filter((x) => fresh.has(x.id)).forEach((x) => { x.replySeen = true; store.updateFeedback(me.id, x.id, { replySeen: true }).catch(() => {}); });
+    paintFbCta();
+  }
   function openBell() {
     const seen = pref.get(seenKey, '');
     const L = [...notifs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -919,14 +974,15 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
         const n = notifs.find((x) => x.id === b.dataset.nid);
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
+        if (n?.type === 'fbReply') { openFeedback(n.fid); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
         if (n?.type === 'month') { openMonth(n); return; }
         if (n?.type === 'board') { tab = 'honor'; draw(); return; }
@@ -952,6 +1008,7 @@ function viewStudent(app) {
       return;
     }
     draw();
+    store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
     if (openRetakeId) { const id = openRetakeId; openRetakeId = null; if ((data.retakes || []).some((r) => r.id === id)) { startRetake(id); return; } }
     openSubId = null; // درجة من إشعار: نفتح «سجل التسميع» ويعرض announceGrades الاحتفال
@@ -962,6 +1019,9 @@ function viewStudent(app) {
       if (L.some((n) => n.type === 'retake' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
         try { data.retakes = await store.listRetakes(me.id); } catch {}
         if ($('#stBody', app) && tab === 'tasks') draw();
+      }
+      if (L.some((n) => n.type === 'fbReply' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
+        try { myFb = await store.listMyFeedback(me.id); paintFbCta(); } catch {}
       }
       if (L.some((n) => n.type === 'grade' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
         try { data.subs = (await store.studentSubmissions(me.id)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
@@ -1026,7 +1086,10 @@ function viewStudent(app) {
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
-      <div id="stBody" style="margin-top:16px"></div>`;
+      <div id="stBody" style="margin-top:16px"></div>
+      <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
+    $('#stFb', app).onclick = () => openFeedback();
+    paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
     paintBell(); paintAnnBar();
@@ -1368,6 +1431,7 @@ function viewTeacher(app) {
   const s = session.get();
   if (!s || s.role !== 'teacher') return teacherLogin(app);
   let tab = pref.get('tTab', 'subs');
+  if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; history.replaceState(null, '', '#/teacher'); }
   let D = { classes: [], students: [], tasks: [], subs: [] };
   let errCat = defaultCatalog();
   store.getErrorCatalog().then((c) => { errCat = mergeCatalog(c); }).catch(() => {});
@@ -1419,6 +1483,7 @@ function viewTeacher(app) {
       return;
     }
     refreshPush(tOwner);
+    loadFb();
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
@@ -1440,7 +1505,7 @@ function viewTeacher(app) {
       <div id="dbWarn"></div>
       <div id="monthBar"></div>
       <div class="kpis" id="tKpis"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['fb', 'رأيك يهمنا'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'fb' ? '<span class="tab-n" id="fbTabN"></span>' : ''}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
@@ -1483,7 +1548,76 @@ function viewTeacher(app) {
   function drawBody() {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
-    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, reports: drawReports, settings: drawSettings })[tab](body);
+    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+  }
+
+  /* --- رأيك يهمنا --- */
+  let FB = null;
+  const fbF = { kind: 'all', status: 'all', cls: 'all' };
+  async function loadFb() {
+    try { FB = (await store.listAllFeedback()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch (e) { FB = FB || []; console.warn(e); }
+    paintFbTab();
+    if (tab === 'fb') drawBody();
+  }
+  function paintFbTab() {
+    const el = $('#fbTabN', app); if (!el) return;
+    const n = (FB || []).filter((x) => !x.seen).length;
+    el.textContent = n ? (n > 9 ? '+٩' : ar(n)) : '';
+  }
+  function drawFb(body) {
+    if (!FB) { body.innerHTML = '<div class="loading">جارٍ تحميل الملاحظات…</div>'; return; }
+    const opt = (v, l, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`;
+    const L = FB.filter((x) => (fbF.kind === 'all' || x.kind === fbF.kind) && (fbF.cls === 'all' || x.classId === fbF.cls)
+      && (fbF.status === 'all' || (fbF.status === 'new' && !x.seen) || (fbF.status === 'open' && !x.reply) || (fbF.status === 'done' && x.reply)));
+    const count = (k) => FB.filter((x) => x.kind === k).length;
+    body.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">ملاحظات الطلاب عن الموقع. يصلك تنبيه عند كل ملاحظة جديدة، ويصل ردّك إلى الطالب كتنبيه.</p></div><button class="btn sm" type="button" id="fbRe">⟳ تحديث</button></div>
+      <div class="fb-stats">${Object.entries(FB_KINDS).map(([k, [i, l]]) => `<button type="button" class="kpi kpi-btn${fbF.kind === k ? ' on' : ''}" data-fk="${k}"><b>${i} ${ar(count(k))}</b><span>${l}</span></button>`).join('')}</div>
+      <div class="row" style="margin:12px 0">
+        <select id="fbK" style="flex:1 1 130px">${opt('all', 'كل الأنواع', fbF.kind)}${Object.entries(FB_KINDS).map(([k, [i, l]]) => opt(k, `${i} ${l}`, fbF.kind)).join('')}</select>
+        <select id="fbS" style="flex:1 1 130px">${opt('all', 'كل الحالات', fbF.status)}${opt('new', 'جديدة', fbF.status)}${opt('open', 'بلا رد', fbF.status)}${opt('done', 'تم الرد', fbF.status)}</select>
+        <select id="fbC" style="flex:1 1 130px">${opt('all', 'كل الصفوف', fbF.cls)}${D.classes.map((c) => opt(c.id, c.name, fbF.cls)).join('')}</select>
+      </div>
+      ${L.length ? `<ul class="fb-list">${L.map((x) => `<li class="fb-item${x.seen ? '' : ' new'}" data-fb="${esc(x.pn)}|${esc(x.id)}">
+        <div class="row" style="justify-content:space-between;gap:8px">
+          <div class="row" style="gap:8px">${fbKindChip(x.kind)}<b>${esc(x.name || 'طالب')}</b><span class="small muted">${esc(x.className || '')}</span>${x.seen ? '' : '<span class="pill">جديدة</span>'}</div>
+          <small class="muted" title="${esc(fmtDate(x.createdAt))}">${esc(timeAgo(x.createdAt))}</small></div>
+        <p class="fb-text">${esc(x.text)}</p>
+        ${x.reply ? `<div class="fb-reply"><b>ردّك</b> <small class="muted">${esc(timeAgo(x.repliedAt))}${x.replySeen ? ' · قرأه الطالب ✓' : ''}</small><p>${esc(x.reply)}</p></div>` : ''}
+        <form class="fb-rf" hidden><textarea rows="3" maxlength="1000" required placeholder="اكتب ردّك على ${esc(x.name || 'الطالب')}…">${esc(x.reply || '')}</textarea><div class="row"><button class="btn primary sm" type="submit">إرسال الرد</button><button class="btn sm" type="button" data-cancel>إلغاء</button></div></form>
+        <div class="row fb-acts"><button class="btn sm" type="button" data-reply>${x.reply ? '✎ تعديل الرد' : '↩ ردّ'}</button><button class="btn sm danger" type="button" data-del>حذف</button></div>
+      </li>`).join('')}</ul>` : `<div class="empty">${FB.length ? 'لا توجد ملاحظات بهذه الاختيارات.' : 'لم تصل ملاحظات بعد. يجد الطلاب زر «رأيك يهمنا» أسفل صفحتهم.'}</div>`}`;
+    $('#fbRe', body).onclick = () => { FB = null; drawFb(body); loadFb(); };
+    $$('[data-fk]', body).forEach((b) => (b.onclick = () => { fbF.kind = fbF.kind === b.dataset.fk ? 'all' : b.dataset.fk; drawFb(body); }));
+    $('#fbK', body).onchange = (e) => { fbF.kind = e.target.value; drawFb(body); };
+    $('#fbS', body).onchange = (e) => { fbF.status = e.target.value; drawFb(body); };
+    $('#fbC', body).onchange = (e) => { fbF.cls = e.target.value; drawFb(body); };
+    $$('[data-fb]', body).forEach((li) => {
+      const [pn, id] = li.dataset.fb.split('|');
+      const x = FB.find((f) => f.id === id && f.pn === pn);
+      const form = $('.fb-rf', li);
+      $('[data-reply]', li).onclick = () => { form.hidden = false; $('.fb-acts', li).hidden = true; $('textarea', form).focus(); };
+      $('[data-cancel]', li).onclick = () => { form.hidden = true; $('.fb-acts', li).hidden = false; };
+      $('[data-del]', li).onclick = async () => {
+        if (!(await confirmBox(`حذف ملاحظة ${x.name || 'الطالب'}؟`))) return;
+        try { await store.deleteFeedback(pn, id); FB = FB.filter((f) => f !== x); paintFbTab(); drawFb(body); toast('حُذفت الملاحظة.'); } catch (e) { toast('تعذر الحذف: ' + (e.code || e.message)); }
+      };
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const reply = $('textarea', form).value.trim(); if (!reply) return;
+        const btn = e.submitter; btn.disabled = true;
+        try {
+          const patch = { reply, repliedAt: new Date().toISOString(), replySeen: false, seen: true };
+          await store.updateFeedback(pn, id, patch); Object.assign(x, patch);
+          const nid = await store.addStudentNotif(pn, { type: 'fbReply', fid: id, title: '💬 ردّ معلمك على ملاحظتك', body: reply.length > 120 ? reply.slice(0, 120) + '…' : reply, link: `./#/student/fb/${id}`, tag: 'fb-' + id });
+          let msg = `أُرسل ردّك إلى ${x.name || 'الطالب'}.`;
+          try { const p = await sendPush(nid, pn); if (p?.sent) msg += ' ووصل الإشعار إلى جواله.'; else if (p?.deferred) msg += ' ويصل إشعار جواله الساعة ٦ صباحاً.'; } catch (err) { console.warn(err); }
+          toast(msg); drawFb(body);
+        } catch (err) { toast('تعذر إرسال الرد: ' + (err.code || err.message)); btn.disabled = false; }
+      };
+    });
+    // ما عُرض من الملاحظات الجديدة يُعلَّم مقروءاً (ويبقى مميزاً في هذا العرض)
+    const unseen = L.filter((x) => !x.seen);
+    if (unseen.length) setTimeout(() => { unseen.forEach((x) => { x.seen = true; store.updateFeedback(x.pn, x.id, { seen: true }).catch(() => {}); }); paintFbTab(); }, 1200);
   }
 
   /* --- التسليمات --- */

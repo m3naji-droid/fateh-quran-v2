@@ -2,6 +2,7 @@
 
 - /send      : يرسل تنبيهاً محفوظاً (notifs/{id} لصف، أو roster/{طالب}/notifs/{id}) إلى أجهزة أصحابه.
 - /announce  : ينشر إعلاناً كتبه المعلم (announcements/{id}) في جرس الطلاب ويرسله إلى جوالاتهم.
+- /feedback  : الطالب يرسل ملاحظة (رأيك يهمنا) فيصل تنبيهها إلى أجهزة المعلم.
 - /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات.
 نص الإشعار يُقرأ دائماً من قاعدة البيانات لا من الطلب، فلا يستطيع أحد إرسال نص من عنده.
 """
@@ -385,7 +386,7 @@ def run_teacher(local: dt.datetime) -> dict | None:
         return None
     out = {"subs": 0, "retakes": 0}
     if last:
-        by_class, retakes, total = {}, [], 0
+        by_class, retakes, feedbacks, total = {}, [], [], 0
         names = {}
         for r in db.collection("roster").stream():
             names[r.id] = (r.get("name"), r.get("classId"))
@@ -398,6 +399,10 @@ def run_teacher(local: dt.datetime) -> dict | None:
                 by_class[cname] = by_class.get(cname, 0) + 1
                 if x.get("retakeId"):
                     retakes.append(x)
+            for fb in where(r.reference.collection("feedback"), "createdAt", ">", last).stream():
+                fx = fb.to_dict()
+                if not fx.get("notified") and not fx.get("seen"):
+                    feedbacks.append((fx, fb.reference))
         if total:
             word = "تسليم جديد" if total == 1 else "تسليمان جديدان" if total == 2 else f"{num(total)} تسليمات جديدة" if total <= 10 else f"{num(total)} تسليماً جديداً"
             detail = " · ".join(f"{k or 'بلا صف'}: {num(v)}" for k, v in sorted(by_class.items()))
@@ -405,7 +410,9 @@ def run_teacher(local: dt.datetime) -> dict | None:
         for x in retakes[:10]:
             rng = f"{x.get('taskTitle') or ''}".strip()
             to_teachers("🔁 وصلت إعادة طلبتها", f"أعاد {x.get('studentName') or 'طالب'} تسميع «{rng}» كما طلبت. استمع وقيّم.", "retake-" + str(x.get("retakeId")))
-        out = {"subs": total, "retakes": len(retakes)}
+        for fx, ref in feedbacks[:10]:  # ملاحظات وصلت في أوقات الهدوء أو تعذّر تنبيهها فوراً
+            feedback_push(fx, ref)
+        out = {"subs": total, "retakes": len(retakes), "feedback": len(feedbacks)}
     # تنبيهات الاستهلاك: مرة واحدة لكل عتبة
     alerts = st.get("alerts") or {}
     try:
@@ -449,6 +456,25 @@ class SendReq(BaseModel):
 
 class BatchReq(BaseModel):
     items: list[dict]  # [{"notif": id, "student": pn}] تنبيهات خاصة بطلاب (مثل نتائج الشهر)
+
+
+class FeedbackReq(BaseModel):
+    student: str
+    feedback: str
+
+
+FB_KINDS = {"comment": "💬 تعليق", "complaint": "⚠️ شكوى", "suggest": "💡 اقتراح", "note": "📝 ملاحظة"}
+
+
+def feedback_push(x: dict, ref) -> dict:
+    kind = FB_KINDS.get(x.get("kind"), "💬 ملاحظة")
+    text = (x.get("text") or "").strip().replace("\n", " ")
+    who = x.get("name") or "طالب"
+    cls = f" ({x['className']})" if x.get("className") else ""
+    r = to_teachers(f"{kind} جديد من {who}{cls}" if x.get("kind") in ("comment", "suggest") else f"{kind} جديدة من {who}{cls}",
+                    text[:140] + ("…" if len(text) > 140 else ""), "fb-" + ref.id, "./#/teacher/feedback")
+    ref.update({"notified": True})
+    return r
 
 
 class AnnReq(BaseModel):
@@ -495,6 +521,30 @@ def send_batch(req: BatchReq, authorization: str | None = Header(None)):
         ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
         stats = add(stats, r)
     return stats
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackReq, authorization: str | None = Header(None)):
+    """يتحقق أن المرسل هو صاحب الملاحظة نفسه، ثم يرسل تنبيهها للمعلم مرة واحدة فقط."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    r = db.collection("roster").document(req.student).get()
+    if not r.exists or r.to_dict().get("uid") != uid:
+        raise HTTPException(403, "غير مسموح.")
+    ref = r.reference.collection("feedback").document(req.feedback)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "الملاحظة غير موجودة.")
+    x = snap.to_dict()
+    if x.get("notified"):
+        return {"sent": 0, "already": True}
+    if quiet(dt.datetime.now(TZ)):
+        return {"sent": 0, "deferred": True}  # يرسلها ملخّص المعلم بعد الساعة ٦ صباحاً
+    return feedback_push(x, ref)
 
 
 @app.post("/announce")

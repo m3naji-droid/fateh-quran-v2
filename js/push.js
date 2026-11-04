@@ -113,3 +113,16 @@ export async function sendPush(notifId, student = null) {
   if (!res.ok) { let m = ''; try { m = (await res.json()).detail; } catch {} throw new Error(m || 'تعذر إرسال الإشعار (' + res.status + ').'); }
   return res.json();
 }
+
+/** الطالب يُبلغ خادم الإشعارات بملاحظة جديدة ليصل تنبيهها إلى المعلم (النص يُقرأ من قاعدة البيانات) */
+export async function notifyFeedback(pn, id) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ student: pn, feedback: id }),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
