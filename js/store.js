@@ -225,6 +225,15 @@ async function makeCloud() {
       try { await au.signInAnonymously(auth); } catch (e) { console.warn('anon auth', e.code); await new Promise((r) => setTimeout(r, 600 * (i + 1))); }
     }
   }
+  // شاشة الدخول (الصفوف وأسماء الطلاب) مقروءة للجميع، فلا تحتاج دخولاً مجهولاً يستهلك حد إنشاء الحسابات.
+  // إن لم تُنشر القواعد الجديدة بعد، نرجع إلى الدخول المجهول.
+  async function open(fn) {
+    await ready;
+    try { return await fn(); } catch (e) {
+      if (e?.code !== 'permission-denied' && e?.code !== 'unauthenticated') throw e;
+      return authed(fn);
+    }
+  }
   // عند رفض الصلاحية (جلسة قديمة انتهت أو لم يكتمل الدخول بعد): نجدد الجلسة ثم نعيد الطلب مرة واحدة
   async function authed(fn) {
     await ensureAnon();
@@ -268,12 +277,11 @@ async function makeCloud() {
 
     /* ---- حسابات الطلاب: لكل طالب حساب في Firebase Authentication (كلمة السر لا تُحفظ في قاعدة البيانات) ---- */
     async listDirectory(classId) {
-      const d = await authed(() => getDoc(doc(db, 'directory', classId)));
+      const d = await open(() => getDoc(doc(db, 'directory', classId)));
       return d.exists() ? (d.data().students || []).map(({ id, name, email }) => ({ id, name, hasAccount: !!email })).sort(byName) : [];
     },
     async studentSignIn(classId, id, password) {
-      await ensureAnon();
-      const d = await getDoc(doc(db, 'directory', classId));
+      const d = await open(() => getDoc(doc(db, 'directory', classId)));
       const entry = d.exists() ? (d.data().students || []).find((x) => x.id === id) : null;
       if (!entry) throw new Error('لم نجد هذا الطالب في الصف المختار.');
       if (!entry.email) throw new Error('لم يُنشأ حساب لهذا الطالب بعد. راجع معلمك.');
@@ -359,7 +367,7 @@ async function makeCloud() {
         await setDoc(doc(db, 'directory', cid), { students: arr, at: now() });
       }
     },
-    async listClasses() { return authed(() => list('classes')); },
+    async listClasses() { return open(() => list('classes')); },
     async saveClass(c) { const id = c.id || uid(); await setDoc(doc(db, 'classes', id), { name: c.name, createdAt: c.createdAt || now() }, { merge: true }); },
     async deleteClass(id) { await deleteDoc(doc(db, 'classes', id)); },
     async listStudents() { return list('roster'); },
