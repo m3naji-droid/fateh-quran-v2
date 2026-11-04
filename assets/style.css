@@ -463,3 +463,5 @@ tr.grp.open .grp-chev { transform: none; }
 .ded-list li { display: grid; grid-template-columns: minmax(120px, auto) 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
 .word-x { all: unset; cursor: pointer; padding: 1px 6px; border-radius: 6px; background: var(--bad-bg); color: var(--bad); font-family: var(--f-quran); font-size: 15px; }
 .auto-errs .chip .qw { font-family: var(--f-quran); }
+.push-invite > .stack { flex: 1 1 220px; min-width: 0; }
+.push-invite > .row { flex: 1 1 100%; justify-content: flex-end; }
