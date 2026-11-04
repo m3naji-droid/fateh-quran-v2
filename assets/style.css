@@ -450,3 +450,16 @@ tr.grp.open .grp-chev { transform: none; }
 .mw-badge .rank-badge { width: 64px; height: 64px; }
 .mute-list { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .mute-list label { display: flex; gap: 8px; align-items: center; }
+
+/* الأخطاء ودرجاتها */
+.err-table input[type=text] { min-width: 180px; }
+.err-table input[type=number] { max-width: 110px; }
+.err-table tr.off td { opacity: .5; }
+.menu-sec { margin-top: 10px; display: grid; gap: 6px; }
+.chip small { opacity: .75; font-weight: 400; }
+.ded-sum { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; padding: 10px 12px; border-radius: 10px; background: var(--green-2); font-size: 16px; }
+.ded-sum b { font-size: 22px; color: var(--green); }
+.ded-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.ded-list li { display: grid; grid-template-columns: minmax(120px, auto) 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.word-x { all: unset; cursor: pointer; padding: 1px 6px; border-radius: 6px; background: var(--bad-bg); color: var(--bad); font-family: var(--f-quran); font-size: 15px; }
+.auto-errs .chip .qw { font-family: var(--f-quran); }

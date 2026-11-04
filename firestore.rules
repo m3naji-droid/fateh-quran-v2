@@ -60,6 +60,11 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // قائمة الأخطاء ودرجاتها (يضبطها المعلم)
+    match /catalog/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
     // نتائج الشهور المعلنة (الأوائل فقط، بلا درجات بقية الطلاب)
     match /results/{ym} {
       allow read: if signedIn();

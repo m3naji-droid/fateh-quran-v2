@@ -10,6 +10,7 @@ import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from '.
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
+import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -521,6 +522,9 @@ function mountRecite(root, opts) {
 
 /* الاحتفال (٨ من ١٠ فأعلى) والتحفيز لما دونها */
 const fmt10 = (v) => ar(Number.isInteger(v) ? v : Number(v).toFixed(1).replace('.', '٫'));
+/** للخصومات والدرجات بالربع: حتى منزلتين بلا أصفار زائدة */
+const negQ = (v) => `<bdi dir="ltr">−${fmtQ(v)}</bdi>`;
+const fmtQ = (v) => ar(String(Math.round(Number(v || 0) * 100) / 100).replace('.', '٫'));
 function cheerHtml(score10, { who = 'auto' } = {}) {
   if (score10 >= 8) {
     const { phrase, hadith } = pickHigh();
@@ -679,7 +683,7 @@ function aiListHtml(sub) {
 function tjMarksHtml(sub) {
   if (!sub.tj?.length) return '';
   const words = rangeWords(sub.surah, sub.from, sub.to);
-  return `<div><b class="small">أخطاء التجويد التي حددها المعلم</b><ul class="mistakes">${sub.tj.map((m) => `<li><span><span class="qw">${esc(words[m.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[m.i]?.ayah || 0)}</span></span><span class="pill bad">${esc(ruleName(m.r))}</span></li>`).join('')}</ul></div>`;
+  return `<div><b class="small">الأخطاء التي حددها المعلم</b><ul class="mistakes">${sub.tj.map((m) => `<li><span><span class="qw">${esc(words[m.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[m.i]?.ayah || 0)}</span></span><span class="pill bad">${esc(m.n || ruleName(m.r))}${m.d ? ` ${negQ(m.d)}` : ''}</span></li>`).join('')}</ul></div>`;
 }
 
 /* ================= التوجيه ================= */
@@ -1343,6 +1347,10 @@ function viewTeacher(app) {
   if (!s || s.role !== 'teacher') return teacherLogin(app);
   let tab = pref.get('tTab', 'subs');
   let D = { classes: [], students: [], tasks: [], subs: [] };
+  let errCat = defaultCatalog();
+  store.getErrorCatalog().then((c) => { errCat = mergeCatalog(c); }).catch(() => {});
+  let errSaveT = null;
+  const saveErrCat = () => { clearTimeout(errSaveT); errSaveT = setTimeout(() => store.saveErrorCatalog({ ...errCat, updatedAt: new Date().toISOString() }).then(() => toast('حُفظت قائمة الأخطاء.')).catch((e) => toast('تعذر حفظ قائمة الأخطاء: ' + (e.code || e.message))), 700); };
   let aiDoc, aiDocLoading = false; // مستند usage/ai-الشهر
   const loadAiDoc = async (force) => {
     if (aiDocLoading || (aiDoc !== undefined && !force) || !aiEnabled()) return;
@@ -1410,7 +1418,7 @@ function viewTeacher(app) {
       <div id="dbWarn"></div>
       <div id="monthBar"></div>
       <div class="kpis" id="tKpis"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
@@ -1453,7 +1461,7 @@ function viewTeacher(app) {
   function drawBody() {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
-    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, honor: drawHonorT, reports: drawReports, settings: drawSettings })[tab](body);
+    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, reports: drawReports, settings: drawSettings })[tab](body);
   }
 
   /* --- التسليمات --- */
@@ -1523,29 +1531,33 @@ function viewTeacher(app) {
     const riskSet = new Set(risky.map((r) => r.i));
     const words = rangeWords(x.surah, x.from, x.to);
     const segRules = segmentRules(x.surah, x.from, x.to);
-    let marks = (x.tj || []).map((m) => ({ ...m }));
+    let marks = (x.tj || []).map((m) => (m.n ? { ...m } : makeMark(errCat, m.i, m.r)));
+    let manual = !!x.teacher && x.teacher.total !== gradeFrom(deduction(marks, errCat).total);
     let aiRes = x.ai || null;
     const weak = weakRules(model, mine, 3);
     openModal(`
       <div class="stack">
         <div><h2>${esc(x.studentName)} <span class="muted small num">${esc(x.pn)}</span></h2>
         <p class="muted" style="margin:4px 0 0">${esc(x.taskTitle || 'تدريب')} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)} · ${x.mode === 'hifz' ? 'غيباً' : 'نظراً'}</p></div>
-        ${(() => { const prev = x.retakeOf && D.subs.find((y) => y.id === x.retakeOf && y.pn === x.pn); return x.retakeId ? `<div class="retake-info">🔁 هذا التسليم <b>إعادة</b> طلبتها${prev ? ` لتسليم ${fmtDate(prev.createdAt)}${prev.teacher ? ` (درجته ${fmt10(prev.teacher.total)} من ١٠)` : ''} <button class="btn sm" type="button" id="sbPrev">افتح التسليم السابق للمقارنة</button>` : '.'}</div>` : ''; })()}
+        ${(() => { const prev = x.retakeOf && D.subs.find((y) => y.id === x.retakeOf && y.pn === x.pn); return x.retakeId ? `<div class="retake-info">🔁 هذا التسليم <b>إعادة</b> طلبتها${prev ? ` لتسليم ${fmtDate(prev.createdAt)}${prev.teacher ? ` (درجته ${fmtQ(prev.teacher.total)} من ١٠)` : ''} <button class="btn sm" type="button" id="sbPrev">افتح التسليم السابق للمقارنة</button>` : '.'}</div>` : ''; })()}
         ${x.retakeRequested ? `<div class="retake-info">🔁 طلبت من الطالب إعادة ${esc(rangeLabel(x.retakeRequested.surah, x.retakeRequested.from, x.retakeRequested.to))} بتاريخ ${fmtDate(x.retakeRequested.at)}.</div>` : ''}
         <div class="row">${x.percent != null ? `<span class="pill ${pctClass(x.percent)}">الدقة الآلية ${ar(x.percent)}٪</span><span class="pill mute">صحيحة ${ar(x.counts?.correct || 0)} · خطأ ${ar(x.counts?.wrong || 0)} · محذوفة ${ar(x.counts?.missing || 0)}</span>` : '<span class="pill mute">بدون تصحيح آلي</span>'}<span class="pill mute">المدة ${fmtTime(x.duration || 0)}</span></div>
         <div id="sbAudio">${x.hasAudio ? '<button class="btn" id="sbLoad" type="button">تشغيل تسجيل الطالب</button>' : '<span class="muted small">لا يوجد تسجيل صوتي.</span>'}</div>
         ${risky.length ? `<div class="learn-note">استمع أولاً إلى المواضع المسطّرة: هي الأرجح أن يخطئ فيها هذا الطالب${weak.length ? `، فقد أخطأ سابقاً في ${weak.map((w) => `«${esc(ruleName(w.r))}»`).join(' و')}` : ''}.</div>` : ''}
         <div id="sbMap">${wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet })}</div>
-        <div class="tj-menu small" id="sbMenu"><b>لتحديد خطأ تجويد:</b> اضغط على الكلمة في المصحف أعلاه، ثم اختر الحكم الذي أخطأ فيه الطالب. كل خطأ تحدده يتعلم منه النظام فوراً.</div>
+        <div class="tj-menu small" id="sbMenu"><b>لتحديد خطأ:</b> اضغط على الكلمة في المصحف أعلاه، ثم اختر الخطأ (لفظي أو تجويد)، فيُخصم من الدرجة حسب «الأخطاء ودرجاتها».</div>
+        <div id="sbAuto"></div>
         <div id="sbMarks"></div>
         <div id="sbAi"></div>
         ${x.transcript ? `<details><summary class="small">النص الذي التقطه التعرف على الكلام</summary><p class="small muted">${esc(x.transcript)}</p></details>` : ''}
         <form id="sbForm" class="card stack" style="gap:12px">
           <h3>درجة المقطع</h3>
+          <div id="gDed"></div>
           <div class="grade-box">
-            <input type="number" id="gTotal" min="0" max="10" step="0.5" value="${t.total ?? suggested}" aria-label="الدرجة من ١٠"><b>/ ١٠</b>
-            <span class="small muted">اقتراح النظام: <b>${ar(suggested)}</b>${model.n ? ` (تعلّم من ${ar(model.n)} تقييماً)` : ' (تقدير أولي قبل أي تقييم)'}</span>
+            <input type="number" id="gTotal" min="0" max="10" step="0.25" value="${t.total ?? 10}" aria-label="الدرجة من ١٠"><b>/ ١٠</b>
+            <span class="small muted" id="gHint"></span>
           </div>
+          <div class="small muted">توقّع النظام من تقييماتك السابقة: <b>${ar(suggested)}</b>${model.n ? ` (تعلّم من ${ar(model.n)} تقييماً)` : ' (تقدير أولي)'}</div>
           <label class="row small" style="gap:6px"><input type="checkbox" id="gTjDone" ${x.tjDone !== false ? 'checked' : ''}> استمعت وحددت أخطاء التجويد في هذا المقطع (إن لم تحدد شيئاً فهذا يعني أن التجويد سليم)</label>
           <label class="field">ملاحظات للطالب<textarea id="gN" placeholder="مثال: انتبه للإخفاء في «من قبل»، وأطل المد المتصل.">${esc(t.notes || '')}</textarea></label>
           <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="gNotify" checked> <span>أشعر الطالب بدرجته <span class="muted">${x.teacher ? '(يُرسل فقط إن تغيّرت الدرجة)' : '(في الجرس داخل الموقع، وعلى جواله إن فعّلها)'}</span></span></label>
@@ -1560,11 +1572,32 @@ function viewTeacher(app) {
           $('#sbAudio', m).innerHTML = blob ? `<audio controls autoplay src="${URL.createObjectURL(blob)}" style="width:100%"></audio>` : '<span class="muted small">لم يُعثر على التسجيل.</span>';
         } catch (e) { $('#sbAudio', m).innerHTML = `<span class="muted small">تعذر تحميل التسجيل: ${esc(e.message)}</span>`; }
       };
+      const toggleMark = (i, r) => { if (marks.some((k) => k.i === i && k.r === r)) marks = marks.filter((k) => !(k.i === i && k.r === r)); else marks.push(makeMark(errCat, i, r)); };
+      const autoErr = [...(x.statuses || '')].map((c, i) => (c === 'w' ? { i, r: 'v_wrong' } : c === 'm' ? { i, r: 'v_missing' } : null)).filter(Boolean);
       const paintMarks = () => {
         $('#sbMap', m).innerHTML = wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet, ai: aiRes ? new Set(aiRes.errors.map((e) => e.i)) : null });
-        $('#sbMarks', m).innerHTML = tjMarksHtml({ ...x, tj: marks });
+        const ded = deduction(marks, errCat);
+        // أخطاء التصحيح الآلي: تُقترح ويؤكدها المعلم
+        const pend = autoErr.filter((a) => !marks.some((k) => k.i === a.i && (k.r === 'v_wrong' || k.r === 'v_missing')));
+        $('#sbAuto', m).innerHTML = autoErr.length ? `<div class="card stack auto-errs" style="gap:8px"><div class="row" style="justify-content:space-between"><h3>أخطاء لفظية اكتشفها التصحيح الآلي (${ar(autoErr.length)})</h3>${pend.length ? `<button class="btn sm" type="button" id="auAll">أكّد الكل (${ar(pend.length)})</button>` : ''}</div>
+          <p class="small muted" style="margin:0">التعرف الآلي قد يخطئ؛ أكّد ما سمعته خطأً فعلاً، فيُخصم حسب القائمة.</p>
+          <div class="row" style="gap:6px">${autoErr.map((a, k) => { const on = marks.some((q) => q.i === a.i && q.r === a.r); return `<button type="button" class="chip ${on ? 'on' : ''}" data-au="${k}"><span class="qw">${esc(words[a.i]?.text || '')}</span> ${a.r === 'v_missing' ? 'محذوفة' : 'خاطئة'}${on ? ' ✓' : ''}</button>`; }).join('')}</div></div>` : '';
+        $$('[data-au]', m).forEach((b) => (b.onclick = () => { const a = autoErr[+b.dataset.au]; toggleMark(a.i, a.r); paintMarks(); }));
+        const au = $('#auAll', m); if (au) au.onclick = () => { pend.forEach((a) => toggleMark(a.i, a.r)); paintMarks(); };
+        // ملخص الأخطاء والخصم
+        $('#sbMarks', m).innerHTML = marks.length ? `<div class="card stack ded-box" style="gap:8px"><h3>الأخطاء المحددة (${ar(marks.length)})</h3>
+          ${Object.entries(CATS).map(([c, label]) => { const gs = ded.groups.filter((g) => g.c === c); return gs.length ? `<div><b class="small">${label} · ${negQ(ded[c])}</b><ul class="ded-list">${gs.map((g) => `<li><span>${esc(g.name)}${g.count > 1 ? ` ×${ar(g.count)}` : ''}</span><span class="small muted">${marks.filter((k) => k.r === g.key).map((k) => `<button type="button" class="word-x" data-rm="${k.i}|${esc(k.r)}" title="إزالة">${esc(words[k.i]?.text || '')} ✕</button>`).join(' ')}</span><b class="num">${negQ(g.sum)}${g.max && g.count * g.d > g.max ? ' <span class="small muted">(الحد)</span>' : ''}</b></li>`).join('')}</ul></div>` : ''; }).join('')}
+          </div>` : '';
+        $$('[data-rm]', m).forEach((b) => (b.onclick = () => { const [i, r] = b.dataset.rm.split('|'); marks = marks.filter((k) => !(k.i === +i && k.r === r)); paintMarks(); }));
+        const g = gradeFrom(ded.total);
+        $('#gDed', m).innerHTML = `<div class="ded-sum"><span>١٠</span><span>− ${fmtQ(ded.total)} خصم${ded.total ? ` <small>(لفظي ${fmtQ(ded.verbal)} · تجويد ${fmtQ(ded.tajweed)})</small>` : ''}</span><b>= ${fmtQ(g)}</b></div>`;
+        const inp = $('#gTotal', m);
+        if (!manual) inp.value = g;
+        $('#gHint', m).innerHTML = manual && +inp.value !== g ? `عدّلتها يدوياً · حسب الأخطاء: <b>${fmtQ(g)}</b> <button type="button" class="btn sm" id="gUse">استخدمها</button>` : 'تتحدّث تلقائياً مع كل خطأ، ويمكنك تعديلها';
+        const use = $('#gUse', m); if (use) use.onclick = () => { manual = false; paintMarks(); };
         paintAi();
       };
+      $('#gTotal', m).addEventListener('input', () => { manual = true; const h = $('#gHint', m); if (h) h.textContent = 'عدّلتها يدوياً'; });
       const has = (e) => marks.some((k) => k.i === e.i && k.r === e.r);
       function paintAi() {
         const box = $('#sbAi', m);
@@ -1593,33 +1626,51 @@ function viewTeacher(app) {
           <p class="ai-notice small-notice">${AI_NOTICE}</p></div>`;
         $$('[data-ai]', box).forEach((b) => (b.onclick = () => {
           const e = aiRes.errors[+b.dataset.ai];
-          if (has(e)) marks = marks.filter((k) => !(k.i === e.i && k.r === e.r)); else marks.push({ i: e.i, r: e.r });
+          toggleMark(e.i, e.r);
           paintMarks();
         }));
         const all = $('#aiAll', box);
-        if (all) all.onclick = () => { pending.forEach((e) => marks.push({ i: e.i, r: e.r })); paintMarks(); };
+        if (all) all.onclick = () => { pending.forEach((e) => marks.push(makeMark(errCat, e.i, e.r))); paintMarks(); };
       }
       paintMarks();
       $('#sbMap', m).addEventListener('click', (e) => {
         const w = e.target.closest('.w'); if (!w) return;
         const i = +w.dataset.i;
-        const opts = [...new Set([...segRules[i], ...(aiRes ? aiRes.errors.filter((e) => e.i === i).map((e) => e.r) : []), 'makhraj', 'haraka'])];
-        const on = new Set(marks.filter((k) => k.i === i).map((k) => k.r));
-        $('#sbMenu', m).innerHTML = `<div class="row" style="gap:8px"><span class="qw" style="font-family:var(--f-quran);font-size:22px">${esc(words[i].text)}</span><span class="muted">آية ${ar(words[i].ayah)}: ما الخطأ؟</span></div>
-          <div class="row" style="gap:6px;margin-top:8px">${opts.map((r) => `<button type="button" class="chip ${on.has(r) ? 'on' : ''}" data-r="${r}">${esc(ruleName(r))}</button>`).join('')}</div>`;
-        $$('[data-r]', $('#sbMenu', m)).forEach((b) => (b.onclick = () => {
-          const r = b.dataset.r;
-          if (marks.some((k) => k.i === i && k.r === r)) marks = marks.filter((k) => !(k.i === i && k.r === r));
-          else marks.push({ i, r });
-          b.classList.toggle('on');
-          paintMarks();
-        }));
+        const drawMenu = () => {
+          const on = new Set(marks.filter((k) => k.i === i).map((k) => k.r));
+          const live = errCat.items.filter((x) => !x.off);
+          const wordTj = [...new Set([...segRules[i], ...(aiRes ? aiRes.errors.filter((e) => e.i === i).map((e) => e.r) : [])])].filter((r) => findErr(errCat, r)?.cat === 'tajweed' && !findErr(errCat, r)?.off);
+          const chip = (e) => `<button type="button" class="chip ${on.has(e.key) ? 'on' : ''}" data-r="${esc(e.key)}">${esc(e.name)} <small>${negQ(e.d)}</small></button>`;
+          const otherTj = live.filter((e) => e.cat === 'tajweed' && !wordTj.includes(e.key));
+          $('#sbMenu', m).innerHTML = `<div class="row" style="gap:8px"><span class="qw" style="font-family:var(--f-quran);font-size:22px">${esc(words[i].text)}</span><span class="muted">آية ${ar(words[i].ayah)}: ما الخطأ؟</span></div>
+            <div class="menu-sec"><b class="small">${CATS.verbal}</b><div class="row" style="gap:6px">${live.filter((e) => e.cat === 'verbal').map(chip).join('')}</div></div>
+            <div class="menu-sec"><b class="small">${CATS.tajweed}${wordTj.length ? ' (في هذه الكلمة)' : ''}</b><div class="row" style="gap:6px">${wordTj.map((r) => chip(findErr(errCat, r))).join('') || '<span class="small muted">لا أحكام ظاهرة في الكلمة.</span>'}</div>
+              ${otherTj.length ? `<details ${otherTj.some((e) => on.has(e.key)) ? 'open' : ''}><summary class="small">أحكام أخرى</summary><div class="row" style="gap:6px;margin-top:6px">${otherTj.map(chip).join('')}</div></details>` : ''}</div>
+            <details class="menu-sec" id="mnNew"><summary class="small">➕ خطأ غير موجود في القائمة</summary>
+              <div class="row" style="align-items:flex-end;margin-top:6px">
+                <label class="field" style="flex:2 1 160px">اسم الخطأ<input type="text" id="mnName" maxlength="40" placeholder="مثال: الوقف في غير موضعه"></label>
+                <label class="field" style="flex:1 1 120px">النوع<select id="mnCat"><option value="verbal">لفظي</option><option value="tajweed">تجويد</option></select></label>
+                <label class="field" style="flex:1 1 90px">الخصم<input type="number" id="mnD" min="0" max="10" step="0.25" value="0.5"></label>
+                <button class="btn sm primary" type="button" id="mnAdd">أضف وحدّده</button>
+              </div><span class="small muted">يُضاف إلى «الأخطاء ودرجاتها» لتستعمله في كل التقييمات.</span></details>`;
+          $$('[data-r]', $('#sbMenu', m)).forEach((b) => (b.onclick = () => { toggleMark(i, b.dataset.r); drawMenu(); paintMarks(); }));
+          $('#mnAdd', m).onclick = () => {
+            const name = $('#mnName', m).value.trim();
+            if (!name) return toast('اكتب اسم الخطأ.');
+            const d = Math.max(0, Math.min(10, parseFloat($('#mnD', m).value) || 0));
+            const key = 'c_' + Date.now().toString(36);
+            errCat.items.push({ key, name, d, max: null, cat: $('#mnCat', m).value, builtin: false });
+            saveErrCat();
+            toggleMark(i, key); drawMenu(); paintMarks();
+          };
+        };
+        drawMenu();
       });
       $('#sbForm', m).onsubmit = async (e) => {
         e.preventDefault();
         const v = parseFloat($('#gTotal', m).value);
         if (isNaN(v)) return toast('اكتب الدرجة من ١٠.');
-        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 2) / 2)), notes: $('#gN', m).value.trim(), suggested, at: new Date().toISOString() };
+        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 4) / 4)), notes: $('#gN', m).value.trim(), suggested, deduction: deduction(marks, errCat).total, at: new Date().toISOString() };
         const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked, ...(aiRes ? { ai: aiRes } : {}) };
         const prevTotal = x.teacher ? x.teacher.total : null;
         const wantNotify = $('#gNotify', m).checked && prevTotal !== teacher.total;
@@ -1631,7 +1682,7 @@ function viewTeacher(app) {
           if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
           const all = D.subs.map((y) => (y.id === x.id && y.pn === x.pn ? { ...y, ...patch } : y));
           store.setModel(pack(train(all))).catch((err) => console.warn('model save', err));
-          toast(`حُفظت الدرجة${marks.length ? ` و${marks.length} من أخطاء التجويد` : ''}، وتعلّم منها النظام.`);
+          toast(`حُفظت الدرجة${marks.length ? ` و${ar(marks.length)} من الأخطاء` : ''}، وتعلّم منها النظام.`);
           drawBody();
         } catch (err) { toast('تعذر الحفظ: ' + err.message); }
       };
@@ -1664,6 +1715,53 @@ function viewTeacher(app) {
   }
 
   /* --- الواجبات --- */
+  /* --- الأخطاء ودرجاتها --- */
+  function drawErrors(body) {
+    const row = (e) => `<tr class="${e.off ? 'off' : ''}"><td><input type="text" data-ek="${esc(e.key)}" data-f="name" value="${esc(e.name)}" maxlength="40" aria-label="اسم الخطأ"></td>
+      <td><input type="number" data-ek="${esc(e.key)}" data-f="d" value="${e.d}" min="0" max="10" step="0.25" aria-label="الخصم لكل مرة"></td>
+      <td><input type="number" data-ek="${esc(e.key)}" data-f="max" value="${e.max ?? ''}" min="0" max="10" step="0.25" placeholder="بلا حد" aria-label="الحد الأقصى"></td>
+      <td>${e.builtin ? `<label class="small" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ek="${esc(e.key)}" data-f="on" ${e.off ? '' : 'checked'}> مفعّل</label>` : `<button class="btn sm danger" type="button" data-edel="${esc(e.key)}">حذف</button>`}</td></tr>`;
+    body.innerHTML = `<div class="stack">
+      <div class="card stack" style="gap:10px"><h3>⚖️ الأخطاء ودرجاتها</h3>
+        <p class="small" style="margin:0">الدرجة = ١٠ − مجموع الخصم. يُخصم الخطأ في كل مرة يتكرر، ولا يتجاوز مجموع النوع الواحد حدّه الأقصى في المقطع. يمكنك تعديل الدرجة يدوياً عند التقييم. تعديل هذه القائمة لا يغيّر الدرجات المحفوظة سابقاً.</p>
+        <form class="row" id="erAdd" style="align-items:flex-end">
+          <label class="field" style="flex:2 1 180px">خطأ جديد<input type="text" id="erName" maxlength="40" required placeholder="مثال: الوقف في غير موضعه"></label>
+          <label class="field" style="flex:1 1 120px">النوع<select id="erCat"><option value="verbal">لفظي</option><option value="tajweed">تجويد</option></select></label>
+          <label class="field" style="flex:1 1 90px">الخصم<input type="number" id="erD" min="0" max="10" step="0.25" value="0.5"></label>
+          <label class="field" style="flex:1 1 90px">الحد الأقصى<input type="number" id="erMax" min="0" max="10" step="0.25" placeholder="بلا حد"></label>
+          <button class="btn primary" type="submit">إضافة</button>
+        </form>
+      </div>
+      ${Object.entries(CATS).map(([c, label]) => `<div class="card stack" style="gap:8px"><h3>${c === 'verbal' ? '🗣️' : '🎼'} ${label} (${ar(errCat.items.filter((e) => e.cat === c).length)})</h3>
+        <div class="table-wrap"><table class="err-table"><thead><tr><th>الخطأ</th><th>الخصم لكل مرة</th><th>الحد الأقصى في المقطع</th><th></th></tr></thead>
+        <tbody>${errCat.items.filter((e) => e.cat === c).map(row).join('')}</tbody></table></div></div>`).join('')}
+      <div class="row"><button class="btn ghost" type="button" id="erReset">استعادة القائمة الافتراضية</button></div>
+    </div>`;
+    $$('[data-ek]', body).forEach((inp) => (inp.onchange = () => {
+      const e = findErr(errCat, inp.dataset.ek); if (!e) return;
+      const f = inp.dataset.f;
+      if (f === 'name') { const v = inp.value.trim(); if (!v) { inp.value = e.name; return; } e.name = v; }
+      else if (f === 'd') e.d = Math.max(0, Math.min(10, parseFloat(inp.value) || 0));
+      else if (f === 'max') e.max = inp.value === '' ? null : Math.max(0, Math.min(10, parseFloat(inp.value) || 0));
+      else if (f === 'on') { e.off = !inp.checked; inp.closest('tr').classList.toggle('off', e.off); }
+      saveErrCat();
+    }));
+    $$('[data-edel]', body).forEach((b) => (b.onclick = async () => {
+      if (!(await confirmBox('حذف هذا الخطأ من القائمة؟ تبقى الدرجات المحفوظة كما هي.'))) return;
+      errCat.items = errCat.items.filter((e) => e.key !== b.dataset.edel); saveErrCat(); drawErrors(body);
+    }));
+    $('#erAdd', body).onsubmit = (ev) => {
+      ev.preventDefault();
+      const mx = $('#erMax', body).value;
+      errCat.items.push({ key: 'c_' + Date.now().toString(36), name: $('#erName', body).value.trim(), d: Math.max(0, Math.min(10, parseFloat($('#erD', body).value) || 0)), max: mx === '' ? null : Math.max(0, parseFloat(mx) || 0), cat: $('#erCat', body).value, builtin: false });
+      saveErrCat(); drawErrors(body);
+    };
+    $('#erReset', body).onclick = async () => {
+      if (!(await confirmBox('استعادة القائمة الافتراضية؟ تُحذف الأخطاء التي أضفتها وتعود الخصومات إلى قيمها الأولى.', 'استعادة'))) return;
+      errCat = defaultCatalog(); saveErrCat(); drawErrors(body);
+    };
+  }
+
   /* --- الإعلانات والتذكير --- */
   let notifySettings = { eveTime: '19:00' };
   store.getNotifySettings().then((v) => { notifySettings = { ...notifySettings, ...v }; }).catch(() => {});
