@@ -76,8 +76,18 @@ def tokens_for(class_id: str | None = None, students: list[str] | None = None) -
     return list(base.stream())
 
 
-def push(docs: list, n: dict) -> dict:
+def push(docs: list, n: dict, kind: str | None = None, defer: bool = True) -> dict:
+    """يرسل إلى الأجهزة. في أوقات الهدوء تُؤجَّل إشعارات الطلاب إلى الصباح، ويُحترم ما أوقفه الطالب من أنواع."""
     data = {k: str(n.get(k) or "") for k in ("title", "body", "link", "tag")}
+    if kind:
+        docs = [d for d in docs if kind not in (d.get("mute") or [])]
+    deferred = 0
+    if defer and quiet(dt.datetime.now(TZ)):
+        later = [d for d in docs if d.get("role") == "student"]
+        if later:
+            db.collection("deferred").document().set({"tokens": [d.reference.path for d in later], "data": data, "at": now_iso()})
+            deferred = len(later)
+            docs = [d for d in docs if d.get("role") != "student"]
     sent = failed = removed = 0
     for i in range(0, len(docs), 500):
         chunk = docs[i:i + 500]
@@ -95,11 +105,23 @@ def push(docs: list, n: dict) -> dict:
                 if isinstance(r.exception, DEAD):
                     d.reference.delete()
                     removed += 1
-    return {"sent": sent, "failed": failed, "removed": removed}
+    return {"sent": sent, "failed": failed, "removed": removed, "deferred": deferred}
 
 
 def add(stats: dict, r: dict) -> dict:
-    return {k: stats.get(k, 0) + r.get(k, 0) for k in ("sent", "failed", "removed")}
+    return {k: stats.get(k, 0) + r.get(k, 0) for k in ("sent", "failed", "removed", "deferred")}
+
+
+def flush_deferred() -> int:
+    """بعد انتهاء أوقات الهدوء: يرسل الإشعارات المؤجلة."""
+    n = 0
+    for d in db.collection("deferred").stream():
+        x = d.to_dict()
+        toks = [s for s in (db.document(p).get() for p in x.get("tokens", [])) if s.exists]
+        if toks:
+            n += push(toks, x.get("data") or {}, defer=False)["sent"]
+        d.reference.delete()
+    return n
 
 
 def notif_ref(notif: str, student: str | None):
@@ -259,7 +281,7 @@ def run_streaks(local: dt.datetime, cfg: dict) -> dict | None:
               "body": f"لديك {unit} متتالية مع القرآن. سمّع أو تدرّب دقيقة واحدة اليوم حتى لا تنقطع!",
               "link": "./#/student/practice", "tag": "streak-" + today, "createdAt": now_iso(), "studentId": pn}
         db.collection("roster").document(pn).collection("notifs").document("streak-" + today).set(nt)
-        stats = add(stats, push(tokens_for(students=[pn]), nt))
+        stats = add(stats, push(tokens_for(students=[pn]), nt, kind="streak"))
     state_ref.set({"day": today, "reminded": len(reminded), **stats, "at": now_iso()})
     return {"reminded": len(reminded), **stats}
 
@@ -324,7 +346,7 @@ def run_board(local: dt.datetime, cfg: dict) -> dict | None:
         nt = {"type": "board", "title": title, "body": body, "link": "./#/student/honor", "tag": "board-" + today, "createdAt": now_iso(), "studentId": pn}
         db.collection("roster").document(pn).collection("notifs").document("board-" + today).set(nt)
         if toks.get(pn):
-            stats = add(stats, push(toks[pn], nt))
+            stats = add(stats, push(toks[pn], nt, kind="board"))
     snap_ref.set(new_snap)
     return {"notified": len(sent), **stats}
 
@@ -347,7 +369,7 @@ def teacher_tokens() -> list:
 
 def to_teachers(title: str, body: str, tag: str, link: str = "./#/teacher") -> dict:
     toks = teacher_tokens()
-    return push(toks, {"title": title, "body": body, "tag": tag, "link": link}) if toks else {"sent": 0, "failed": 0, "removed": 0}
+    return push(toks, {"title": title, "body": body, "tag": tag, "link": link}, defer=False) if toks else {"sent": 0, "failed": 0, "removed": 0}
 
 
 def run_teacher(local: dt.datetime) -> dict | None:
@@ -496,6 +518,12 @@ def cron(x_cron_secret: str | None = Header(None)):
             except Exception as e:  # إعلان واحد معطوب لا يوقف الباقي
                 anns.append({"ann": d.id, "error": str(e)[:200]})
     local, cfg = dt.datetime.now(TZ), notify_cfg()
+    flushed = 0
+    if not quiet(local):
+        try:
+            flushed = flush_deferred()
+        except Exception as e:
+            print("flush error", e, flush=True)
     reminders = run_reminders(local, cfg)
     try:
         streaks = run_streaks(local, cfg)
@@ -510,4 +538,4 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         teacher = {"error": str(e)[:200]}
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
-    return {"announcements": anns, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher}
+    return {"announcements": anns, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "deferredSent": flushed}

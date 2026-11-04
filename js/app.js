@@ -5,7 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle } from './leaderboard.js';
@@ -549,6 +549,9 @@ function streakOf(days) {
   return { days: n, today: days.has(today), start: addDays(d, 1) };
 }
 const STREAK_MILESTONES = [[30, '🏆 شهر كامل!', 'ثلاثون يوماً متتالية مع القرآن. هذا ثبات الكبار، بارك الله فيك وجعله حجة لك.'], [14, '🌟 أسبوعان متتاليان!', 'أربعة عشر يوماً بلا انقطاع. أنت تبني عادة عظيمة، فواصل.'], [7, '🔥 أسبوع كامل!', 'سبعة أيام متتالية مع القرآن. «أحب الأعمال إلى الله أدومها وإن قلّ».']];
+
+/** ملاحظة للمعلم إن أُجّل الإشعار لأوقات الهدوء */
+const deferNote = (r) => (r && r.deferred && !r.sent ? '، وسيصل إشعار الجوال الساعة ٦ صباحاً (أوقات الهدوء)' : r && r.deferred ? '، ويصل الباقي صباحاً (أوقات الهدوء)' : '');
 
 /* عبارة تشجيع قصيرة تناسب الإشعار */
 function gradeCheer(g) {
@@ -1098,13 +1101,22 @@ function viewStudent(app) {
     host.innerHTML = `<div class="row" style="gap:10px"><span class="install-ico">🔔</span><h3 style="margin:0">الإشعارات</h3></div>
       <p class="small" style="margin:0">${msg}</p>
       ${st === 'ready' ? '<button class="btn primary" type="button" id="pushOn" style="align-self:flex-start">فعّل الإشعارات</button>' : ''}
-      ${st === 'on' ? '<div class="row"><button class="btn" type="button" id="pushTest">جرّب إشعاراً</button><button class="btn ghost" type="button" id="pushOff">إيقاف</button></div>' : ''}`;
+      ${st === 'on' ? `<div class="mute-list"><b class="small">ما يصلني على الجوال:</b>
+        <label><input type="checkbox" checked disabled> الواجبات والدرجات وطلبات الإعادة والإعلانات وتذكير المواعيد <span class="muted small">(دائماً)</span></label>
+        <label><input type="checkbox" data-mute="streak" ${getMute().includes('streak') ? '' : 'checked'}> 🔥 تذكير «حافظ على سلسلتك»</label>
+        <label><input type="checkbox" data-mute="board" ${getMute().includes('board') ? '' : 'checked'}> 🏆 أخبار لوحة الشرف</label>
+        <span class="small muted">لا تصلك إشعارات بين ١٠ مساءً و٦ صباحاً، وما يُرسل فيها يصلك صباحاً. تبقى كل التنبيهات في الجرس 🔔.</span></div>
+        <div class="row"><button class="btn" type="button" id="pushTest">جرّب إشعاراً</button><button class="btn ghost" type="button" id="pushOff">إيقاف</button></div>` : ''}`;
     const on = $('#pushOn', host);
     if (on) on.onclick = async () => { on.disabled = true; try { await enablePush(owner); toast('تم تفعيل الإشعارات.'); } catch (e) { toast(e.message); } drawPushCard(body); };
     const off = $('#pushOff', host);
     if (off) off.onclick = async () => { await disablePush().catch(() => {}); toast('أُوقفت الإشعارات على هذا الجهاز. تبقى التنبيهات في الجرس 🔔.'); drawPushCard(body); };
     const tst = $('#pushTest', host);
     if (tst) tst.onclick = () => testNotification().catch((e) => toast(e.message));
+    $$('[data-mute]', host).forEach((c) => (c.onchange = async () => {
+      const mute = $$('[data-mute]', host).filter((x) => !x.checked).map((x) => x.dataset.mute);
+      try { await setMute(mute); toast('حُفظ اختيارك.'); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); c.checked = !c.checked; }
+    }));
   }
 
   function drawInstall(body) {
@@ -1739,7 +1751,7 @@ function viewTeacher(app) {
       try {
         const id = await store.saveAnnouncement({ title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length });
         if (later) toast(`جُدول الإعلان ليُرسل ${whenText(sendAt)}.`);
-        else { const r = await sendAnnouncement(id); toast(`أُرسل الإعلان${r && r.sent ? `، ووصل إشعار إلى ${ar(r.sent)} ${r.sent === 1 ? 'جهاز' : r.sent <= 10 ? 'أجهزة' : 'جهازاً'}` : ''}.`); }
+        else { const r = await sendAnnouncement(id); toast(`أُرسل الإعلان${r && r.sent ? `، ووصل إشعار إلى ${ar(r.sent)} ${r.sent === 1 ? 'جهاز' : r.sent <= 10 ? 'أجهزة' : 'جهازاً'}` : ''}${deferNote(r)}.`); }
         drawAnn(body);
       } catch (x) { toast('تعذر الإرسال: ' + (x.code || x.message)); btn.disabled = false; }
     };
@@ -1842,7 +1854,7 @@ function viewTeacher(app) {
               body: `معلمك يطلب إعادة «${r.taskTitle}»: ${rangeLabel(r.surah, r.from, r.to)}${r.due ? ` قبل ${dueText(r.due)}` : ''}.${r.notes ? ' ومعه ملاحظة لك.' : ''}`,
               link: `./#/student/retake/${id}`, tag: 'retake-' + id,
             });
-            try { const p = await sendPush(nid, x.pn); if (p && p.sent) msg += ' ووصل الإشعار إلى جواله.'; } catch (err) { console.warn(err); }
+            try { const p = await sendPush(nid, x.pn); if (p && p.sent) msg += ' ووصل الإشعار إلى جواله.'; else if (p && p.deferred) msg += ' ويصل إشعار جواله الساعة ٦ صباحاً (أوقات الهدوء).'; } catch (err) { console.warn(err); }
           }
           toast(msg);
           if (store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); }
@@ -1865,7 +1877,7 @@ function viewTeacher(app) {
       const r = await sendPush(id, x.pn);
       if (!r) return '';
       const who = x.studentName || 'الطالب';
-      return r.sent ? `وصل إشعار الدرجة إلى جوال ${who}.` : r.already ? '' : `ظهرت الدرجة لـ${who} في الموقع. لم يصل إشعار للجوال لأنه لم يفعّل الإشعارات على جهازه بعد.`;
+      return r.sent ? `وصل إشعار الدرجة إلى جوال ${who}.` : r.deferred ? `ظهرت الدرجة لـ${who} في الموقع، ويصل إشعار جواله الساعة ٦ صباحاً (أوقات الهدوء).` : r.already ? '' : `ظهرت الدرجة لـ${who} في الموقع. لم يصل إشعار للجوال لأنه لم يفعّل الإشعارات على جهازه بعد.`;
     } catch (e) { return `تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر للطالب في الموقع.`; }
   }
   /** يحفظ التنبيه (للجرس) ثم يطلب إرساله إلى الجوالات */
@@ -1876,7 +1888,7 @@ function viewTeacher(app) {
     const id = await store.addNotif({ ...n, classId: t.classId, taskId: t.id, link: `./#/student/task/${t.id}`, tag: 'task-' + t.id });
     try {
       const r = await sendPush(id);
-      return !r ? '' : r.sent ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}` : '، ولم يفعّل أحد من طلاب الصف إشعارات الجوال بعد';
+      return !r ? '' : r.sent ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}${deferNote(r)}` : r.deferred ? deferNote(r) : '، ولم يفعّل أحد من طلاب الصف إشعارات الجوال بعد';
     } catch (e) { console.warn(e); return `. تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر في الموقع`; }
   }
   function drawTasks(body) {
@@ -2392,8 +2404,8 @@ function viewTeacher(app) {
     });
     await store.saveMonthResult(ym, { ym, label, stage: res.stage, byClass: res.byClass, challenge: res.challenge, announcedAt: new Date().toISOString(), teacher: s.name || '', students: ok });
     let pushed = null;
-    try { for (let i = 0; i < items.length; i += 200) { const r = await sendPushBatch(items.slice(i, i + 200)); if (r) pushed = { sent: (pushed?.sent || 0) + r.sent }; } } catch (e) { console.warn(e); }
-    toast(`أُعلنت نتائج ${label} لـ${nWord(ok, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}${pushed ? `، ووصل إشعار إلى ${ar(pushed.sent)} جهازاً` : ''}${fail ? `، وتعذر ${ar(fail)}` : ''}.`);
+    try { for (let i = 0; i < items.length; i += 200) { const r = await sendPushBatch(items.slice(i, i + 200)); if (r) pushed = { sent: (pushed?.sent || 0) + r.sent, deferred: (pushed?.deferred || 0) + (r.deferred || 0) }; } } catch (e) { console.warn(e); }
+    toast(`أُعلنت نتائج ${label} لـ${nWord(ok, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}${pushed && pushed.sent ? `، ووصل إشعار إلى ${ar(pushed.sent)} جهازاً` : ''}${deferNote(pushed)}${fail ? `، وتعذر ${ar(fail)}` : ''}.`);
     checkMonthBar();
     if (tab === 'honor') drawBody();
   }

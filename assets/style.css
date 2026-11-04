@@ -448,3 +448,5 @@ tr.grp.open .grp-chev { transform: none; }
 .month-win { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 14px; background: linear-gradient(160deg, var(--gold-soft), var(--card)); border: 2px solid var(--gold); }
 .month-win > div:last-child { display: grid; gap: 2px; } .month-win b { font-size: 20px; color: var(--gold); }
 .mw-badge .rank-badge { width: 64px; height: 64px; }
+.mute-list { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.mute-list label { display: flex; gap: 8px; align-items: center; }

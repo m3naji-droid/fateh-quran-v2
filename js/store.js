@@ -182,6 +182,7 @@ const local = {
   async savePushToken() {},
   async deletePushToken() {},
   async listPushTokens() { return []; },
+  async setPushMute() {},
   async setBoard(b) { LS.set('board', b); },
   async saveRanks(ranks) { const r = LS.get('roster', {}); Object.entries(ranks).forEach(([id, v]) => { if (r[id]) r[id].rank = v; }); LS.set('roster', r); },
   async getMyRank(me) { return LS.get('roster', {})[me.id]?.rank || null; },
@@ -467,6 +468,7 @@ async function makeCloud() {
       await setDoc(doc(db, 'pushTokens', await tokenId(token)), { token, uid: u.uid, ...info, updatedAt: now() });
     },
     async listPushTokens() { return (await getDocs(collection(db, 'pushTokens'))).docs.map((d) => { const { token, ...rest } = d.data(); return { id: d.id, ...rest }; }); },
+    async setPushMute(token, mute) { await updateDoc(doc(db, 'pushTokens', await tokenId(token)), { mute }); },
     async deletePushToken(token) { if (token) await deleteDoc(doc(db, 'pushTokens', await tokenId(token))).catch(() => {}); },
     async getAiUsage(month) { const d = await getDoc(doc(db, 'usage', 'ai-' + month)); return d.exists() ? d.data() : null; },
     async getBoard() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'main')); return d.exists() ? d.data() : null; },

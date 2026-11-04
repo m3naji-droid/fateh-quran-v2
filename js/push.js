@@ -55,10 +55,18 @@ export async function refreshPush(owner) {
     const old = getLocal();
     if (token && (token !== old.token || Date.now() - old.at > 7 * 864e5)) {
       if (old.token !== token) await store.deletePushToken(old.token);
-      await store.savePushToken(token, { ...owner.info, platform: old.platform || (platform().ios ? 'ios' : platform().android ? 'android' : 'desktop') });
-      setLocal({ token, owner: owner.id, at: Date.now() });
+      await store.savePushToken(token, { ...owner.info, mute: old.mute || [], platform: old.platform || (platform().ios ? 'ios' : platform().android ? 'android' : 'desktop') });
+      setLocal({ ...old, token, owner: owner.id, at: Date.now() });
     }
   } catch (e) { console.warn('push refresh', e); }
+}
+
+/** أنواع الإشعارات التي أوقفها صاحب هذا الجهاز (تُحفظ مع رمز الجهاز ليحترمها الخادم) */
+export function getMute() { return getLocal()?.mute || []; }
+export async function setMute(mute) {
+  const t = getLocal(); if (!t) return;
+  await store.setPushMute(t.token, mute);
+  setLocal({ ...t, mute });
 }
 
 /** إشعار تجريبي محلي على هذا الجهاز */
