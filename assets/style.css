@@ -366,3 +366,5 @@ tr.picked td { background: var(--green-2); }
 .install-steps { margin: 0; padding-inline-start: 0; list-style: none; counter-reset: st; display: grid; gap: 10px; }
 .install-steps li { counter-increment: st; display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; line-height: 1.8; }
 .install-steps li::before { content: counter(st, arabic-indic); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--green); color: #fff; font-weight: 700; font-size: 14px; }
+.gear-btn { display: inline-flex; align-items: center; gap: 6px; }
+.gear-btn.on { background: var(--green-2); border-color: var(--green); color: var(--green); }
