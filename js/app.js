@@ -1376,6 +1376,7 @@ function viewTeacher(app) {
       $('#tOut2', app).onclick = async () => { await store.signOut(); session.set(null); render(); };
       return;
     }
+    refreshPush(tOwner);
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
@@ -1399,7 +1400,7 @@ function viewTeacher(app) {
       <div class="kpis" id="tKpis"></div>
       <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['honor', 'لوحة الشرف'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
-    $('#tOut', app).onclick = async () => { unsub?.(); await store.signOut(); session.set(null); render(); };
+    $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
     drawBody();
   }
@@ -2397,6 +2398,30 @@ function viewTeacher(app) {
     if (tab === 'honor') drawBody();
   }
 
+  /* --- إشعارات جوال المعلم --- */
+  const tOwner = { id: 'teacher', info: { role: 'teacher' } };
+  function drawTeacherPush(body) {
+    const host = $('#tPush', body); if (!host) return;
+    const st = pushState('teacher');
+    const msg = {
+      'off-config': 'الإشعارات على الجوال غير مفعّلة في الموقع بعد.',
+      unsupported: '<span class="pill warn">غير مدعوم</span> هذا المتصفح لا يدعم الإشعارات. افتح لوحة المعلم من Chrome على جوالك، أو ثبّت المقرأة على الآيفون.',
+      'needs-install': '<span class="pill warn">ثبّت أولاً</span> على الآيفون: ثبّت المقرأة على الشاشة الرئيسية (مشاركة ← إضافة إلى الشاشة الرئيسية)، ثم افتحها من أيقونتها وادخل كمعلم وعُد إلى هنا.',
+      denied: '<span class="pill bad">مرفوضة</span> رفض جهازك الإشعارات لهذا الموقع. اسمح بها من إعدادات الجوال أو المتصفح ثم حدّث الصفحة.',
+      ready: 'فعّلها على هذا الجهاز ليصلك: ملخّص التسليمات الجديدة كل ساعة، وخبر وصول الإعادات التي طلبتها، وتنبيه عند ٧٠٪ و٩٠٪ من الاستهلاك. لا شيء بين ١٠ مساءً و٦ صباحاً.',
+      on: '<span class="pill ok">مفعّلة</span> يصلك على هذا الجهاز ملخّص التسليمات كل ساعة، وخبر الإعادات، وتنبيهات الاستهلاك (لا شيء بين ١٠ مساءً و٦ صباحاً).',
+    }[st];
+    host.innerHTML = `<h3>🔔 إشعارات جوالك (المعلم)</h3><p class="small" style="margin:0">${msg}</p>
+      ${st === 'ready' ? '<button class="btn primary" type="button" id="tpOn" style="align-self:flex-start">فعّل إشعاراتي على هذا الجهاز</button>' : ''}
+      ${st === 'on' ? '<div class="row"><button class="btn" type="button" id="tpTest">جرّب إشعاراً</button><button class="btn ghost" type="button" id="tpOff">إيقاف</button></div>' : ''}`;
+    const on = $('#tpOn', host);
+    if (on) on.onclick = async () => { on.disabled = true; try { await enablePush(tOwner); toast('تم تفعيل إشعاراتك على هذا الجهاز.'); } catch (e) { toast(e.message); } drawTeacherPush(body); };
+    const off = $('#tpOff', host);
+    if (off) off.onclick = async () => { await disablePush().catch(() => {}); toast('أُوقفت إشعاراتك على هذا الجهاز.'); drawTeacherPush(body); };
+    const tst = $('#tpTest', host);
+    if (tst) tst.onclick = () => testNotification().catch((e) => toast(e.message));
+  }
+
   /* --- عدّاد خادم التجويد --- */
   function drawAiCard(body) {
     const host = $('#aiUse', body); if (!host) return;
@@ -2452,6 +2477,7 @@ function viewTeacher(app) {
         ${store.mode === 'cloud' ? '<p style="margin:0"><span class="pill ok">سحابي</span> البيانات محفوظة في Firebase وتظهر على كل الأجهزة.</p>' : '<p style="margin:0"><span class="pill warn">محلي</span> البيانات محفوظة في هذا المتصفح فقط. للعمل بين أجهزة الطلاب والمعلم فعّل Firebase (راجع ملف README).</p>'}
       </div>
       ${aiEnabled() ? '<div class="card stack usage-card" id="aiUse" style="gap:12px;grid-column:1 / -1"></div>' : ''}
+ <div class="card stack" style="gap:10px" id="tPush"></div>
       <div class="card stack" style="gap:10px"><h3>الإشعارات على الجوال</h3><div id="pushStat" class="small muted">${pushConfigured() && PUSH.url ? 'جارٍ العدّ…' : '<span class="pill warn">غير مفعّلة</span> تظهر التنبيهات للطلاب داخل الموقع فقط. لتفعيل إشعارات الجوال ضع <code>vapidKey</code> و<code>url</code> في ملف js/firebase-config.js (راجع notify-service/README.md).'}</div></div>
       <div class="card stack" style="gap:10px"><h3>خادم تحليل التجويد</h3><div id="aiStatus" class="small muted">${aiEnabled() ? 'جارٍ الفحص…' : 'غير مفعّل. ضع رابط الخادم في ملف js/firebase-config.js (راجع muaalem-space/README.md).'}</div></div>
       ${store.mode === 'cloud' ? `<div class="card stack" style="gap:10px"><h3>نقل بيانات النسخة السابقة</h3>
@@ -2459,6 +2485,7 @@ function viewTeacher(app) {
         <button class="btn" id="mig" type="button">نقل البيانات القديمة</button></div>` : ''}
     </div>`;
     if (aiEnabled()) drawAiCard(body);
+    drawTeacherPush(body);
     if (pushConfigured() && PUSH.url) store.listPushTokens().then((L) => {
       const el = $('#pushStat', body); if (!el) return;
       const st = L.filter((x) => x.role === 'student');

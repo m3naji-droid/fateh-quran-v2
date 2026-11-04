@@ -64,7 +64,7 @@ export async function refreshPush(owner) {
 /** إشعار تجريبي محلي على هذا الجهاز */
 export async function testNotification() {
   const reg = await navigator.serviceWorker.ready;
-  await reg.showNotification('مقرأة الفاتح', { body: 'الإشعارات تعمل على جهازك. سيصلك كل واجب جديد هنا.', icon: 'assets/icons/icon-192.png', badge: 'assets/icons/icon-192.png', dir: 'rtl', lang: 'ar', tag: 'test' });
+  await reg.showNotification('مقرأة الفاتح', { body: 'الإشعارات تعمل على جهازك بإذن الله.', icon: 'assets/icons/icon-192.png', badge: 'assets/icons/icon-192.png', dir: 'rtl', lang: 'ar', tag: 'test' });
 }
 
 /** ينشر إعلاناً عبر الخادم، أو يعيد إرسال إشعاره لطلاب بأعينهم (من لم يقرأ) */

@@ -329,6 +329,96 @@ def run_board(local: dt.datetime, cfg: dict) -> dict | None:
     return {"notified": len(sent), **stats}
 
 
+# ------------------------------------------------------------ إشعارات المعلم
+QUIET = (os.environ.get("QUIET_FROM", "22:00"), os.environ.get("QUIET_TO", "06:00"))
+AI_INSTANCE = (float(os.environ.get("AI_VCPU", "2")), float(os.environ.get("AI_GIB", "8")))
+DB_QUOTA = 1024 ** 3
+
+
+def quiet(local: dt.datetime) -> bool:
+    t = local.strftime("%H:%M")
+    a, b = QUIET
+    return (t >= a or t < b) if a > b else (a <= t < b)
+
+
+def teacher_tokens() -> list:
+    return list(where(db.collection("pushTokens"), "role", "==", "teacher").stream())
+
+
+def to_teachers(title: str, body: str, tag: str, link: str = "./#/teacher") -> dict:
+    toks = teacher_tokens()
+    return push(toks, {"title": title, "body": body, "tag": tag, "link": link}) if toks else {"sent": 0, "failed": 0, "removed": 0}
+
+
+def run_teacher(local: dt.datetime) -> dict | None:
+    """كل ساعة (خارج أوقات الهدوء): ملخّص التسليمات الجديدة، والإعادات التي وصلت، وتنبيهات الاستهلاك."""
+    if quiet(local):
+        return None
+    st_ref = db.collection("settings").document("teacherDigest")
+    st = st_ref.get()
+    st = st.to_dict() if st.exists else {}
+    now = now_iso()
+    last = st.get("lastAt")
+    if last and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last.replace("Z", "+00:00"))) < dt.timedelta(minutes=55):
+        return None
+    out = {"subs": 0, "retakes": 0}
+    if last:
+        by_class, retakes, total = {}, [], 0
+        names = {}
+        for r in db.collection("roster").stream():
+            names[r.id] = (r.get("name"), r.get("classId"))
+            for sub in where(r.reference.collection("subs"), "createdAt", ">", last).stream():
+                x = sub.to_dict()
+                if x.get("teacher"):
+                    continue
+                total += 1
+                cname = x.get("className") or ""
+                by_class[cname] = by_class.get(cname, 0) + 1
+                if x.get("retakeId"):
+                    retakes.append(x)
+        if total:
+            word = "تسليم جديد" if total == 1 else "تسليمان جديدان" if total == 2 else f"{num(total)} تسليمات جديدة" if total <= 10 else f"{num(total)} تسليماً جديداً"
+            detail = " · ".join(f"{k or 'بلا صف'}: {num(v)}" for k, v in sorted(by_class.items()))
+            to_teachers(f"📥 {'وصلت' if 3 <= total <= 10 else 'وصل'} {word} بانتظار تقييمك", detail, "digest-" + now[:13], "./#/teacher")
+        for x in retakes[:10]:
+            rng = f"{x.get('taskTitle') or ''}".strip()
+            to_teachers("🔁 وصلت إعادة طلبتها", f"أعاد {x.get('studentName') or 'طالب'} تسميع «{rng}» كما طلبت. استمع وقيّم.", "retake-" + str(x.get("retakeId")))
+        out = {"subs": total, "retakes": len(retakes)}
+    # تنبيهات الاستهلاك: مرة واحدة لكل عتبة
+    alerts = st.get("alerts") or {}
+    try:
+        ym = local.strftime("%Y-%m")
+        u = db.collection("usage").document("ai-" + ym).get()
+        if u.exists:
+            d = u.to_dict()
+            free = min(180000 / AI_INSTANCE[0], 360000 / AI_INSTANCE[1])
+            pct = ((d.get("billed_seconds") or 0) + (d.get("startup_seconds") or 0)) / free
+            lvl = 90 if pct >= 0.9 else 70 if pct >= 0.7 else 0
+            if lvl and alerts.get("ai-" + ym, 0) < lvl:
+                to_teachers(f"⚠️ خادم التجويد: استُهلك {num(round(pct * 100))}٪ من الحصة المجانية",
+                            "تفاصيل الاستهلاك في لوحة المعلم ← الإعدادات. لإيقاف التحليل مؤقتاً اجعل أقصى عدد للنسخ صفراً في Cloud Run.", "usage-ai")
+                alerts["ai-" + ym] = lvl
+        if alerts.get("dbDay") != local.date().isoformat():  # المساحة: فحص واحد يومياً
+            alerts["dbDay"] = local.date().isoformat()
+            total, students = 200 * 1024, 0
+            for r in db.collection("roster").stream():
+                students += 1
+                for sub in r.reference.collection("subs").stream():
+                    x = sub.to_dict()
+                    total += len(str(x)) + 300 + (x.get("audioBytes") or (int((x.get("duration") or 30) * 3400) if x.get("hasAudio") else 0))
+            total += students * 1500
+            pct = total / DB_QUOTA
+            lvl = 90 if pct >= 0.9 else 70 if pct >= 0.7 else 0
+            if lvl > alerts.get("db", 0):
+                to_teachers(f"⚠️ مساحة قاعدة البيانات: {num(round(pct * 100))}٪ من ١ GB",
+                            "احذف التسجيلات القديمة من لوحة المعلم ← الإعدادات ← مساحة قاعدة البيانات. تبقى الدرجات كما هي.", "usage-db")
+            alerts["db"] = lvl  # إن نزلت المساحة بعد التنظيف يعود التنبيه للعمل
+    except Exception as e:
+        out["usageError"] = str(e)[:200]
+    st_ref.set({"lastAt": now, "alerts": alerts, **out})
+    return out
+
+
 # ------------------------------------------------------------ الواجهات
 class SendReq(BaseModel):
     notif: str
@@ -415,5 +505,9 @@ def cron(x_cron_secret: str | None = Header(None)):
         board = run_board(local, cfg)
     except Exception as e:
         board = {"error": str(e)[:200]}
+    try:
+        teacher = run_teacher(local)
+    except Exception as e:
+        teacher = {"error": str(e)[:200]}
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
-    return {"announcements": anns, "reminders": reminders, "streaks": streaks, "board": board}
+    return {"announcements": anns, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher}
