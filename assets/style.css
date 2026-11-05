@@ -804,3 +804,7 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 .ss-tpl input:checked + span { border-color: var(--sc); background: color-mix(in srgb, var(--sc) 14%, var(--card)); color: var(--sc); }
 .kh-list li[style*="--sc"] { border-inline-start: 4px solid var(--sc); }
 .mr-list li.me { background: var(--green-2); border-radius: 8px; font-weight: 700; }
+
+/* إطار المصحف في التسميع والتدريب: يتمرر داخلياً ليبقى الميكروفون ظاهراً، ويتبع موضع القراءة */
+.reciter .quran { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; scroll-padding: 40px; padding-inline: 4px; }
+@media (max-width: 980px) { .reciter .quran { max-height: 46vh; } .reciter .sheet { scroll-margin-top: 64px; } }

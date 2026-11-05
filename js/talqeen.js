@@ -3,7 +3,7 @@
 // وبعد كل آية (عدا الأولى): ربط الآية السابقة بالحالية غيباً.
 // الاستماع لجزء من الآية: توقيتات الكلمات لتلاوة مشاري العفاسي من Quran.com، وإن تعذرت نقدّرها من صوت الآية.
 import { rangeWords, surahName, toArabicDigits as ar } from './quran.js';
-import { RecitationSession, hasRecognition, ayahAudioUrl } from './speech.js';
+import { RecitationSession, hasRecognition, ayahAudioUrl, RECITERS } from './speech.js';
 import { align, score } from './align.js';
 import { confetti } from './celebrate.js';
 
@@ -21,13 +21,18 @@ export function chunkWords(n) {
 }
 
 /* ---------- الصوت ---------- */
+// أرقام القرّاء في Quran.com (للتلاوة نفسها مع توقيت كل كلمة)
+const QDC = { Alafasy_128kbps: 7, Husary_128kbps: 6, Husary_Muallim_128kbps: 12, Minshawy_Murattal_128kbps: 9, Abdul_Basit_Murattal_192kbps: 2, khalefa_al_tunaiji_64kbps: 161 };
 const timingCache = new Map();
-async function chapterTimings(surah) {
-  if (timingCache.has(surah)) return timingCache.get(surah);
+async function chapterTimings(surah, reciter) {
+  const rid = QDC[reciter];
+  if (!rid) return null;
+  const ck = rid + ':' + surah;
+  if (timingCache.has(ck)) return timingCache.get(ck);
   const p = (async () => {
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 6000);
     try {
-      const r = await fetch(`https://api.qurancdn.com/api/qdc/audio/reciters/7/audio_files?chapter=${surah}&segments=true`, { signal: ctl.signal });
+      const r = await fetch(`https://api.qurancdn.com/api/qdc/audio/reciters/${rid}/audio_files?chapter=${surah}&segments=true`, { signal: ctl.signal });
       if (!r.ok) return null;
       const j = await r.json();
       const f = j.audio_files?.[0] || j.audio_file;
@@ -38,7 +43,7 @@ async function chapterTimings(surah) {
       return { url: f.audio_url, by };
     } catch { return null; } finally { clearTimeout(t); }
   })();
-  timingCache.set(surah, p);
+  timingCache.set(ck, p);
   return p;
 }
 
@@ -70,14 +75,17 @@ class ClipPlayer {
 
 /** موضع المقطع [ws, we) من الآية بالثواني: {url, start, end} */
 async function clipFor(surah, ayah, words, ws, we, reciter) {
-  const t = await chapterTimings(surah);
+  const t = await chapterTimings(surah, reciter);
   const v = t?.by?.[ayah];
   if (v && v.seg.length) {
     const max = Math.max(...v.seg.map((s) => s[0]));
     const idx = (i) => (max === words.length ? i + 1 : Math.max(1, Math.round(((i + 0.5) / words.length) * max))); // تقابل الكلمات إن اختلف العدد
     const s1 = v.seg.find((s) => s[0] === idx(ws)) || v.seg[0];
     const s2 = [...v.seg].reverse().find((s) => s[0] === idx(we - 1)) || v.seg[v.seg.length - 1];
-    return { url: t.url, start: Math.max(0, (v.from + s1[1]) / 1000 - 0.05), end: (v.from + s2[2]) / 1000 + 0.2 };
+    // التوقيتات قد تكون من بداية ملف السورة أو من بداية الآية: نتحقق أيهما
+    const abs = v.from > 0 && v.seg[0][1] >= v.from - 1500;
+    const base = abs ? 0 : v.from;
+    return { url: t.url, start: Math.max(0, (base + s1[1]) / 1000 - 0.05), end: (base + s2[2]) / 1000 + 0.15 };
   }
   // تقدير بطول الحروف من صوت الآية كاملة
   const url = ayahAudioUrl(reciter, surah, ayah);
@@ -95,6 +103,8 @@ export function mountTalqeen(root, opts) {
   const { surah, from, to } = opts;
   const player = new ClipPlayer();
   let reps = opts.reps || 3, sess = null, dead = false, started = Date.now();
+  let reciter = opts.reciter || 'Alafasy_128kbps';
+  try { const r = JSON.parse(localStorage.getItem('fp_pref_talqeenReciter')); if (RECITERS.some((x) => x.id === r)) reciter = r; } catch {}
   const steps = [];
   for (let a = from; a <= to; a++) {
     const words = rangeWords(surah, a, a);
@@ -112,7 +122,7 @@ export function mountTalqeen(root, opts) {
     const s = steps[i];
     const ayahs = to - from + 1, n = s.a - from + 1;
     return `<div class="tq-top"><div><b>سورة ${esc(surahName(surah))}</b> · الآية ${ar(s.a)} <span class="muted">(${ar(n)} من ${ar(ayahs)})</span>${s.kind !== 'link' && s.of > 1 ? ` · المقطع ${ar(s.k + 1)} من ${ar(s.of)}` : ''}</div>
-      <span class="row" style="gap:8px">${opts.onExit ? '<button class="btn sm ghost" type="button" id="tqExit">✕ خروج</button>' : ''}<label class="small">التكرار <select id="tqReps">${[1, 2, 3, 4, 5].map((r) => `<option ${r === reps ? 'selected' : ''}>${r}</option>`).join('')}</select></label></span></div>
+      <span class="row" style="gap:8px">${opts.onExit ? '<button class="btn sm ghost" type="button" id="tqExit">✕ خروج</button>' : ''}<label class="small">القارئ <select id="tqRec">${RECITERS.map((r) => `<option value="${r.id}" ${r.id === reciter ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label><label class="small">التكرار <select id="tqReps">${[1, 2, 3, 4, 5].map((r) => `<option ${r === reps ? 'selected' : ''}>${r}</option>`).join('')}</select></label></span></div>
       <div class="tq-bar"><i style="width:${Math.round((i / steps.length) * 100)}%"></i></div>
       <div class="tq-steps">${['listen', 'read', 'recite'].map((k, j) => `<span class="${s.kind === k ? 'on' : s.kind === 'link' || ['listen', 'read', 'recite'].indexOf(s.kind) > j ? 'done' : ''}">${['🎧 استمع', '👁 ردّد نظراً', '🎙️ سمّع غيباً'][j]}</span>`).join('')}${s.kind === 'link' ? '<span class="on">🔗 اربط الآيتين</span>' : ''}</div>`;
   };
@@ -120,7 +130,7 @@ export function mountTalqeen(root, opts) {
     const box = root.querySelector('#tqPlay');
     const set = (t) => { if (box) box.textContent = t; };
     set('جارٍ تجهيز الصوت…');
-    const c = await clipFor(surah, s.a, s.words, s.ws, s.we, opts.reciter);
+    const c = await clipFor(surah, s.a, s.words, s.ws, s.we, reciter);
     if (dead || steps[i] !== s) return;
     let start = c.start, end = c.end;
     if (c.frac) { // نحتاج مدة الآية أولاً
@@ -155,6 +165,7 @@ export function mountTalqeen(root, opts) {
         <div class="row">${hasRecognition ? '' : '<button class="btn primary" type="button" id="tqSelf">سمّعتها صحيحة ✓</button>'}<button class="btn" type="button" id="tqPeek">👁 أظهر النص</button>${s.kind === 'link' ? '' : '<button class="btn ghost" type="button" id="tqBack">🎧 استمع مرة أخرى</button>'}</div></div>`;
     }
     root.innerHTML = `<div class="talqeen">${progress()}${body}</div>`;
+    root.querySelector('#tqRec').onchange = (e) => { reciter = e.target.value; try { localStorage.setItem('fp_pref_talqeenReciter', JSON.stringify(reciter)); } catch {} if (steps[i]?.kind === 'listen') listen(steps[i]); };
     root.querySelector('#tqReps').onchange = (e) => { reps = +e.target.value; try { localStorage.setItem('fp_pref_talqeenReps', String(reps)); } catch {} };
     const $ = (q) => root.querySelector(q);
     if ($('#tqNext')) $('#tqNext').onclick = () => { i++; draw(); };

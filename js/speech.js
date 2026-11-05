@@ -138,6 +138,7 @@ export const RECITERS = [
   { id: 'Minshawy_Murattal_128kbps', name: 'محمد صديق المنشاوي' },
   { id: 'Abdul_Basit_Murattal_192kbps', name: 'عبد الباسط عبد الصمد' },
   { id: 'MaherAlMuaiqly128kbps', name: 'ماهر المعيقلي' },
+  { id: 'khalefa_al_tunaiji_64kbps', name: 'خليفة الطنيجي' },
   { id: 'Abdurrahmaan_As-Sudais_192kbps', name: 'عبد الرحمن السديس' },
   { id: 'Saood_ash-Shuraym_128kbps', name: 'سعود الشريم' },
   { id: 'Yasser_Ad-Dussary_128kbps', name: 'ياسر الدوسري' },

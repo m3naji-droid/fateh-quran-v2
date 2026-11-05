@@ -307,7 +307,7 @@ function mountRecite(root, opts) {
 
   // مشغل القارئ
   const player = new AyahPlayer({
-    onAyah: (a) => { $$('.ayah', text).forEach((x) => x.classList.toggle('playing', +x.dataset.a === a)); },
+    onAyah: (a) => { $$('.ayah', text).forEach((x) => x.classList.toggle('playing', +x.dataset.a === a)); follow($(`.ayah[data-a="${a}"]`, text)); },
     onState: (s) => {
       $('#rcPlay', root).hidden = s === 'playing';
       $('#rcStopPlay', root).hidden = s !== 'playing';
@@ -319,8 +319,18 @@ function mountRecite(root, opts) {
   $('#rcRate', root).onchange = (e) => player.setRate(+e.target.value);
   $('#rcRep', root).onchange = (e) => (player.repeat = +e.target.value);
   const playRange = (f, t) => { if (sess?.active) return toast('أوقف التسجيل أولاً.'); player.play(surah, f, t); };
-  $('#rcPlay', root).onclick = () => playRange(from, to);
+  $('#rcPlay', root).onclick = () => { showSheet(); text.scrollTo({ top: 0 }); playRange(from, to); };
   $('#rcStopPlay', root).onclick = () => player.stop();
+
+  // متابعة النص: يبقى موضع القراءة أو التلاوة ظاهراً داخل إطار المصحف
+  let followT = 0;
+  function follow(el) {
+    if (!el || !text.isConnected) return;
+    const now = Date.now(); if (now - followT < 350) return; followT = now;
+    const box = text.getBoundingClientRect(), r = el.getBoundingClientRect();
+    if (r.top < box.top + 40 || r.bottom > box.bottom - 40) text.scrollTo({ top: text.scrollTop + (r.top - box.top) - text.clientHeight / 3, behavior: 'smooth' });
+  }
+  const showSheet = () => { const sh = $('.sheet', root); const r = sh?.getBoundingClientRect(); if (r && (r.top < 56 || r.top > innerHeight * 0.4)) sh.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 
   // التلوين حسب النتيجة
   function paint(res, live) {
@@ -330,7 +340,7 @@ function mountRecite(root, opts) {
       const s = res.status[i];
       if (s !== 'pending') el.classList.add(s);
     });
-    if (live && wEls[res.position]) wEls[res.position].classList.add('cursor');
+    if (live && wEls[res.position]) { wEls[res.position].classList.add('cursor'); follow(wEls[res.position]); }
     $('#rcProg', root).style.width = (res.total ? (res.done / res.total) * 100 : 0) + '%';
   }
 
@@ -362,6 +372,7 @@ function mountRecite(root, opts) {
     sess.onAutoStop = () => { toast('انتهى الحد الأقصى لمدة التسجيل.'); finishRec(); };
     try {
       await sess.start();
+      showSheet(); text.scrollTo({ top: 0 });
     } catch (e) {
       $('#rcNotice', root).innerHTML = `<div class="notice">${esc(e.message)}</div>`;
       return;
@@ -778,7 +789,7 @@ function mountPractice(host, learn, onActivity, onResult) {
     comp = mountTalqeen($('#prBody', host), { ...r, reciter: pref.get('reciter', RECITERS[0].id), onActivity, onAyahDone: onResult,
       onExit: () => mount(r), onFinish: () => { mode0 = 'hifz'; mount(r); } });
   };
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, onTalqeen: onResult ? talqeen : null }); };
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, noAi: true, onTalqeen: onResult ? talqeen : null }); }; // التدريب الحر بلا تحليل تجويد آلي
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
   return { destroy: () => comp?.destroy() };
