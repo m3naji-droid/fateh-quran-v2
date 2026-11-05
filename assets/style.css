@@ -678,3 +678,27 @@ body.home-green .foot a { color: #d9b45a; }
 .em-sc-head span { flex: 1; font-size: 20px; color: #5b6b64; }
 .em-big { font-size: clamp(30px, 4.2vw, 56px); line-height: 2.2; max-height: none; background: #fffdf7; color: #15231e; }
 .em-sc-leg { font-size: 18px; justify-content: center; color: #5b6b64; }
+
+/* ================= آية اليوم ================= */
+.aod-home { margin-top: 18px; }
+.aod { position: relative; text-align: center; padding: 18px 20px 14px; border-radius: 18px; background: var(--sheet); border: 1px solid var(--line); box-shadow: inset 0 0 0 6px color-mix(in srgb, var(--gold) 10%, transparent); display: flex; flex-direction: column; gap: 8px; }
+.aod-k { align-self: center; font-size: 13px; font-weight: 700; color: var(--gold); padding: 2px 12px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--gold) 50%, transparent); }
+.aod-text { margin: 0; font: 400 clamp(22px, 4.4vw, 30px)/2 var(--f-quran); color: var(--ink); }
+.aod-end { color: var(--gold); font-size: .8em; }
+.aod-ref { font-size: 13px; color: var(--muted); }
+.aod-meaning { text-align: start; font-size: 14px; line-height: 1.9; background: var(--card); border-radius: 12px; padding: 10px 12px; border: 1px solid var(--line); }
+.aod-meaning small { display: block; color: var(--muted); margin-top: 4px; font-size: 11px; }
+.aod-acts { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.aod-btn { font: inherit; font-size: 13px; padding: 5px 14px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+.aod-btn.on { border-color: var(--green); color: var(--green); }
+.aod-compact { flex-direction: column; margin-bottom: 14px; padding: 12px 14px 10px; }
+.aod-compact .aod-text { font-size: clamp(20px, 3.6vw, 26px); }
+body.home-green .aod { background: rgba(255,255,255,.06); border-color: rgba(217,180,90,.35); box-shadow: none; backdrop-filter: blur(6px); }
+body.home-green .aod-text { color: #fff; }
+body.home-green .aod-ref { color: #cfe0d8; }
+body.home-green .aod-k { color: #d9b45a; }
+body.home-green .aod-meaning { background: rgba(0,0,0,.18); border-color: rgba(217,180,90,.25); color: #e9f3ee; }
+body.home-green .aod-meaning small { color: #a9c4b8; }
+body.home-green .aod-btn { background: rgba(255,255,255,.06); border-color: rgba(217,180,90,.35); color: #f3e7c6; }
+html.splashing .aod-home { opacity: 0; }
+html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }

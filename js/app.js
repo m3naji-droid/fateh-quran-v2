@@ -7,6 +7,7 @@ import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
+import { mountAyahOfDay } from './ayahday.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge } from './push.js';
@@ -750,11 +751,13 @@ function viewHome(app) {
         <a class="entry" href="#/student"><b>دخول الطالب</b><span>واجباتك، والتدريب الحر على أي سورة، وسجل تسميعك، ودفتر أخطائك.</span></a>
         <a class="entry" href="#/teacher"><b>لوحة المعلم</b><span>الصفوف والطلاب والواجبات، والاستماع والتقييم والتقارير.</span></a>
       </div>
+      <div id="aodHome" class="aod-home"></div>
     </div>
   </section>
   <ul class="feature-list">
     ${feats.map(([i, h, d]) => `<li><span class="fi" aria-hidden="true">${i}</span><span><b>${h}:</b> ${d}</span></li>`).join('')}
   </ul>`;
+  mountAyahOfDay($('#aodHome', app));
 }
 
 /* ================= التدريب الحر (للطلاب المسجلين والمعلم فقط) ================= */
@@ -1275,7 +1278,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="annBar"></div><div id="chBar"></div>
+      <div id="annBar"></div><div id="chBar"></div><div id="aodStu"></div>
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -1286,6 +1289,7 @@ function viewStudent(app) {
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
     paintBell(); paintAnnBar(); paintChBar();
+    if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);

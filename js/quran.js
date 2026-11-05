@@ -2,15 +2,13 @@
 let QURAN = null;
 let SURAHS = null;
 
-export async function loadQuran() {
-  if (QURAN) return { QURAN, SURAHS };
-  const [q, s] = await Promise.all([
+let loading = null;
+export function loadQuran() {
+  if (!loading) loading = Promise.all([
     fetch('data/quran.json').then((r) => r.json()),
     fetch('data/surahs.json').then((r) => r.json()),
-  ]);
-  QURAN = q;
-  SURAHS = s;
-  return { QURAN, SURAHS };
+  ]).then(([q, s]) => { QURAN = q; SURAHS = s; return { QURAN, SURAHS }; }).catch((e) => { loading = null; throw e; });
+  return loading;
 }
 
 export const getSurahs = () => SURAHS || [];
