@@ -49,6 +49,8 @@ html.splashing body { overflow: hidden; }
 (function () {
   var root = document.documentElement, el = document.getElementById('splash');
   root.classList.add('splashing');
+  // الخلفية الخضراء للرئيسية من اللحظة الأولى، حتى لو تأخر تحميل الموقع
+  if (!location.hash || /^#\/?$/.test(location.hash)) document.body.classList.add('home-green');
   var t0 = Date.now(), MIN = matchMedia('(prefers-reduced-motion: reduce)').matches ? 400 : 1300, done = false;
   function finish() {
     if (done) return; done = true;

@@ -699,6 +699,7 @@ function tjMarksHtml(sub) {
 
 /* ================= التوجيه ================= */
 let current = null;
+let booted = false; // اكتمل تحميل المصحف وقاعدة البيانات
 const routes = { '': viewHome, practice: viewPractice, student: viewStudent, teacher: viewTeacher };
 function navTo(r) { location.hash = '#/' + r; }
 function render() {
@@ -709,6 +710,8 @@ function render() {
   const r = location.hash.replace(/^#\/?/, '').split('/')[0];
   const fn = routes[r] || viewHome;
   document.body.classList.toggle('home-green', fn === viewHome);
+  // قبل اكتمال تحميل المصحف وقاعدة البيانات لا تُفتح إلا الرئيسية (لا تحتاج بيانات)
+  if (!booted && fn !== viewHome) { $('#app').innerHTML = '<div class="loading">جارٍ التحميل…</div>'; return; }
   $('#nav').innerHTML = [['', 'الرئيسية'], ['student', 'الطالب'], ['teacher', 'المعلم']]
     .map(([k, l]) => `<a href="#/${k}" class="${k === r || (!routes[r] && !k) ? 'on' : ''}">${l}</a>`).join('');
   const app = $('#app');
@@ -2894,6 +2897,10 @@ async function teacherLogin(app) {
 
 /* ================= التشغيل ================= */
 (async function boot() {
+  // الرئيسية لا تحتاج بيانات: نرسمها فوراً لتستقبل شعار الشاشة الافتتاحية دون انتظار التحميل
+  const isHome = () => !routes[location.hash.replace(/^#\/?/, '').split('/')[0]] || location.hash.replace(/^#\/?/, '').split('/')[0] === '';
+  const homeFirst = isHome();
+  if (homeFirst) { render(); window.__splashReady?.(); }
   try {
     await Promise.all([loadQuran(), initStore()]);
   } catch (e) {
@@ -2904,6 +2911,7 @@ async function teacherLogin(app) {
   setTokenProvider(() => store.idToken());
   $('#modeTag').textContent = store.mode === 'cloud' ? 'الحفظ: سحابي' : 'الحفظ: محلي على هذا الجهاز';
   if (cloudError) { const b = $('#banner'); b.hidden = false; b.textContent = 'تعذر الاتصال بقاعدة البيانات السحابية؛ تعمل المنصة الآن بالحفظ المحلي على هذا الجهاز.'; }
-  render();
+  booted = true;
+  if (!(homeFirst && isHome())) render();
   window.__splashReady?.();
 })();
