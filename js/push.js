@@ -126,3 +126,15 @@ export async function notifyFeedback(pn, id) {
   if (!res.ok) return null;
   return res.json();
 }
+
+/** تحدٍّ ودّي: يُبلغ خادم الإشعارات بتحدٍّ جديد أو بانتهائه (الخادم يتحقق ويقرأ التفاصيل من قاعدة البيانات) */
+export async function notifyChallenge(id, event) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/challenge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ id, event }),
+  });
+  return res.ok ? res.json() : null;
+}

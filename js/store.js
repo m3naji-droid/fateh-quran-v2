@@ -147,6 +147,14 @@ const local = {
   // طلبات إعادة التسميع
   async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
   async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
+  // التحديات الودّية
+  async createChallenge(c) { const all = LS.get('challenges', []); const id = uid(); all.push({ ...c, id }); LS.set('challenges', all); return id; },
+  async listMyChallenges(pn) { return LS.get('challenges', []).filter((c) => c.pns.includes(pn)); },
+  async listAllChallenges() { return LS.get('challenges', []); },
+  async getChallenge(id) { return LS.get('challenges', []).find((c) => c.id === id) || null; },
+  async updateChallenge(id, patch) { const all = LS.get('challenges', []); const i = all.findIndex((c) => c.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('challenges', all); } },
+  async getChallengeCfg() { return LS.get('chCfg', { off: false }); },
+  async setChallengeCfg(c) { LS.set('chCfg', c); },
   // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
   async getProgress(pn) { return LS.get('progress_' + pn, null); },
   async saveProgress(pn, patch) { LS.set('progress_' + pn, { ...(LS.get('progress_' + pn, {}) || {}), ...patch }); },
@@ -425,6 +433,13 @@ async function makeCloud() {
     async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
     async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
     async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },
+    async createChallenge(c) { const id = uid(); await setDoc(doc(db, 'challenges', id), c); return id; },
+    async listMyChallenges(pn) { await ensureAnon(); return (await getDocs(query(collection(db, 'challenges'), where('pns', 'array-contains', pn), limit(200)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
+    async listAllChallenges() { return (await getDocs(query(collection(db, 'challenges'), limit(5000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
+    async getChallenge(id) { await ensureAnon(); const d = await getDoc(doc(db, 'challenges', id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
+    async updateChallenge(id, patch) { await updateDoc(doc(db, 'challenges', id), patch); },
+    async getChallengeCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'challengeCfg')).catch(() => null); return d?.exists() ? d.data() : { off: false }; },
+    async setChallengeCfg(c) { await setDoc(doc(db, 'leaderboard', 'challengeCfg'), c); },
     async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
     async saveProgress(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'map'), { ...patch, at: now() }, { merge: true }); },
     async addFeedback(pn, f) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'feedback', id), { ...f, pn, createdAt: now() }); return id; },

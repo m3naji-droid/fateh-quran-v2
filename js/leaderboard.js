@@ -1,5 +1,6 @@
 // لوحة الشرف: تحدي الصفوف، وقارئ الصف، وشيخ المرحلة
 // نقاط الطالب = مجموع أفضل درجة له في كل واجب (درجة المعلم إن وُجدت، وإلا الدرجة الآلية من ١٠)
+// + نقاط التحديات الودّية (مُدخلات فيها bonus)
 // نقاط الصف = مجموع نقاط كل طلابه
 
 const TOP = 5;
@@ -13,7 +14,9 @@ export function subScore(x) {
 
 function rankList(students, subs, classes) {
   const best = new Map(); // `${pn}|${task}` -> score
+  const bonus = new Map();
   subs.forEach((x) => {
+    if (x.bonus) { bonus.set(x.pn, (bonus.get(x.pn) || 0) + x.bonus); return; }
     if (!x.taskId) return;
     const sc = subScore(x);
     if (sc == null) return;
@@ -26,6 +29,7 @@ function rankList(students, subs, classes) {
     pts.set(pn, (pts.get(pn) || 0) + sc);
     tasks.set(pn, (tasks.get(pn) || 0) + 1);
   });
+  bonus.forEach((b, pn) => pts.set(pn, (pts.get(pn) || 0) + b));
   const cname = (id) => classes.find((c) => c.id === id)?.name || '';
   const all = students.map((s) => ({ id: s.id, name: s.name, classId: s.classId, className: cname(s.classId), points: round1(pts.get(s.id) || 0), tasks: tasks.get(s.id) || 0 }))
     .sort((a, b) => b.points - a.points || b.tasks - a.tasks || a.name.localeCompare(b.name, 'ar'));
@@ -179,7 +183,7 @@ export function boardHtml(p, opts = {}) {
     </section>
   </div>
   <details class="small muted"><summary>كيف تُحسب النقاط؟</summary>
-    <p>في كل واجب تُحسب أفضل محاولة لك فقط: درجة المعلم إن قيّمها، وإلا الدرجة الآلية (من ١٠). نقاطك مجموع درجات واجباتك، فالإتقان والإنجاز معاً يرفعانك. ونقاط الصف مجموع نقاط كل طلابه، فكل واجب متقن من أي طالب يرفع صفه.</p>
+    <p>في كل واجب تُحسب أفضل محاولة لك فقط: درجة المعلم إن قيّمها، وإلا الدرجة الآلية (من ١٠). نقاطك مجموع درجات واجباتك، فالإتقان والإنجاز معاً يرفعانك. ونقاط الصف مجموع نقاط كل طلابه، فكل واجب متقن من أي طالب يرفع صفه. وفي «تحدّي الزملاء»: الفائز +٣ نقاط، والمشارك +١، والتعادل +٢ لكلٍّ منهما.</p>
   </details>`;
 }
 

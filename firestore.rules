@@ -61,6 +61,19 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // التحديات الودّية بين زميلين من الصف نفسه: كل طرف يكتب نتيجته مرة واحدة فقط
+    match /challenges/{cid} {
+      allow read: if signedIn();
+      allow create: if isStudent(request.resource.data.a.pn)
+        && request.resource.data.pns == [request.resource.data.a.pn, request.resource.data.b.pn]
+        && request.resource.data.a.pn != request.resource.data.b.pn
+        && get(/databases/$(database)/documents/roster/$(request.resource.data.b.pn)).data.classId == get(/databases/$(database)/documents/roster/$(request.resource.data.a.pn)).data.classId
+        && request.resource.data.ra == null && request.resource.data.rb == null;
+      allow update: if isTeacher()
+        || (isStudent(resource.data.a.pn) && resource.data.get('ra', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ra']))
+        || (isStudent(resource.data.b.pn) && resource.data.get('rb', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rb', 'declined']));
+      allow delete: if isTeacher();
+    }
     // صور الإعلانات (مصغّرة، صورة واحدة لكل إعلان، أقل من ٧٠٠ KB): يكتبها المعلم ويقرؤها الطلاب
     match /annImages/{aid} {
       allow read: if signedIn();

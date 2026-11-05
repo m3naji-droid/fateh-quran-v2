@@ -2,6 +2,7 @@
 
 - /send      : يرسل تنبيهاً محفوظاً (notifs/{id} لصف، أو roster/{طالب}/notifs/{id}) إلى أجهزة أصحابه.
 - /announce  : ينشر إعلاناً كتبه المعلم (announcements/{id}) في جرس الطلاب ويرسله إلى جوالاتهم.
+- /challenge : تحدٍّ ودّي بين زميلين: إشعار بالتحدي الجديد، وبالنتيجة عند انتهائه.
 - /feedback  : الطالب يرسل ملاحظة (رأيك يهمنا) فيصل تنبيهها إلى أجهزة المعلم.
 - /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات.
 نص الإشعار يُقرأ دائماً من قاعدة البيانات لا من الطلب، فلا يستطيع أحد إرسال نص من عنده.
@@ -482,6 +483,27 @@ def feedback_push(x: dict, ref) -> dict:
     return r
 
 
+class ChallengeReq(BaseModel):
+    id: str
+    event: str  # new | done
+
+
+def _ch_winner(c: dict):
+    a, b = c.get("ra"), c.get("rb")
+    if not (a and b):
+        return None
+    if a.get("p") != b.get("p"):
+        return c["a"]["pn"] if a.get("p", 0) > b.get("p", 0) else c["b"]["pn"]
+    if (a.get("wpm") or 0) != (b.get("wpm") or 0):
+        return c["a"]["pn"] if (a.get("wpm") or 0) > (b.get("wpm") or 0) else c["b"]["pn"]
+    return "tie"
+
+
+def _student_notif(pn: str, nid: str, n: dict) -> dict:
+    db.collection("roster").document(pn).collection("notifs").document(nid).set({**n, "studentId": pn, "createdAt": now_iso()})
+    return push(tokens_for(students=[pn]), n, kind="challenge")
+
+
 class AnnReq(BaseModel):
     ann: str
     resend: list[str] | None = None  # إعادة الإشعار لهؤلاء الطلاب فقط (من لم يقرأ)
@@ -526,6 +548,45 @@ def send_batch(req: BatchReq, authorization: str | None = Header(None)):
         ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
         stats = add(stats, r)
     return stats
+
+
+@app.post("/challenge")
+def challenge(req: ChallengeReq, authorization: str | None = Header(None)):
+    """يتحقق أن المرسل طرف في التحدي، ثم يرسل الإشعار المناسب مرة واحدة فقط."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    ref = db.collection("challenges").document(req.id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "التحدي غير موجود.")
+    c = snap.to_dict()
+    uids = [(db.collection("roster").document(p).get().to_dict() or {}).get("uid") for p in c.get("pns", [])]
+    if uid not in uids:
+        raise HTTPException(403, "غير مسموح.")
+    rng = c.get("label") or ""
+    link = "./#/student/challenge/" + req.id
+    if req.event == "new" and not c.get("nNew"):
+        ref.update({"nNew": True})
+        return _student_notif(c["b"]["pn"], "ch-" + req.id, {"type": "challenge", "chId": req.id, "title": "⚔️ تحدٍّ جديد",
+                              "body": f"{c['a']['name']} يتحداك في {rng}. لديك ٤٨ ساعة، ولكلٍّ منكما محاولة واحدة.", "link": link, "tag": "ch-" + req.id})
+    if req.event == "done" and not c.get("nDone"):
+        w = _ch_winner(c)
+        if not w:
+            return {"sent": 0}
+        ref.update({"nDone": True})
+        out = {"sent": 0}
+        for me, other, mine, theirs in ((c["a"], c["b"], c.get("ra"), c.get("rb")), (c["b"], c["a"], c.get("rb"), c.get("ra"))):
+            score = f"دقتك {num(mine.get('p', 0))}٪ ودقة {other['name']} {num(theirs.get('p', 0))}٪."
+            title = "🤝 تعادل في التحدي" if w == "tie" else "🏆 فزت بالتحدي!" if w == me["pn"] else "⚔️ انتهى التحدي"
+            body = f"{score} {'+٢ نقطة لكلٍّ منكما.' if w == 'tie' else '+٣ نقاط في لوحة الشرف. ما شاء الله!' if w == me['pn'] else '+١ نقطة على مشاركتك، وفي التحدي القادم تفوز بإذن الله.'}"
+            r = _student_notif(me["pn"], "chd-" + req.id, {"type": "challenge", "chId": req.id, "title": title, "body": body, "link": link, "tag": "chd-" + req.id})
+            out["sent"] += r.get("sent", 0)
+        return out
+    return {"sent": 0, "already": True}
 
 
 @app.post("/feedback")

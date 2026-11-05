@@ -5,9 +5,10 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
+import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle } from './leaderboard.js';
@@ -194,12 +195,12 @@ function mountRecite(root, opts) {
   <div class="reciter">
     <div class="stack">
       <div class="toolbar">
-        <div class="seg" role="group" aria-label="نوع التدريب">
+        <div class="seg" role="group" aria-label="نوع التدريب" ${opts.lockMode ? 'hidden' : ''}>
           <button type="button" data-mode="recite" class="${mode === 'recite' ? 'on' : ''}">تلاوة نظراً</button>
           <button type="button" data-mode="hifz" class="${mode === 'hifz' ? 'on' : ''}">تسميع غيباً</button>
         </div>
         <label class="btn sm"><input type="checkbox" id="rcTaj" ${tajOn ? 'checked' : ''}> ألوان التجويد</label>
-        <button class="btn sm" id="rcHint" type="button" ${mode === 'hifz' ? '' : 'hidden'}>تلميح بالكلمة التالية</button>
+        <button class="btn sm" id="rcHint" type="button" ${mode === 'hifz' && !opts.noHint ? '' : 'hidden'}>تلميح بالكلمة التالية</button>
         <span style="flex:1"></span>
         <button class="icon-btn" id="rcMinus" type="button" aria-label="تصغير الخط">ـ</button>
         <button class="icon-btn" id="rcPlus" type="button" aria-label="تكبير الخط">+</button>
@@ -257,7 +258,7 @@ function mountRecite(root, opts) {
     mode = b.dataset.mode;
     $$('[data-mode]', root).forEach((x) => x.classList.toggle('on', x === b));
     text.classList.toggle('hide', mode === 'hifz');
-    $('#rcHint', root).hidden = mode !== 'hifz';
+    $('#rcHint', root).hidden = mode !== 'hifz' || !!opts.noHint;
   }));
   $('#rcTaj', root).onchange = (e) => { text.classList.toggle('tajweed', e.target.checked); pref.set('tajweed', e.target.checked); };
   const setSize = (d) => { const v = Math.max(20, Math.min(52, pref.get('qsize', 30) + d)); pref.set('qsize', v); text.style.setProperty('--qsize', v + 'px'); };
@@ -441,7 +442,7 @@ function mountRecite(root, opts) {
       box.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
       opts.onResult && opts.onResult(buildSubmission());
     }
-    if (lastBlob && aiEnabled()) mountAi(box);
+    if (lastBlob && aiEnabled() && !opts.noAi) mountAi(box);
     const rr = $('#rcRetry', box);
     if (rr) rr.onclick = () => { aiCtl?.abort(); aiRes = null; wEls.forEach((el) => el.classList.remove('tjai')); box.innerHTML = ''; wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed')); if (mode === 'hifz') text.classList.add('hide'); $('#rcTimer', root).textContent = '00:00'; $('#rcProg', root).style.width = '0'; $('#rcStatus', root).textContent = 'جاهز. اضغط الزر وابدأ.'; };
     if (oneShot && counts) autoSend(box);
@@ -849,7 +850,9 @@ function viewStudent(app) {
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb|challenge)\/([\w-]+)/);
+  let openChId = deep && deep[1] === 'challenge' ? deep[2] : null;
+  let myCh = [], chCfg = { off: false };
   let openFbId = deep && deep[1] === 'fb' ? deep[2] : null;
   let myFb = [];
   let openMonthYm = deep && deep[1] === 'month' ? deep[2] : null;
@@ -935,6 +938,128 @@ function viewStudent(app) {
     });
     if (w) setTimeout(() => confetti(), 150);
   }
+  /* --- التحدي الودّي --- */
+  async function loadChallenges() {
+    try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); } catch (e) { console.warn('challenges', e); }
+    myCh.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    paintChBar();
+    const host = $('#chCard', app); if (host) drawChCard(host);
+    // تحدٍّ انتهى وقته ولم يُبلَّغ: نطلب إشعار النتيجة (يكفي طرف واحد)
+    myCh.filter((c) => chStatus(c) === 'done' && !c.nDone).forEach((c) => notifyChallenge(c.id, 'done').catch(() => {}));
+  }
+  const chLabel = (c) => `«سورة ${surahName(c.surah)}» ${c.from === c.to ? `الآية ${ar(c.from)}` : `${ar(c.from)}–${ar(c.to)}`}`;
+  function paintChBar() {
+    const host = $('#chBar', app); if (!host) return;
+    const L = myCh.filter((c) => chStatus(c) === 'open' && !chView(c, me.id).mine);
+    host.innerHTML = L.slice(0, 2).map((c) => { const v = chView(c, me.id); return `<div class="ann-bar ch-bar" role="status"><span class="ann-ico">⚔️</span>
+      <div class="ann-tx"><b>${v.incoming ? `${esc(v.other.name)} يتحداك!` : `تحديك مع ${esc(v.other.name)} بانتظار تسميعك`}</b><span>${esc(chLabel(c))} · ${esc(ar(timeLeft(c)))}</span></div>
+      <button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">ابدأ التحدي</button></div>`; }).join('');
+    $$('[data-chgo]', host).forEach((b) => (b.onclick = () => openChallenge(b.dataset.chgo)));
+  }
+  function drawChCard(host) {
+    const today = riyadhDay();
+    const sentToday = myCh.filter((c) => c.a.pn === me.id && riyadhDay(new Date(c.createdAt)) === today).length;
+    const wins = myCh.filter((c) => chWinner(c) === me.id).length, played = myCh.filter((c) => chView(c, me.id).mine).length;
+    const active = myCh.filter((c) => chStatus(c) === 'open');
+    const recent = myCh.filter((c) => chStatus(c) !== 'open').slice(0, 5);
+    const row = (c) => {
+      const v = chView(c, me.id), st = chStatus(c), w = chWinner(c);
+      const res = st === 'open' ? (v.mine ? `<span class="pill mute">سمّعت (${ar(v.mine.p)}٪) · بانتظار ${esc(v.other.name)}</span>` : `<button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">ابدأ</button>${v.incoming ? ` <button class="btn sm ghost" type="button" data-chno="${esc(c.id)}">اعتذار</button>` : ''}`)
+        : st === 'declined' ? '<span class="pill mute">اعتذر</span>'
+        : w === me.id ? '<span class="pill ok">🏆 فزت</span>' : w === 'tie' ? '<span class="pill warn">🤝 تعادل</span>' : w ? '<span class="pill mute">خسرت</span>' : '<span class="pill mute">انتهى الوقت</span>';
+      return `<li><div><b>${v.incoming ? '⬅' : '➡'} ${esc(v.other.name)}</b><span class="small muted">${esc(chLabel(c))}${st === 'open' ? ' · ' + esc(ar(timeLeft(c))) : v.mine && v.theirs ? ` · ${ar(v.mine.p)}٪ مقابل ${ar(v.theirs.p)}٪` : ''}</span></div><div class="row" style="gap:4px;flex-wrap:nowrap">${res}</div></li>`;
+    };
+    host.innerHTML = `<div class="card ch-card stack" style="gap:10px;margin-bottom:16px">
+      <div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3><span class="small muted">انتصاراتك: <b>${ar(wins)}</b> من ${ar(played)}</span></div>
+      <p class="small muted" style="margin:0">تحدَّ زميلاً من صفك في مقطع تختاره: تسميع غيباً، محاولة واحدة لكلٍّ منكما خلال ${ar(CH_HOURS)} ساعة. الأدق يفوز (+${ar(CH_PTS.win)} نقاط)، والمشارك +${ar(CH_PTS.lose)}.</p>
+      ${chCfg.off ? '<div class="notice">أوقف المعلم التحديات مؤقتاً.</div>' : `<div class="row"><button class="btn primary" type="button" id="chNew" ${sentToday >= CH_DAILY ? 'disabled' : ''}>تحدَّ زميلاً</button><span class="small muted">${sentToday >= CH_DAILY ? `وصلت إلى ${ar(CH_DAILY)} تحديات اليوم. عُد غداً!` : `يتبقى لك اليوم ${ar(CH_DAILY - sentToday)} من ${ar(CH_DAILY)}`}</span></div>`}
+      ${active.length ? `<b class="small">تحديات جارية</b><ul class="ch-list">${active.map(row).join('')}</ul>` : ''}
+      ${recent.length ? `<b class="small">آخر النتائج</b><ul class="ch-list">${recent.map(row).join('')}</ul>` : ''}
+    </div>`;
+    const nb = $('#chNew', host); if (nb) nb.onclick = newChallenge;
+    $$('[data-chgo]', host).forEach((b) => (b.onclick = () => openChallenge(b.dataset.chgo)));
+    $$('[data-chno]', host).forEach((b) => (b.onclick = async () => {
+      if (!(await confirmBox('الاعتذار عن هذا التحدي؟ لن تُحسب نقاط لأحد.', 'اعتذار'))) return;
+      try { await store.updateChallenge(b.dataset.chno, { declined: true }); await loadChallenges(); } catch (e) { toast('تعذر: ' + (e.code || e.message)); }
+    }));
+  }
+  async function newChallenge() {
+    openModal('<div class="loading">جارٍ تحميل زملائك…</div>');
+    let mates = [];
+    try { mates = (await store.listDirectory(me.classId)).filter((x) => x.id !== me.id && x.hasAccount); } catch (e) { $('#modalBody').innerHTML = `<div class="notice">تعذر تحميل الزملاء: ${esc(e.code || e.message)}</div>`; return; }
+    const busy = new Set(myCh.filter((c) => chStatus(c) === 'open').map((c) => chView(c, me.id).other.pn));
+    const init = pref.get('lastRange', { surah: 78, from: 1, to: 10 });
+    $('#modalBody').innerHTML = `<form class="stack" id="chForm"><h2>⚔️ تحدٍّ جديد</h2>
+      <label class="field">زميلك<select id="chMate" required><option value="">اختر زميلاً من صفك</option>${mates.map((x) => `<option value="${esc(x.id)}" ${busy.has(x.id) ? 'disabled' : ''}>${esc(x.name)}${busy.has(x.id) ? ' (بينكما تحدٍّ جارٍ)' : ''}</option>`).join('')}</select></label>
+      <div class="card">${rangePicker('cx', init)}</div>
+      <p class="small muted" style="margin:0">المقطع حتى ٢٠ آية. تسميع غيباً بلا تلميح، ومحاولة واحدة لكلٍّ منكما. يصل زميلك إشعار، وأمامكما ${ar(CH_HOURS)} ساعة.</p>
+      <div class="row"><button class="btn primary" type="submit">أرسل التحدي</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`;
+    const m = $('#modalBody');
+    let rng = { ...init };
+    bindRangePicker(m, 'cx', (r) => (rng = r));
+    $('#chForm', m).onsubmit = async (e) => {
+      e.preventDefault();
+      const mate = mates.find((x) => x.id === $('#chMate', m).value); if (!mate) return toast('اختر زميلك.');
+      if (rng.to - rng.from + 1 > 20) return toast('اختر مقطعاً لا يزيد على ٢٠ آية.');
+      const btn = e.submitter; btn.disabled = true;
+      const cls = data.classes.find((c) => c.id === me.classId);
+      const now = new Date();
+      const c = { pns: [me.id, mate.id], a: { pn: me.id, name: me.name }, b: { pn: mate.id, name: mate.name }, classId: me.classId, className: cls?.name || '', surah: rng.surah, from: rng.from, to: rng.to, label: '', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CH_HOURS * 3600e3).toISOString(), ra: null, rb: null };
+      c.label = chLabel(c);
+      try {
+        const id = await store.createChallenge(c);
+        myCh.unshift({ ...c, id });
+        notifyChallenge(id, 'new').catch(() => {});
+        closeModal(); toast(`أُرسل التحدي إلى ${mate.name} ⚔️`);
+        openChallenge(id);
+      } catch (x) { toast('تعذر إرسال التحدي: ' + (x.code || x.message)); btn.disabled = false; }
+    };
+  }
+  /** شاشة التحدي: التسميع (مرة واحدة) أو النتيجة */
+  async function openChallenge(id) {
+    let c = myCh.find((x) => x.id === id);
+    try { c = (await store.getChallenge(id)) || c; } catch {}
+    if (!c) return toast('هذا التحدي لم يعد موجوداً.');
+    const i = myCh.findIndex((x) => x.id === id); if (i >= 0) myCh[i] = c; else myCh.unshift(c);
+    const v = chView(c, me.id), st = chStatus(c);
+    comp?.destroy(); comp = null;
+    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="chBack" type="button">→ رجوع</button><h1>⚔️ تحدٍّ مع ${esc(v.other.name)}</h1>
+      <p class="muted" style="margin:4px 0 0">${esc(chLabel(c))} · ${st === 'open' ? esc(ar(timeLeft(c))) : 'انتهى'}</p></div></div><div id="chBody"></div>`;
+    $('#chBack', app).onclick = () => { comp?.destroy(); comp = null; tab = 'honor'; draw(); };
+    const body = $('#chBody', app);
+    if (v.mine || st !== 'open') return showChResult(body, c);
+    body.innerHTML = '<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً، بلا تلميح، ومحاولة واحدة فقط: النتيجة تُحتسب عند أول إيقاف. استعد جيداً ثم ابدأ.</div><div id="chRc"></div>';
+    comp = mountRecite($('#chRc', body), {
+      surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true,
+      onActivity: (sec) => logAct('practice', sec),
+      onResult: (sub) => setTimeout(async () => {
+        const r = { p: sub.percent, wpm: sub.wpm || 0, dur: Math.round(sub.duration || 0), at: new Date().toISOString() };
+        comp?.destroy(); comp = null;
+        body.innerHTML = '<div class="loading">جارٍ حفظ نتيجتك…</div>';
+        try {
+          await store.updateChallenge(c.id, { [v.side]: r });
+          c[v.side] = r;
+          recordProgress(sub);
+          if (chStatus(c) === 'done') notifyChallenge(c.id, 'done').catch(() => {});
+        } catch (x) { body.innerHTML = `<div class="notice">تعذر حفظ النتيجة: ${esc(x.code || x.message)}</div>`; return; }
+        showChResult(body, c, true);
+        paintChBar();
+      }),
+    });
+  }
+  function showChResult(body, c, fresh = false) {
+    const v = chView(c, me.id), st = chStatus(c), w = chWinner(c);
+    const tile = (who, r) => `<div class="ch-tile${w === who.pn ? ' win' : ''}"><span>${esc(who.name)}</span><b>${r ? ar(r.p) + '٪' : '—'}</b><small>${r ? `${ar(r.wpm)} كلمة/دقيقة` : st === 'open' ? 'لم يسمّع بعد' : 'لم يشارك'}</small>${w === who.pn ? '<i>🏆</i>' : ''}</div>`;
+    const head = st === 'open' ? `سمّعت بدقة ${ar(v.mine.p)}٪، والآن ننتظر ${esc(v.other.name)} (${esc(ar(timeLeft(c)))}).`
+      : st === 'declined' ? 'اعتذر عن التحدي.' : w === 'tie' ? `🤝 تعادل! +${ar(CH_PTS.tie)} نقطة لكلٍّ منكما.` : w === me.id ? `🏆 فزت بالتحدي! +${ar(CH_PTS.win)} نقاط في لوحة الشرف.` : w ? `انتهى التحدي لصالح ${esc(v.other.name)}. ${v.mine ? `+${ar(CH_PTS.lose)} نقطة على مشاركتك.` : ''}` : 'انتهى الوقت ولم يسمّع أحد.';
+    body.innerHTML = `<div class="card stack ch-result" style="gap:14px"><h2 style="margin:0">${head}</h2>
+      <div class="ch-vs">${tile(v.me, v.mine)}<span class="ch-x">⚔️</span>${tile(v.other, v.theirs)}</div>
+      <div class="row"><button class="btn primary" type="button" id="chHome">إلى لوحة الشرف</button>${st !== 'open' && chCfg.off !== true ? '<button class="btn gold" type="button" id="chAgain">تحدٍّ جديد</button>' : ''}</div></div>`;
+    if (fresh && w === me.id) setTimeout(() => confetti(), 150);
+    $('#chHome', body).onclick = () => { tab = 'honor'; draw(); };
+    const ag = $('#chAgain', body); if (ag) ag.onclick = () => { tab = 'honor'; draw(); newChallenge(); };
+  }
+
   /* --- مصحفي: خريطة الحفظ --- */
   let progress = null, mfFilter = 'all';
   async function loadProgress() {
@@ -1026,8 +1151,8 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
@@ -1035,6 +1160,7 @@ function viewStudent(app) {
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
         if (n?.type === 'fbReply') { openFeedback(n.fid); return; }
+        if (n?.type === 'challenge') { loadChallenges().then(() => openChallenge(n.chId)); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
         if (n?.type === 'month') { openMonth(n); return; }
         if (n?.type === 'board') { tab = 'honor'; draw(); return; }
@@ -1061,6 +1187,7 @@ function viewStudent(app) {
     }
     draw();
     pruneImageCache();
+    loadChallenges().then(() => { if (openChId) { const id = openChId; openChId = null; openChallenge(id); } });
     store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
     if (openRetakeId) { const id = openRetakeId; openRetakeId = null; if ((data.retakes || []).some((r) => r.id === id)) { startRetake(id); return; } }
@@ -1072,6 +1199,9 @@ function viewStudent(app) {
       if (L.some((n) => n.type === 'retake' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
         try { data.retakes = await store.listRetakes(me.id); } catch {}
         if ($('#stBody', app) && tab === 'tasks') draw();
+      }
+      if (L.some((n) => n.type === 'challenge' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
+        await loadChallenges(); if ($('#stBody', app) && tab === 'honor') draw();
       }
       if (L.some((n) => n.type === 'fbReply' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
         try { myFb = await store.listMyFeedback(me.id); paintFbCta(); } catch {}
@@ -1135,7 +1265,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="annBar"></div>
+      <div id="annBar"></div><div id="chBar"></div>
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -1145,7 +1275,7 @@ function viewStudent(app) {
     paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell(); paintAnnBar();
+    paintBell(); paintAnnBar(); paintChBar();
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
@@ -1275,7 +1405,9 @@ function viewStudent(app) {
     try { [board, myRank] = await Promise.all([store.getBoard(), store.getMyRank(me).catch(() => null)]); }
     catch (e) { body.innerHTML = `<div class="empty">تعذر تحميل لوحة الشرف: ${esc(e.code || e.message)}</div>`; return; }
     if (tab !== 'honor') return;
-    mountBoard(body, board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
+    body.innerHTML = '<div id="chCard"></div><div id="hbB"></div>';
+    drawChCard($('#chCard', body));
+    mountBoard($('#hbB', body), board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
     // احتفال أول مرة يدخل فيها الخمسة الأوائل في صفه أو المرحلة (لكل شهر)
     const r = myRank?.month;
     if (r && ((r.cls && r.cls <= 5) || (r.stage && r.stage <= 5))) {
@@ -1545,6 +1677,7 @@ function viewTeacher(app) {
     }
     refreshPush(tOwner);
     loadFb();
+    store.listAllChallenges().then((L) => { D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
@@ -2670,13 +2803,15 @@ function viewTeacher(app) {
 
   /* --- لوحة الشرف: تُحسب هنا وتُنشر للطلاب --- */
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
+  // التسليمات + نقاط التحديات الودّية المحسومة
+  const boardSubs = () => (D.challenges?.length ? D.subs.concat(chBonus(D.challenges)) : D.subs);
   function schedulePublish() {
     clearTimeout(boardTimer);
     boardTimer = setTimeout(publishBoard, 2500);
   }
   async function publishBoard() {
     if (!D.students.length) return;
-    const { board, ranks } = computeBoard(D.subs, D.students, D.classes);
+    const { board, ranks } = computeBoard(boardSubs(), D.students, D.classes);
     lastBoard = board;
     const json = JSON.stringify(board);
     if (json === lastBoardJson) return;
@@ -2687,14 +2822,16 @@ function viewTeacher(app) {
     } catch (e) { console.warn('board publish', e); }
   }
   function drawHonorT(body) {
-    const { board } = computeBoard(D.subs, D.students, D.classes);
+    const { board } = computeBoard(boardSubs(), D.students, D.classes);
     const months = [...new Set(D.subs.map((x) => (x.createdAt || '').slice(0, 7)).filter(Boolean))].sort().reverse();
     const cur = new Date().toISOString().slice(0, 7);
     body.innerHTML = `<div class="card stack month-card" style="gap:10px;margin-bottom:16px">
         <div class="row" style="justify-content:space-between"><h3>📅 نتائج الشهر والشهادات</h3><span class="small muted" id="mStat"></span></div>
         <p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>
         <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}</div>
-      </div><div id="hbBoard"></div>`;
+      </div>
+      <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="hbBoard"></div>`;
+    drawChAdmin($('#chAdm', body));
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
     const pick = $('#mPick', body);
     if (pick) {
@@ -2703,6 +2840,23 @@ function viewTeacher(app) {
       $('#mGo', body).onclick = () => openMonthReview(pick.value);
     }
     schedulePublish();
+  }
+
+  /* --- إدارة التحديات الودّية --- */
+  async function drawChAdmin(host) {
+    const L = D.challenges || [];
+    const ym = new Date().toISOString().slice(0, 7);
+    const month = L.filter((c) => (c.createdAt || '').slice(0, 7) === ym);
+    const open = L.filter((c) => chStatus(c) === 'open');
+    let cfg = { off: false };
+    try { cfg = await store.getChallengeCfg(); } catch {}
+    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3>
+        <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
+      <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}. الفائز +${ar(CH_PTS.win)} في لوحة الشرف، والمشارك +${ar(CH_PTS.lose)}، والتعادل +${ar(CH_PTS.tie)} لكلٍّ منهما. حد كل طالب ${ar(CH_DAILY)} تحديات يومياً.</p>
+      ${month.length ? `<details><summary class="small">آخر التحديات</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => { const w = chWinner(c); return `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span></div><span class="small">${chStatus(c) === 'open' ? 'جارٍ' : chStatus(c) === 'declined' ? 'اعتذار' : w === 'tie' ? 'تعادل' : w ? '🏆 ' + esc(w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`; }).join('')}</ul></details>` : ''}`;
+    $('#chOn', host).onchange = async (e) => {
+      try { await store.setChallengeCfg({ off: !e.target.checked }); toast(e.target.checked ? 'فُعّلت التحديات.' : 'أُوقفت التحديات مؤقتاً، ولا يستطيع الطلاب إنشاء تحدٍّ جديد.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); e.target.checked = !e.target.checked; }
+    };
   }
 
   /* --- نتائج الشهر --- */
@@ -2724,7 +2878,7 @@ function viewTeacher(app) {
     return { ym: res.ym, name: st.name, title: w.title, line: w.line, rank: w.rank, month: monthLabel(res.ym), points: r.points, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
   }
   async function openMonthReview(ym) {
-    const res = computeMonth(D.subs, D.students, D.classes, ym);
+    const res = computeMonth(boardSubs(), D.students, D.classes, ym);
     const ungraded = D.subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym && x.taskId && !x.teacher).length;
     let done = null; try { done = await store.getMonthResult(ym); } catch {}
     const isCur = ym === new Date().toISOString().slice(0, 7);
