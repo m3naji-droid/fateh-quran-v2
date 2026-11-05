@@ -702,3 +702,59 @@ body.home-green .aod-meaning small { color: #a9c4b8; }
 body.home-green .aod-btn { background: rgba(255,255,255,.06); border-color: rgba(217,180,90,.35); color: #f3e7c6; }
 html.splashing .aod-home { opacity: 0; }
 html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
+
+/* ================= وضع عرض الفصل ================= */
+.cr-launch { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cr-launch > div:first-child { display: flex; flex-direction: column; gap: 4px; flex: 1 1 300px; }
+.cr { position: fixed; inset: 0; z-index: 9500; color: #fff; font-family: var(--f-ui); overflow: hidden; display: flex; flex-direction: column; }
+.cr-bg { position: absolute; inset: 0; background: radial-gradient(120vmax 90vmax at 50% 30%, #0f6b51 0%, #0a4a39 45%, #052c22 100%); }
+.cr-bg::before { content: ""; position: absolute; left: 50%; top: 42%; width: 240vmax; height: 240vmax; margin: -120vmax 0 0 -120vmax; opacity: .08; animation: spSpin 90s linear infinite;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cg fill='none' stroke='%23d9b45a' stroke-width='1'%3E%3Crect x='10' y='10' width='20' height='20'/%3E%3Crect x='10' y='10' width='20' height='20' transform='rotate(45 20 20)'/%3E%3Ccircle cx='20' cy='20' r='4'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 48vmax 48vmax; }
+.cr-stage { position: relative; flex: 1; display: grid; place-items: center; padding: 3vh 4vw 0; cursor: pointer; }
+.cr-slide { width: min(1400px, 100%); display: flex; flex-direction: column; align-items: center; gap: 2vh; text-align: center; animation: crIn .6s ease-out both; }
+@keyframes crIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+.cr-title { margin: 0; font: 700 clamp(40px, 6vw, 92px)/1.2 'Aref Ruqaa', 'Amiri', serif; color: #d9b45a; text-shadow: 0 8px 30px rgba(0,0,0,.35); }
+.cr-sub { margin: 0; font-size: clamp(18px, 2vw, 30px); color: #cfe0d8; }
+.cr-podium { display: flex; align-items: flex-end; justify-content: center; gap: 2vw; margin-top: 3vh; width: 100%; }
+.cr-step { display: flex; flex-direction: column; align-items: center; gap: .6vh; width: min(26vw, 340px); opacity: 0; animation: crUp .8s cubic-bezier(.34,1.4,.64,1) var(--d) both; }
+@keyframes crUp { from { opacity: 0; transform: translateY(80px) scale(.9); } to { opacity: 1; transform: none; } }
+.cr-medal { font-size: clamp(40px, 5vw, 80px); }
+.cr-name { font: 700 clamp(22px, 2.6vw, 44px)/1.2 var(--f-display); }
+.cr-cls { font-size: clamp(14px, 1.3vw, 22px); color: #cfe0d8; }
+.cr-pts { font: 700 clamp(20px, 2.2vw, 36px) var(--f-display); color: #d9b45a; }
+.cr-pts small, .cr-rest small { font-size: .55em; font-weight: 400; color: #cfe0d8; }
+.cr-block { width: 100%; display: grid; place-items: center; font: 800 clamp(40px, 5vw, 90px) var(--f-display); color: #052c22; border-radius: 18px 18px 0 0; background: linear-gradient(180deg, #f3e7c6, #d9b45a); box-shadow: 0 20px 50px rgba(0,0,0,.35); }
+.s1 .cr-block { height: 28vh; } .s2 .cr-block { height: 20vh; background: linear-gradient(180deg, #f1f1f1, #b9c2c0); } .s3 .cr-block { height: 14vh; background: linear-gradient(180deg, #f2d2b3, #c98b55); }
+.cr-rest { display: flex; gap: 3vw; font-size: clamp(18px, 1.8vw, 30px); }
+.cr-rest > div { opacity: 0; animation: crIn .6s ease-out var(--d) both; background: rgba(255,255,255,.08); border: 1px solid rgba(217,180,90,.35); border-radius: 14px; padding: 1vh 2vw; }
+.cr-rest b { color: #d9b45a; margin-inline-end: 8px; }
+.cr-race { width: 100%; display: flex; flex-direction: column; gap: 2.2vh; margin-top: 2vh; }
+.cr-lane { display: grid; grid-template-columns: 4vw minmax(160px, 22vw) 1fr 7vw; align-items: center; gap: 1.5vw; font-size: clamp(20px, 2.2vw, 36px); }
+.cr-lane.me .cr-lname { color: #d9b45a; }
+.cr-pos { font-size: 1.3em; }
+.cr-lname { text-align: start; font-weight: 700; }
+.cr-track { height: clamp(18px, 3.6vh, 40px); background: rgba(255,255,255,.1); border-radius: 99px; overflow: hidden; }
+.cr-track i { display: block; height: 100%; width: var(--w); border-radius: 99px; background: linear-gradient(90deg, #d9b45a, #f3e7c6); animation: crGrow 1.4s cubic-bezier(.2,.8,.2,1) var(--d) both; }
+@keyframes crGrow { from { width: 0; } }
+.cr-ayah { margin: 2vh 0 0; max-width: 1200px; font: 400 clamp(34px, 4.6vw, 76px)/1.9 var(--f-quran); color: #fff; }
+.cr-ayah span { color: #d9b45a; font-size: .7em; }
+.cr-mean { margin: 0; max-width: 1000px; font-size: clamp(16px, 1.6vw, 26px); line-height: 1.9; color: #cfe0d8; }
+.cr-heroes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2vw; width: 100%; margin-top: 3vh; }
+.cr-hero { display: flex; flex-direction: column; align-items: center; gap: 1vh; padding: 4vh 1vw; border-radius: 24px; background: rgba(255,255,255,.07); border: 1.5px solid rgba(217,180,90,.4); animation: crUp .8s cubic-bezier(.34,1.4,.64,1) both; }
+.cr-hero:nth-child(2) { animation-delay: .3s; } .cr-hero:nth-child(3) { animation-delay: .6s; }
+.cr-hico { font-size: clamp(50px, 6vw, 100px); }
+.cr-ht { font-size: clamp(18px, 1.8vw, 30px); color: #cfe0d8; }
+.cr-hname { font: 700 clamp(24px, 2.8vw, 48px)/1.2 var(--f-display); }
+.cr-hval { font: 700 clamp(18px, 1.8vw, 30px) var(--f-display); color: #d9b45a; }
+.cr-hval.muted { color: #a9c4b8; font-weight: 400; }
+.cr-bar { position: relative; display: flex; justify-content: space-between; align-items: center; padding: 1.4vh 2vw; }
+.cr-brand { font: 700 clamp(20px, 2vw, 32px) 'Aref Ruqaa', serif; color: #d9b45a; }
+.cr-dots { display: flex; gap: 10px; }
+.cr-dots button { width: 12px; height: 12px; border-radius: 50%; border: 0; background: rgba(255,255,255,.3); cursor: pointer; padding: 0; }
+.cr-dots button.on { background: #d9b45a; width: 30px; border-radius: 6px; }
+.cr-ctl { display: flex; gap: 8px; }
+.cr-ctl button { width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(217,180,90,.4); background: rgba(255,255,255,.06); color: #f3e7c6; font-size: 18px; cursor: pointer; }
+.cr-timer { position: relative; height: 4px; background: rgba(255,255,255,.08); }
+.cr-timer i { display: block; height: 100%; width: 0; background: #d9b45a; }
+@keyframes crTimer { from { width: 0; } to { width: 100%; } }
+@media (max-width: 700px) { .cr-heroes { grid-template-columns: 1fr; } .cr-lane { grid-template-columns: 30px 1fr 1fr 50px; } }

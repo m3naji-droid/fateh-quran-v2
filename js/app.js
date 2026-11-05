@@ -8,6 +8,7 @@ import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
+import { openClassroom } from './classroom.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge } from './push.js';
@@ -3015,7 +3016,10 @@ function viewTeacher(app) {
         <p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>
         <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}</div>
       </div>
+      <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
+        <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
       <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="hbBoard"></div>`;
+    $('#crGo', body).onclick = () => startClassroom($('#crScope', body).value);
     drawChAdmin($('#chAdm', body));
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
     const pick = $('#mPick', body);
@@ -3025,6 +3029,26 @@ function viewTeacher(app) {
       $('#mGo', body).onclick = () => openMonthReview(pick.value);
     }
     schedulePublish();
+  }
+
+  /* --- وضع عرض الفصل --- */
+  function startClassroom(scope) {
+    const { board } = computeBoard(boardSubs(), D.students, D.classes);
+    const m = board.month, isStage = scope === 'stage';
+    const cls = D.classes.find((c) => c.id === scope);
+    const inScope = (pn) => { const s = D.students.find((x) => x.id === pn); return s && (isStage || s.classId === scope); };
+    const since = Date.now() - 7 * 864e5, yday = addDays(riyadhDay(), -1);
+    const best = (map) => { let b = null; map.forEach((v, pn) => { if (v > 0 && inScope(pn) && (!b || v > b.v)) b = { pn, v }; }); return b && { name: D.students.find((x) => x.id === b.pn)?.name || '', v: b.v }; };
+    const streaks = new Map(D.students.filter((s) => s.streak?.days && s.streak.on >= yday).map((s) => [s.id, s.streak.days]));
+    const subs = new Map(); D.subs.filter((x) => new Date(x.createdAt).getTime() >= since).forEach((x) => subs.set(x.pn, (subs.get(x.pn) || 0) + 1));
+    const wins = new Map(); (D.challenges || []).forEach((c) => { const w = chWinner(c); const at = [c.ra?.at, c.rb?.at].filter(Boolean).sort().pop(); if (w && w !== 'tie' && at && new Date(at).getTime() >= since) wins.set(w, (wins.get(w) || 0) + 1); });
+    openClassroom({
+      scopeName: isStage ? 'المرحلة كلها' : cls?.name || '', monthLabel: ar(m.label || ''),
+      podiumTitle: isStage ? '👑 شيخ المرحلة' : '🏆 قارئ الصف',
+      top: isStage ? m.stage : (m.byClass?.[scope] || []),
+      classes: m.classes || [], focusClass: isStage ? null : scope,
+      heroes: { streak: best(streaks), subs: best(subs), wins: best(wins) },
+    });
   }
 
   /* --- إدارة التحديات الودّية --- */
