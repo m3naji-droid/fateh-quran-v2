@@ -656,3 +656,25 @@ body.home-green .foot a { color: #d9b45a; }
 .attn-why .chip { cursor: default; }
 .attn-act { grid-column: 1 / -1; gap: 6px; }
 @media (max-width: 640px) { .attn-list li { grid-template-columns: 1fr; } }
+
+/* ================= خريطة أخطاء الصف ================= */
+.emap { gap: 12px; }
+.em-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); }
+.em-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-inline-end: 5px; }
+.em-text { background: var(--sheet); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; font-size: 26px; line-height: 2.3; max-height: 60vh; overflow: auto; }
+.em-w { border-radius: 6px; padding: 0 2px; cursor: default; }
+.em-w sup { font: 600 11px var(--f-ui); color: var(--bad); margin-inline-start: 1px; }
+.em1, .em-legend .em1 { background: color-mix(in srgb, #f0b429 28%, transparent); cursor: pointer; }
+.em2, .em-legend .em2 { background: color-mix(in srgb, #e8730c 38%, transparent); cursor: pointer; }
+.em3, .em-legend .em3 { background: color-mix(in srgb, #d63b2f 50%, transparent); cursor: pointer; }
+.em-tj { text-decoration: underline wavy #6b4bd1; text-underline-offset: 8px; }
+.em-legend .em-tjk { background: none; border-bottom: 3px solid #6b4bd1; border-radius: 0; height: 8px; }
+.em-flash { outline: 3px solid var(--green); }
+.em-chip { cursor: pointer; border: 0; color: var(--ink); }
+.em-chip small { font: 400 12px var(--f-ui); color: var(--muted); }
+.em-screen { position: fixed; inset: 0; z-index: 9500; background: #fbf8ef; color: #15231e; overflow: auto; padding: 24px 32px; display: flex; flex-direction: column; gap: 18px; }
+.em-sc-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.em-sc-head h2 { font: 700 44px 'Aref Ruqaa', var(--f-quran); color: #0d5c46; margin: 0; }
+.em-sc-head span { flex: 1; font-size: 20px; color: #5b6b64; }
+.em-big { font-size: clamp(30px, 4.2vw, 56px); line-height: 2.2; max-height: none; background: #fffdf7; color: #15231e; }
+.em-sc-leg { font-size: 18px; justify-content: center; color: #5b6b64; }

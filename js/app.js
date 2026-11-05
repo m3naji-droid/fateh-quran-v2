@@ -2875,14 +2875,10 @@ function viewTeacher(app) {
     });
     const need = students.filter((x) => x.avg != null && x.avg < 70).sort((a, b) => a.avg - b.avg).slice(0, 10);
     const silent = students.filter((x) => x.n === 0).slice(0, 30);
-    body.innerHTML = `<div class="grid2" style="align-items:start">
+    body.innerHTML = `<div class="card stack emap" id="emap" style="margin-bottom:16px"></div><div class="grid2" style="align-items:start">
       <div class="card stack" style="gap:12px"><h3>متوسط الدقة الآلية لكل صف</h3>
         ${byClass.map((r) => `<div class="bar-row"><span>${esc(r.c.name)}</span><div class="bar"><i style="width:${r.avg ?? 0}%"></i></div><b class="num">${r.avg == null ? '—' : ar(r.avg) + '٪'}</b></div>
         <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? ` · متوسط درجتك ${ar(r.tavg)}/١٠` : ''}</div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
-      </div>
-      <div class="card stack" style="gap:12px"><h3>الكلمات الأكثر خطأً بين الطلاب</h3>
-        ${top.length ? `<div class="row" style="gap:8px">${top.map((e) => `<span title="${esc(surahName(e.s))} ${e.a}"><span class="word-chip">${esc(e.w)}</span> <span class="small muted">${esc(surahName(e.s))}:${ar(e.a)} · ${ar(e.who.size)} طالب</span></span>`).join('')}</div>` : '<span class="muted">ستظهر هنا بعد أول تسليمات مصححة آلياً.</span>'}
-        <p class="small muted" style="margin:0">استخدمها لتحديد مواضع الشرح في الحصة القادمة.</p>
       </div>
       ${learnCard()}
       <div class="card stack" style="gap:8px"><h3>طلاب يحتاجون متابعة</h3>
@@ -2892,6 +2888,83 @@ function viewTeacher(app) {
         ${silent.length ? `<div class="row" style="gap:6px">${silent.map((x) => `<span class="pill mute">${esc(x.s.name)}</span>`).join('')}</div>` : '<span class="muted">كل الطلاب أرسلوا.</span>'}
       </div>
     </div>`;
+    drawErrMap($('#emap', body));
+  }
+
+  /* --- خريطة أخطاء الصف على المصحف --- */
+  const emF = { cls: 'all', period: 'all', surah: null };
+  function errData() {
+    const from = emF.period === '30' ? Date.now() - 30 * 864e5 : emF.period === 'month' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() : 0;
+    const subs = D.subs.filter((x) => x.surah && (emF.cls === 'all' || x.classId === emF.cls) && (!from || new Date(x.createdAt).getTime() >= from));
+    const W = new Map(); // `${s}:${a}:${i}` -> { s, a, i, w, rec:Set, err:Map(pn->st), tj:Map(rule->Set) }
+    const get = (s, w) => { const k = `${s}:${w.ayah}:${w.idx}`; let e = W.get(k); if (!e) W.set(k, (e = { s, a: w.ayah, i: w.idx, w: w.text, rec: new Set(), err: new Map(), tj: new Map() })); return e; };
+    subs.forEach((x) => {
+      const words = rangeWords(x.surah, x.from, x.to);
+      const reached = x.statuses ? x.statuses.length : 0;
+      words.forEach((w, j) => { if (j < reached) get(x.surah, w).rec.add(x.pn); });
+      (x.mistakes || []).forEach((m) => { const w = words[m.i]; if (w) { const e = get(x.surah, w); e.rec.add(x.pn); e.err.set(x.pn, m.st || 'w'); } });
+      (x.tj || []).forEach((m) => { const w = words[m.i]; if (!w) return; const e = get(x.surah, w); e.rec.add(x.pn); const r = m.n || ruleName(m.r); if (!e.tj.has(r)) e.tj.set(r, new Set()); e.tj.get(r).add(x.pn); });
+    });
+    W.forEach((e) => { e.who = new Set([...e.err.keys(), ...[...e.tj.values()].flatMap((s) => [...s])]); e.rate = e.rec.size ? e.who.size / e.rec.size : 0; });
+    return W;
+  }
+  const lvl = (e) => (!e || !e.who.size ? 0 : e.rate >= 0.4 ? 3 : e.rate >= 0.2 ? 2 : 1);
+  function drawErrMap(host) {
+    if (!host) return;
+    const W = errData();
+    const errs = [...W.values()].filter((e) => e.who.size);
+    const bySurah = new Map(); errs.forEach((e) => bySurah.set(e.s, (bySurah.get(e.s) || 0) + e.who.size));
+    const surahs = [...bySurah.entries()].sort((a, b) => b[1] - a[1]).map(([s]) => s);
+    if (!surahs.includes(emF.surah)) emF.surah = surahs[0] || null;
+    const opt = (v, l, sel) => `<option value="${esc(v)}" ${String(v) === String(sel) ? 'selected' : ''}>${esc(l)}</option>`;
+    const top = errs.slice().sort((a, b) => b.who.size - a.who.size || b.rate - a.rate).slice(0, 12);
+    const mapHtml = (big = false) => {
+      if (!emF.surah) return '';
+      const ws = [...W.values()].filter((e) => e.s === emF.surah && e.rec.size);
+      const ayahs = [...new Set(ws.map((e) => e.a))].sort((a, b) => a - b);
+      let html = '';
+      ayahs.forEach((a) => {
+        const words = rangeWords(emF.surah, a, a);
+        html += words.map((w) => { const e = W.get(`${emF.surah}:${a}:${w.idx}`); const l = lvl(e); return `<span class="em-w em${l}${e?.tj.size ? ' em-tj' : ''}" data-k="${emF.surah}:${a}:${w.idx}"${l ? ` title="${ar(e.who.size)} من ${ar(e.rec.size)}"` : ''}>${esc(w.text)}${l && !big ? `<sup>${ar(e.who.size)}</sup>` : ''}</span>`; }).join(' ') + ` <span class="ayah-end">۝${ar(a)}</span> `;
+      });
+      return `<div class="quran em-text${big ? ' em-big' : ''}">${html}</div>`;
+    };
+    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🗺️ خريطة أخطاء الصف على المصحف</h3>${emF.surah ? '<button class="btn sm gold" type="button" id="emShow">📺 اعرضها في الحصة</button>' : ''}</div>
+      <div class="row">
+        <select id="emC" style="flex:1 1 140px">${opt('all', 'كل الصفوف', emF.cls)}${D.classes.map((c) => opt(c.id, c.name, emF.cls)).join('')}</select>
+        <select id="emP" style="flex:1 1 140px">${opt('all', 'منذ البداية', emF.period)}${opt('30', 'آخر ٣٠ يوماً', emF.period)}${opt('month', 'هذا الشهر', emF.period)}</select>
+        <select id="emS" style="flex:2 1 180px" ${surahs.length ? '' : 'disabled'}>${surahs.length ? surahs.map((s) => opt(s, `${surahName(s)} (${ar(bySurah.get(s))} خطأ)`, emF.surah)).join('') : '<option>لا أخطاء بعد</option>'}</select>
+      </div>
+      ${emF.surah ? `<div class="em-legend small"><span><i class="em1"></i>أقل من ٢٠٪ من الطلاب</span><span><i class="em2"></i>٢٠–٤٠٪</span><span><i class="em3"></i>٤٠٪ فأكثر</span><span><i class="em-tjk"></i>خطأ تجويد حدده المعلم</span><span class="muted">الرقم: عدد من أخطأ فيها · اضغط الكلمة للتفاصيل</span></div>
+      ${mapHtml()}
+      <div><b class="small">أكثر الكلمات خطأً${emF.cls === 'all' ? '' : ' في هذا الصف'}</b><div class="row em-top" style="gap:6px;margin-top:6px">${top.map((e) => `<button type="button" class="word-chip em-chip" data-k="${e.s}:${e.a}:${e.i}"><span class="qw">${esc(e.w)}</span> <small>${esc(surahName(e.s))}:${ar(e.a)} · ${ar(e.who.size)} من ${ar(e.rec.size)}</small></button>`).join('')}</div></div>` : '<div class="empty">لا توجد أخطاء مسجّلة بهذه الاختيارات بعد.</div>'}`;
+    $('#emC', host).onchange = (e) => { emF.cls = e.target.value; drawErrMap(host); };
+    $('#emP', host).onchange = (e) => { emF.period = e.target.value; drawErrMap(host); };
+    const S = $('#emS', host); if (S) S.onchange = (e) => { emF.surah = +e.target.value; drawErrMap(host); };
+    const detail = (k) => {
+      const e = W.get(k); if (!e) return;
+      const nm = (pn) => esc(D.students.find((x) => x.id === pn)?.name || pn);
+      const autoW = [...e.err.entries()];
+      openModal(`<div class="stack"><h2><span class="qw" style="font-size:30px">${esc(e.w)}</span> <span class="small muted">${esc(surahName(e.s))} · الآية ${ar(e.a)}</span></h2>
+        <p style="margin:0">أخطأ فيها <b>${ar(e.who.size)}</b> من ${ar(e.rec.size)} ${e.rec.size === 1 ? 'طالب سمّعها' : 'طلاب سمّعوها'} (${ar(Math.round(e.rate * 100))}٪).</p>
+        ${autoW.length ? `<div><b class="small">في الحفظ (آلياً)</b><div class="row" style="gap:6px;margin-top:4px">${autoW.map(([pn, st]) => `<span class="pill ${st === 'm' ? 'bad' : 'warn'}">${nm(pn)} · ${st === 'm' ? 'حذفها' : 'أخطأ نطقها'}</span>`).join('')}</div></div>` : ''}
+        ${e.tj.size ? `<div><b class="small">في التجويد (حددها المعلم)</b>${[...e.tj.entries()].map(([r, set]) => `<div class="row" style="gap:6px;margin-top:4px"><span class="pill">${esc(r)}</span>${[...set].map((pn) => `<span class="pill mute">${nm(pn)}</span>`).join('')}</div>`).join('')}</div>` : ''}
+        <div class="row"><button class="btn primary" type="button" data-close>حسناً</button></div></div>`);
+    };
+    $$('.em-w[data-k]', host).forEach((b) => (b.onclick = () => { if (b.classList.contains('em0')) return; detail(b.dataset.k); }));
+    $$('.em-chip', host).forEach((b) => (b.onclick = () => { const s = +b.dataset.k.split(':')[0]; if (s !== emF.surah) { emF.surah = s; drawErrMap(host); } setTimeout(() => { const el = $(`.em-w[data-k="${b.dataset.k}"]`, host); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.classList.add('em-flash'); setTimeout(() => el?.classList.remove('em-flash'), 1600); }, 50); }));
+    const sh = $('#emShow', host);
+    if (sh) sh.onclick = () => {
+      const box = document.createElement('div');
+      box.className = 'em-screen';
+      box.innerHTML = `<div class="em-sc-head"><h2>سورة ${esc(surahName(emF.surah))}</h2><span>انتبهوا لهذه الكلمات عند التسميع</span><button class="btn" type="button" data-x>إغلاق ✕</button></div>${mapHtml(true)}
+        <div class="em-legend em-sc-leg"><span><i class="em1"></i>قليل</span><span><i class="em2"></i>متوسط</span><span><i class="em3"></i>يخطئ فيها كثيرون</span><span><i class="em-tjk"></i>انتبه للتجويد</span></div>`;
+      const close = () => { box.remove(); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
+      box.querySelector('[data-x]').onclick = close;
+      document.addEventListener('fullscreenchange', function f() { if (!document.fullscreenElement) { box.remove(); document.removeEventListener('fullscreenchange', f); } });
+      document.body.appendChild(box);
+      box.requestFullscreen?.().catch(() => {});
+    };
   }
 
   function learnCard() {
