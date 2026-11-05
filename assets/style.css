@@ -518,3 +518,22 @@ tr.grp.open .grp-chev { transform: none; }
 .lightbox img { flex: 0 1 auto; min-height: 0; max-width: 100%; max-height: calc(100% - 72px); object-fit: contain; border-radius: 8px; touch-action: pinch-zoom; }
 .lbx-bar { display: flex; gap: 10px; flex: 0 0 auto; }
 .lbx-bar .btn:not(.gold) { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); }
+
+/* ================= شعار الصفحة الرئيسية (يصل إليه شعار الشاشة الافتتاحية) ================= */
+:root { --brand-name: #a77a1c; }
+:root[data-theme="dark"] { --brand-name: #d9b45a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --brand-name: #d9b45a; } }
+.hero-brand { display: flex; flex-direction: column; align-items: center; margin-bottom: 6px; }
+.hero-logo { width: 84px; height: 84px; }
+.hero-name { font: 700 clamp(44px, 9vw, 68px)/1.25 'Aref Ruqaa', 'Amiri', serif; color: var(--brand-name); margin-top: 2px; }
+.hero-orn { width: 220px; height: auto; margin: 2px 0 4px; }
+.hero-tag { font: 400 clamp(22px, 4.6vw, 32px)/1.6 'Amiri', serif; color: var(--ink); margin: 0 0 10px; }
+.hero-pill { margin-bottom: 4px; }
+html.splashing .hero-logo { opacity: 0; }
+html.splashing .hero-solo > div > :not(.hero-brand), html.splashing .hero-name, html.splashing .hero-orn, html.splashing .feature-list { opacity: 0; }
+html.hero-arrive .hero-name { animation: spUp .55s ease-out .4s both; }
+html.hero-arrive .hero-orn { animation: spUp .5s ease-out .55s both; }
+html.hero-arrive .hero-tag { animation: spUp .55s ease-out .65s both; }
+html.hero-arrive .hero-pill, html.hero-arrive .hero-solo .lead { animation: spUp .55s ease-out .75s both; }
+html.hero-arrive .hero-solo .grid2 { animation: spUp .6s ease-out .85s both; }
+html.hero-arrive .feature-list { animation: spUp .6s ease-out 1s both; }

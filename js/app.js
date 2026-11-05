@@ -733,8 +733,9 @@ function viewHome(app) {
   app.innerHTML = `
   <section class="hero hero-solo">
     <div>
-      <span class="pill">المصحف كاملاً · ١١٤ سورة</span>
-      <h1 style="margin-top:12px">اقرأ، ونحن نتابعك كلمةً بكلمة</h1>
+      <div class="hero-brand"><svg class="hero-logo" viewBox="0 0 32 32" aria-hidden="true"><g fill="#d9b45a"><rect x="7" y="7" width="18" height="18" rx="2"/><rect x="7" y="7" width="18" height="18" rx="2" transform="rotate(45 16 16)"/></g><circle cx="16" cy="16" r="5" fill="#0d5c46"/><circle cx="16" cy="16" r="3" fill="#f3e7c6"/></svg><div class="hero-name">مقرأة الفاتح</div><svg class="hero-orn" viewBox="0 0 540 40" aria-hidden="true"><g fill="#d9b45a"><g transform="translate(30 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(90 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(150 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(210 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(270 20)"><rect x="-12" y="-12" width="24" height="24"/><rect x="-12" y="-12" width="24" height="24" transform="rotate(45)"/></g><g transform="translate(330 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(390 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(450 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(510 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g></g><path d="M20 20H250M290 20H520" stroke="#d9b45a" stroke-width="1.5" opacity=".6"/></svg></div>
+      <h1 class="hero-tag">اقرأ، ونحن نتابعك كلمةً بكلمة</h1>
+      <span class="pill hero-pill">المصحف كاملاً · ١١٤ سورة</span>
       <p class="lead">مقرأة إلكترونية للمدارس وحلقات التحفيظ: يقرأ الطالب من أي سورة، فتظهر الكلمات الصحيحة والمحذوفة والخاطئة أثناء القراءة، ثم يُرسل تسجيله إلى المعلم ليقيّم التجويد والأداء.</p>
       <div class="grid2">
         <a class="entry" href="#/student"><b>دخول الطالب</b><span>واجباتك، والتدريب الحر على أي سورة، وسجل تسميعك، ودفتر أخطائك.</span></a>
@@ -2896,10 +2897,12 @@ async function teacherLogin(app) {
     await Promise.all([loadQuran(), initStore()]);
   } catch (e) {
     $('#app').innerHTML = `<div class="empty">تعذر تحميل المصحف. تأكد من الاتصال ثم أعد تحميل الصفحة.</div>`;
+    window.__splashReady?.();
     return;
   }
   setTokenProvider(() => store.idToken());
   $('#modeTag').textContent = store.mode === 'cloud' ? 'الحفظ: سحابي' : 'الحفظ: محلي على هذا الجهاز';
   if (cloudError) { const b = $('#banner'); b.hidden = false; b.textContent = 'تعذر الاتصال بقاعدة البيانات السحابية؛ تعمل المنصة الآن بالحفظ المحلي على هذا الجهاز.'; }
   render();
+  window.__splashReady?.();
 })();
