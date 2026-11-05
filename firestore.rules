@@ -61,6 +61,12 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // صور الإعلانات (مصغّرة، صورة واحدة لكل إعلان، أقل من ٧٠٠ KB): يكتبها المعلم ويقرؤها الطلاب
+    match /annImages/{aid} {
+      allow read: if signedIn();
+      allow create, update: if isTeacher() && request.resource.data.b64 is string && request.resource.data.b64.size() < 700000;
+      allow delete: if isTeacher();
+    }
     // قائمة الأخطاء ودرجاتها (يضبطها المعلم)
     match /catalog/{id} {
       allow read: if signedIn();

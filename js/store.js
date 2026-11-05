@@ -169,13 +169,18 @@ const local = {
   async listAnnouncements() { return LS.get('anns', []); },
   async publishAnnouncementLocal(id) {
     const all = LS.get('anns', []); const a = all.find((x) => x.id === id); if (!a || a.status === 'sent') return;
-    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, link: './#/student/ann/' + id, tag: 'ann-' + id };
+    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, hasImage: !!a.hasImage, link: './#/student/ann/' + id, tag: 'ann-' + id };
     const t = a.target || { type: 'all' };
     if (t.type === 'student') await this.addNotif({ ...n, classId: 'stu:' + t.studentId, studentId: t.studentId });
     else for (const cid of t.type === 'classes' ? t.classIds : ['all']) await this.addNotif({ ...n, classId: cid });
     a.status = 'sent'; a.sentAt = now(); LS.set('anns', all);
   },
-  async deleteAnnouncement(a) { LS.set('anns', LS.get('anns', []).filter((x) => x.id !== a.id)); LS.set('notifs', LS.get('notifs', []).filter((n) => n.annId !== a.id)); },
+  async deleteAnnouncement(a) { LS.set('anns', LS.get('anns', []).filter((x) => x.id !== a.id)); LS.set('notifs', LS.get('notifs', []).filter((n) => n.annId !== a.id)); await this.deleteAnnImage(a.id); },
+  // صور الإعلانات (محلياً في هذا المتصفح)
+  async saveAnnImage(aid, img) { const all = LS.get('annImgs', {}); all[aid] = { ...img, createdAt: now() }; LS.set('annImgs', all); },
+  async getAnnImage(aid) { return LS.get('annImgs', {})[aid] || null; },
+  async deleteAnnImage(aid) { const all = LS.get('annImgs', {}); delete all[aid]; LS.set('annImgs', all); },
+  async cleanupAnnImages() { const all = LS.get('annImgs', {}); const t = now(); Object.keys(all).forEach((k) => { if ((all[k].exp || '') < t) delete all[k]; }); LS.set('annImgs', all); },
   async markAnnRead(aid, pn) { const r = LS.get('annReads', {}); (r[aid] = r[aid] || {})[pn] = now(); LS.set('annReads', r); },
   async listAnnReads(aid) { return Object.keys(LS.get('annReads', {})[aid] || {}); },
   async getCronStatus() { return null; },
@@ -478,7 +483,16 @@ async function makeCloud() {
     async publishAnnouncementLocal() {},
     async deleteAnnouncement(a) {
       for (const p of a.notifPaths || []) await deleteDoc(doc(db, p)).catch(() => {});
+      if (a.hasImage) await deleteDoc(doc(db, 'annImages', a.id)).catch(() => {});
       await deleteDoc(doc(db, 'announcements', a.id));
+    },
+    async saveAnnImage(aid, img) { await setDoc(doc(db, 'annImages', aid), { ...img, createdAt: now() }); },
+    async getAnnImage(aid) { await ensureAnon(); const d = await getDoc(doc(db, 'annImages', aid)); return d.exists() ? d.data() : null; },
+    async deleteAnnImage(aid) { await deleteDoc(doc(db, 'annImages', aid)); },
+    async cleanupAnnImages() {
+      const old = (await getDocs(query(collection(db, 'annImages'), where('exp', '<', now())))).docs;
+      for (const d of old) await deleteDoc(d.ref).catch(() => {});
+      return old.length;
     },
     async markAnnRead(aid, pn) { await setDoc(doc(db, 'announcements', aid, 'reads', pn), { at: now() }).catch(() => {}); },
     async listAnnReads(aid) { return (await getDocs(collection(db, 'announcements', aid, 'reads'))).docs.map((d) => d.id); },

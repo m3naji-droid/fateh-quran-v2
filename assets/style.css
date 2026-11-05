@@ -501,3 +501,20 @@ tr.grp.open .grp-chev { transform: none; }
 .fb-stats .kpi.on { outline: 2px solid var(--green); }
 @media (max-width: 560px) { .fb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tab-n:not(:empty) { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-inline-start: 6px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+
+/* ================= صور الإعلانات ================= */
+.ann-pic { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.ann-pic label.btn { cursor: pointer; }
+.ann-pic label.btn.disabled { opacity: .5; pointer-events: none; }
+.ann-pic-prev { display: flex; gap: 12px; align-items: center; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); }
+.ann-pic-prev img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; flex: 0 0 auto; }
+.ann-pic-prev .small { flex: 1; }
+.ann-thumb { display: inline-flex; gap: 10px; align-items: center; border: 1px dashed var(--gold); background: var(--gold-soft); color: var(--ink); border-radius: 10px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 14px; margin-bottom: 6px; }
+.ann-img { min-height: 60px; }
+.ann-img-btn { display: block; position: relative; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--sheet); cursor: zoom-in; }
+.ann-img-btn img { display: block; width: 100%; max-height: 60vh; object-fit: contain; background: #fff; }
+.ann-zoom { position: absolute; inset-inline-start: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 999px; }
+.lightbox { position: fixed; inset: 0; z-index: 9999; background: rgba(8,14,12,.94); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); gap: 12px; }
+.lightbox img { flex: 0 1 auto; min-height: 0; max-width: 100%; max-height: calc(100% - 72px); object-fit: contain; border-radius: 8px; touch-action: pinch-zoom; }
+.lbx-bar { display: flex; gap: 10px; flex: 0 0 auto; }
+.lbx-bar .btn:not(.gold) { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); }

@@ -141,13 +141,16 @@ def publish_announcement(aid: str) -> dict:
     a = snap.to_dict()
     if a.get("status") == "sent":
         return {"sent": 0, "failed": 0, "removed": 0, "already": True}
+    img = bool(a.get("hasImage"))
     n = {
-        "type": "ann", "annId": aid,
+        "type": "ann", "annId": aid, "hasImage": img,
         "title": "📢 " + (a.get("title") or "إعلان من معلمك"),
         "body": a.get("body", ""),
         "link": "./#/student/ann/" + aid, "tag": "ann-" + aid,
         "createdAt": now_iso(),
     }
+    # إشعار الجوال لا يعرض الصورة، فننبّه إلى وجودها في النص
+    pn_ = {**n, "title": n["title"] + " 📷", "body": n["body"] + "\n📷 مع صورة، افتح الإعلان لتراها."} if img else n
     t = a.get("target") or {"type": "all"}
     paths, stats = [], {"sent": 0, "failed": 0, "removed": 0}
     if t.get("type") == "student" and t.get("studentId"):
@@ -155,14 +158,14 @@ def publish_announcement(aid: str) -> dict:
         r = db.collection("roster").document(pn).collection("notifs").document("ann-" + aid)
         r.set({**n, "studentId": pn})
         paths.append(r.path)
-        stats = push(tokens_for(students=[pn]), n)
+        stats = push(tokens_for(students=[pn]), pn_)
     else:
         classes = ["all"] if t.get("type") != "classes" else (t.get("classIds") or [])
         for cid in classes:
             r = db.collection("notifs").document(f"ann-{aid}-{cid}")
             r.set({**n, "classId": cid})
             paths.append(r.path)
-            stats = add(stats, push(tokens_for(class_id=cid), n))
+            stats = add(stats, push(tokens_for(class_id=cid), pn_))
     ref.update({"status": "sent", "sentAt": n["createdAt"], "notifPaths": paths, "push": stats})
     return stats
 
@@ -172,7 +175,7 @@ def resend_announcement(aid: str, students: list[str]) -> dict:
     if not a.exists:
         raise HTTPException(404, "الإعلان غير موجود.")
     a = a.to_dict()
-    n = {"title": "📢 تذكير: " + (a.get("title") or "إعلان من معلمك"), "body": a.get("body", ""),
+    n = {"title": "📢 تذكير: " + (a.get("title") or "إعلان من معلمك") + (" 📷" if a.get("hasImage") else ""), "body": a.get("body", ""),
          "link": "./#/student/ann/" + aid, "tag": "ann-" + aid}
     return push(tokens_for(students=students), n) if students else {"sent": 0, "failed": 0, "removed": 0}
 
@@ -436,6 +439,8 @@ def run_teacher(local: dt.datetime) -> dict | None:
                     x = sub.to_dict()
                     total += len(str(x)) + 300 + (x.get("audioBytes") or (int((x.get("duration") or 30) * 3400) if x.get("hasAudio") else 0))
             total += students * 1500
+            for im in db.collection("annImages").stream():
+                total += len(im.to_dict().get("b64") or "") + 200
             pct = total / DB_QUOTA
             lvl = 90 if pct >= 0.9 else 70 if pct >= 0.7 else 0
             if lvl > alerts.get("db", 0):

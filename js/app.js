@@ -5,6 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
+import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
@@ -882,14 +883,25 @@ function viewStudent(app) {
     const L = anns().filter((n) => !acked.has(n.annId));
     host.innerHTML = L.slice(0, 3).map((n) => `<div class="ann-bar" role="status"><span class="ann-ico">📢</span>
       <div class="ann-tx"><b>${esc((n.title || '').replace(/^📢\s*/, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></div>
-      <button class="btn sm primary" type="button" data-ack="${esc(n.annId)}">فهمت</button></div>`).join('');
+      ${n.hasImage ? `<button class="btn sm gold" type="button" data-annopen="${esc(n.annId)}">📷 الصورة</button>` : ''}<button class="btn sm primary" type="button" data-ack="${esc(n.annId)}">فهمت</button></div>`).join('');
     $$('[data-ack]', host).forEach((b) => (b.onclick = () => ackAnn(b.dataset.ack)));
+    $$('[data-annopen]', host).forEach((b) => (b.onclick = () => openAnn(b.dataset.annopen)));
   }
   function openAnn(aid) {
     const n = anns().find((x) => x.annId === aid);
     if (!n) return toast('هذا الإعلان لم يعد موجوداً.');
     openModal(`<div class="stack"><h2>📢 ${esc((n.title || '').replace(/^📢\s*/, ''))}</h2><p style="margin:0;white-space:pre-wrap;line-height:2">${esc(n.body || '')}</p>
-      <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row"><button class="btn primary" type="button" data-close>فهمت</button></div></div>`);
+      ${n.hasImage ? '<div class="ann-img" id="annImg"><div class="loading">جارٍ تحميل الصورة…</div></div>' : ''}
+      <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row"><button class="btn primary" type="button" data-close>فهمت</button></div></div>`, (m) => {
+      if (!n.hasImage) return;
+      annImage(aid, (id) => store.getAnnImage(id)).then((blob) => {
+        const box = $('#annImg', m); if (!box) return;
+        if (!blob) { box.innerHTML = `<div class="small muted">انتهت مدة عرض الصورة (${ar(IMG_DAYS)} يوماً).</div>`; return; }
+        const url = URL.createObjectURL(blob);
+        box.innerHTML = `<button type="button" class="ann-img-btn" aria-label="تكبير الصورة"><img alt="صورة الإعلان" src="${url}"><span class="ann-zoom">🔍 اضغط للتكبير</span></button>`;
+        $('button', box).onclick = () => openLightbox(blob, 'صورة الإعلان');
+      }).catch(() => { const box = $('#annImg', m); if (box) box.innerHTML = '<div class="small muted">تعذر تحميل الصورة. تحقق من الاتصال ثم افتح الإعلان مرة أخرى.</div>'; });
+    });
     ackAnn(aid);
   }
   /** نافذة «نتائج شهرك» (تظهر تلقائياً مرة واحدة، وتُفتح من الجرس) */
@@ -1008,6 +1020,7 @@ function viewStudent(app) {
       return;
     }
     draw();
+    pruneImageCache();
     store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
     if (openRetakeId) { const id = openRetakeId; openRetakeId = null; if ((data.retakes || []).some((r) => r.id === id)) { startRetake(id); return; } }
@@ -1497,7 +1510,7 @@ function viewTeacher(app) {
   const reload = async (redraw = true) => {
     const [classes, students, tasks] = await Promise.all([store.listClasses(), store.listStudents(), store.listTasks()]);
     D = { ...D, classes: sortClasses(classes), students, tasks };
-    if (!reload.cleaned) { reload.cleaned = true; store.cleanupNotifs().catch(() => {}); }
+    if (!reload.cleaned) { reload.cleaned = true; store.cleanupNotifs().catch(() => {}); store.cleanupAnnImages().catch(() => {}); }
     if (redraw) drawBody();
   };
   const className = (id) => (id === 'all' ? 'كل الصفوف' : D.classes.find((c) => c.id === id)?.name || '—');
@@ -1940,6 +1953,11 @@ function viewTeacher(app) {
         <h3>📢 إعلان جديد</h3>
         <label class="field">العنوان (اختياري)<input type="text" id="anTitle" maxlength="80" placeholder="مثال: تنبيه مهم"></label>
         <label class="field">نص الإعلان<textarea id="anBody" maxlength="500" required placeholder="مثال: لا تسميع غداً بسبب الاختبارات، ونكمل يوم الأحد بإذن الله."></textarea></label>
+        <div class="ann-pic" id="anPic">
+          <label class="btn" id="anPickL"><input type="file" id="anFile" accept="image/*" hidden> 📷 إرفاق صورة (اختياري)</label>
+          <div class="ann-pic-prev" id="anPrev" hidden><img alt="معاينة الصورة"><div class="small"><b id="anPicInfo"></b><br><span class="muted">تُحذف تلقائياً بعد ${ar(IMG_DAYS)} يوماً.</span></div><button class="btn sm danger" type="button" id="anPicX">إزالة</button></div>
+          <div class="small muted" id="anPicQuota"></div>
+        </div>
         <fieldset class="seg-field"><legend>لمن؟</legend>
           <label><input type="radio" name="anT" value="all" checked> كل الصفوف</label>
           <label><input type="radio" name="anT" value="classes"> صفوف محددة</label>
@@ -1979,6 +1997,23 @@ function viewTeacher(app) {
     const fillStu = () => { const c = $('#anStuC', body).value; $('#anStuS', body).innerHTML = D.students.filter((x) => x.classId === c).sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(''); };
     if (first) { $('#anStuC', body).value = first; fillStu(); }
     $('#anStuC', body).onchange = fillStu;
+    // الصورة المرفقة: تُصغَّر فوراً وتُعرض معاينتها
+    let pic = null;
+    const todayKey = new Date().toDateString();
+    const imgsToday = (L) => L.filter((a) => a.hasImage && new Date(a.createdAt).toDateString() === todayKey).length;
+    const paintQuota = (L) => { const q = $('#anPicQuota', body); if (!q) return; const n = imgsToday(L); q.textContent = `صور اليوم: ${ar(n)} من ${ar(IMG_DAILY_LIMIT)}`; const full = n >= IMG_DAILY_LIMIT; $('#anFile', body).disabled = full; $('#anPickL', body).classList.toggle('disabled', full); if (full) q.textContent += ' · وصلت إلى الحد اليومي، ويمكنك إرسال إعلانات نصية.'; };
+    $('#anFile', body).onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      const info = $('#anPicInfo', body); $('#anPrev', body).hidden = false; info.textContent = 'جارٍ تجهيز الصورة…';
+      try {
+        const c = await compressImage(f);
+        pic = c;
+        const img = $('#anPrev img', body); if (img.src) URL.revokeObjectURL(img.src); img.src = URL.createObjectURL(c.blob);
+        info.textContent = `${fmtKB(c.blob.size)} · ${ar(c.w)}×${ar(c.h)}${f.size > c.blob.size * 1.5 ? ` (كانت ${fmtKB(f.size)})` : ''}`;
+        $('#anPickL', body).hidden = true;
+      } catch (x) { pic = null; $('#anPrev', body).hidden = true; toast(x.message); }
+    };
+    $('#anPicX', body).onclick = () => { pic = null; $('#anPrev', body).hidden = true; $('#anPickL', body).hidden = false; };
     $$('[name=anT]', body).forEach((r) => (r.onchange = () => { const v = $('[name=anT]:checked', body).value; $('#anCls', body).hidden = v !== 'classes'; $('#anStu', body).hidden = v !== 'student'; }));
     $$('[name=anW]', body).forEach((r) => (r.onchange = () => { $('#anLater', body).hidden = $('[name=anW]:checked', body).value !== 'later'; }));
     $('#evSave', body).onclick = async () => {
@@ -2009,7 +2044,17 @@ function viewTeacher(app) {
       }
       btn.disabled = true;
       try {
-        const id = await store.saveAnnouncement({ title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length });
+        if (pic && imgsToday(await store.listAnnouncements()) >= IMG_DAILY_LIMIT) { btn.disabled = false; return toast(`وصلت إلى حد ${ar(IMG_DAILY_LIMIT)} صور اليوم. أزل الصورة أو أرسلها غداً.`); }
+        const fields = { title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length };
+        // الحالة «مسودة» حتى تُرفع الصورة، فلا يُنشر إعلان مجدول قبل اكتمال صورته
+        const id = await store.saveAnnouncement(pic ? { ...fields, status: 'draft', hasImage: true, imageBytes: Math.ceil(pic.blob.size * 4 / 3) } : fields);
+        if (pic) {
+          try {
+            const exp = new Date(Math.max(Date.now(), sendAt ? new Date(sendAt).getTime() : 0) + IMG_DAYS * 864e5).toISOString();
+            await store.saveAnnImage(id, { b64: await blobToB64(pic.blob), type: 'image/jpeg', w: pic.w, h: pic.h, bytes: pic.blob.size, exp });
+          } catch (x) { await store.deleteAnnouncement({ id }).catch(() => {}); throw x; }
+          await store.saveAnnouncement({ id, status: fields.status });
+        }
         if (later) toast(`جُدول الإعلان ليُرسل ${whenText(sendAt)}.`);
         else { const r = await sendAnnouncement(id); toast(`أُرسل الإعلان${r && r.sent ? `، ووصل إشعار إلى ${ar(r.sent)} ${r.sent === 1 ? 'جهاز' : r.sent <= 10 ? 'أجهزة' : 'جهازاً'}` : ''}${deferNote(r)}.`); }
         drawAnn(body);
@@ -2035,10 +2080,18 @@ function viewTeacher(app) {
       <div class="row" style="justify-content:space-between;align-items:flex-start"><div><b>${esc(a.title || 'إعلان من معلمك')}</b><div class="small muted">إلى: ${esc(annTargetLabel(a.target))}</div></div>
         ${a.status === 'scheduled' ? `<span class="pill warn">مجدول · ${esc(whenText(a.sendAt))}</span>` : a.status === 'sent' ? `<span class="pill ok">أُرسل ${esc(timeAgo(a.sentAt) === 'الآن' ? 'للتو' : timeAgo(a.sentAt))}</span>` : '<span class="pill mute">لم يُرسل</span>'}</div>
       <p style="margin:6px 0;white-space:pre-wrap">${esc(a.body)}</p>
+      ${a.hasImage ? `<button class="ann-thumb" type="button" data-anpic="${esc(a.id)}" aria-label="عرض صورة الإعلان"><span>📷 عرض الصورة</span><small class="muted">${esc(fmtKB(a.imageBytes || 0))}</small></button>` : ''}
       <div class="row" style="justify-content:space-between">
         <span class="small" data-reads="${esc(a.id)}">${a.status === 'sent' ? 'جارٍ عدّ القراءات…' : ''}</span>
         <span class="row" style="gap:4px">${a.status === 'scheduled' || a.status === 'pending' ? `<button class="btn sm" type="button" data-now="${esc(a.id)}">أرسل الآن</button>` : `<button class="btn sm" type="button" data-unread="${esc(a.id)}">من لم يقرأ؟</button>`}<button class="btn sm danger" type="button" data-andel="${esc(a.id)}">${a.status === 'scheduled' ? 'إلغاء' : 'حذف'}</button></span>
       </div></div>`).join('') : '<div class="empty">لم ترسل أي إعلان بعد.</div>';
+    paintQuota(L);
+    $$('[data-anpic]', host).forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try { const blob = await annImage(b.dataset.anpic, (id) => store.getAnnImage(id)); if (blob) openLightbox(blob); else toast(`حُذفت الصورة (مضى عليها ${ar(IMG_DAYS)} يوماً).`); }
+      catch (e) { toast('تعذر تحميل الصورة: ' + (e.code || e.message)); }
+      b.disabled = false;
+    }));
     const reads = {};
     L.filter((a) => a.status === 'sent').slice(0, 30).forEach(async (a) => {
       try {
