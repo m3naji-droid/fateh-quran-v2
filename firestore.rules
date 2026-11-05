@@ -133,6 +133,11 @@ service cloud.firestore {
         allow read: if isTeacher() || isStudent(pn);
         allow write: if isTeacher();
       }
+      // «مصحفي»: خريطة الحفظ (أفضل دقة ويوم آخر إتقان لكل آية)، يكتبها الطالب لنفسه
+      match /progress/{doc} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow write: if isTeacher() || isStudent(pn);
+      }
       // رأيك يهمنا: الطالب يرسل ملاحظته باسمه ويقرأ ملاحظاته ورد المعلم. المعلم يقرأ ويرد ويحذف
       match /feedback/{fid} {
         allow read: if isTeacher() || isStudent(pn);

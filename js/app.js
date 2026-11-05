@@ -5,6 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
+import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
@@ -754,14 +755,14 @@ function viewHome(app) {
 
 /* ================= التدريب الحر (للطلاب المسجلين والمعلم فقط) ================= */
 let pendingPractice = null;
-function mountPractice(host, learn, onActivity) {
+function mountPractice(host, learn, onActivity, onResult) {
   const init = pendingPractice || pref.get('lastRange', { surah: 36, from: 1, to: 12 });
   pendingPractice = null;
   host.innerHTML = `<p class="muted" style="margin:0 0 12px">اختر أي مقطع ثم اضغط زر الميكروفون وابدأ القراءة. التدريب لا يُرسل للمعلم.</p>
     <div class="card" style="margin-bottom:16px">${rangePicker('pr', init)}</div>
     <div id="prBody"></div>`;
   let comp = null;
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn, onActivity }); };
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn, onActivity, onResult }); };
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
   return { destroy: () => comp?.destroy() };
@@ -934,6 +935,40 @@ function viewStudent(app) {
     });
     if (w) setTimeout(() => confetti(), 150);
   }
+  /* --- مصحفي: خريطة الحفظ --- */
+  let progress = null, mfFilter = 'all';
+  async function loadProgress() {
+    if (progress) return progress;
+    let p = null;
+    try { p = await store.getProgress(me.id); } catch (e) { console.warn(e); }
+    if (!p?.seeded) { // أول مرة: نبنيها من التسميعات السابقة
+      const built = mapFromSubs(data.subs.filter((x) => x.percent != null));
+      p = { ...built, ...(p || {}), seeded: true };
+      store.saveProgress(me.id, p).catch(() => {});
+    }
+    return (progress = p);
+  }
+  async function recordProgress(sub) {
+    try {
+      const p = await loadProgress();
+      const keys = mergeAttempt(p, sub);
+      if (keys.length) await store.saveProgress(me.id, Object.fromEntries(keys.map((k) => [k, p[k]])));
+    } catch (e) { console.warn('progress', e); }
+  }
+  async function drawMushaf(body) {
+    body.innerHTML = '<div class="loading">جارٍ تجهيز مصحفك…</div>';
+    const p = await loadProgress();
+    if (tab !== 'mushaf') return;
+    const paint = () => renderMushaf(body, p, {
+      filter: mfFilter, onFilter: (f) => { mfFilter = f; paint(); },
+      onOpen: (s) => openModal(`<div class="stack">${surahDetailHtml(p, s)}
+        <div class="row"><button class="btn primary" type="button" id="mfGo">🎙️ راجع الآن (تسميع غيباً)</button><button class="btn" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+        $('#mfGo', m).onclick = () => { closeModal(); pendingPractice = { ...suggestRange(p, s), mode: 'hifz' }; tab = 'practice'; draw(); scrollTo(0, 0); };
+      }),
+    });
+    paint();
+  }
+
   /* --- رأيك يهمنا --- */
   function paintFbCta() {
     const b = $('#stFb', app); if (!b) return;
@@ -1102,7 +1137,7 @@ function viewStudent(app) {
       </div>
       <div id="annBar"></div>
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>
       <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
@@ -1119,6 +1154,7 @@ function viewStudent(app) {
     if (tab === 'notebook') drawNotebook(body);
     if (tab === 'practice') drawPractice(body);
     if (tab === 'honor') drawHonor(body);
+    if (tab === 'mushaf') drawMushaf(body);
     if (tab === 'settings') drawStSettings(body);
   }
 
@@ -1256,7 +1292,7 @@ function viewStudent(app) {
     } catch {}
     if (tab !== 'practice') return;
     comp?.destroy();
-    comp = mountPractice(body, learn, (sec) => logAct('practice', sec));
+    comp = mountPractice(body, learn, (sec) => logAct('practice', sec), (sub) => recordProgress(sub));
   }
 
   function pushInvite() {
@@ -1331,6 +1367,7 @@ function viewStudent(app) {
         const id = await store.addSubmission(me.id, { ...sub, ...range, taskId: t?.id || rt?.taskId || null, taskTitle: t?.title || rt?.taskTitle || '', studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null, ...extra }, blob, sid);
         data.subs.unshift({ ...sub, id, pn: me.id, taskId: t?.id || rt?.taskId, ...extra, createdAt: new Date().toISOString() });
         logAct('task', sub.duration || 0);
+        recordProgress({ ...sub, ...range });
         return id;
       },
       onAi: (id, ai) => store.updateOwnAi(me.id, id, ai),
@@ -1573,6 +1610,24 @@ function viewTeacher(app) {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
     ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+  }
+
+  /* --- مصحف الطالب (للمعلم) --- */
+  async function openStudentMushaf(st) {
+    if (!st) return;
+    openModal('<div class="loading">جارٍ تحميل خريطة الحفظ…</div>');
+    let p = null;
+    try { p = await store.getProgress(st.id); } catch (e) { console.warn(e); }
+    if (!p?.seeded) p = { ...mapFromSubs(D.subs.filter((x) => x.pn === st.id && x.percent != null)), ...(p || {}) };
+    let f = 'all';
+    const show = () => {
+      $('#modalBody').innerHTML = `<div class="stack"><h2>📖 مصحف ${esc(st.name)}</h2><span class="small muted">${esc(className(st.classId))}</span><div id="mfHost"></div></div>`;
+      renderMushaf($('#mfHost'), p, { who: 'teacher', filter: f, onFilter: (x) => { f = x; show(); }, onOpen: (s) => {
+        $('#modalBody').innerHTML = `<div class="stack">${surahDetailHtml(p, s)}<div class="row"><button class="btn" type="button" id="mfBack">→ رجوع للخريطة</button></div></div>`;
+        $('#mfBack').onclick = show;
+      } });
+    };
+    show();
   }
 
   /* --- رأيك يهمنا --- */
@@ -2466,8 +2521,9 @@ function viewTeacher(app) {
         ${groups.map((g) => { const open = !!q || openGroups.has(g.id); return `<tr class="grp${open ? ' open' : ''}" data-grp="${esc(g.id)}" tabindex="0" aria-expanded="${open}"><td class="sel"><input type="checkbox" data-sg="${esc(g.id)}" ${g.list.every((x) => selStu.has(x.id)) ? 'checked' : ''} aria-label="تحديد طلاب الصف"></td><td colspan="5"><span class="grp-chev" aria-hidden="true">▾</span> <b>${esc(g.id === '_' ? 'بلا صف' : className(g.id))}</b> <span class="muted small">· ${nWord(g.list.length, 'طالب واحد', 'طالبان', 'طلاب', 'طالباً')}${!open && g.list.some((x) => selStu.has(x.id)) ? ` · المحدد ${ar(g.list.filter((x) => selStu.has(x.id)).length)}` : ''}</span><span class="small muted grp-hint">${open ? 'اضغط للإخفاء' : 'اضغط لعرض الطلاب'}</span></td></tr>
         ${!open ? '' : g.list.map((s) => `<tr class="${selStu.has(s.id) ? 'picked' : ''}"><td class="sel"><input type="checkbox" data-ss="${esc(s.id)}" ${selStu.has(s.id) ? 'checked' : ''} aria-label="تحديد"></td><td>${esc(s.name)}${s.streak && s.streak.days >= 2 && s.streak.on >= addDays(riyadhDay(), -1) ? ` <span class="streak-pill" title="أيام متتالية من التسميع والتدريب">🔥 ${ar(s.streak.days)}</span>` : ''}${/^st/.test(s.id) ? '' : `<div class="small muted num">${esc(s.id)}</div>`}</td><td><select data-mv="${esc(s.id)}">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === s.classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
         <td>${accPill(s)}</td><td class="num">${ar(D.subs.filter((x) => x.pn === s.id).length)}</td>
-        <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}`; }).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
+        <td><span class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" data-mfs="${esc(s.id)}" type="button" title="خريطة الحفظ">📖 مصحفه</button><button class="btn sm" data-rpw="${esc(s.id)}" type="button">${hasAcc(s) ? 'كلمة سر جديدة' : 'إنشاء حساب'}</button><button class="btn sm danger" data-dels="${esc(s.id)}" type="button">حذف</button></span></td></tr>`).join('')}`; }).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد طلاب. أضفهم من النموذج.</div>';
       $$('[data-ss]', body).forEach((c) => (c.onchange = () => { c.checked ? selStu.add(c.dataset.ss) : selStu.delete(c.dataset.ss); paint(q); }));
+      $$('[data-mfs]', body).forEach((b) => (b.onclick = () => openStudentMushaf(D.students.find((x) => x.id === b.dataset.mfs))));
       $$('[data-grp]', body).forEach((r) => {
         const toggle = () => { const id = r.dataset.grp; openGroups.has(id) ? openGroups.delete(id) : openGroups.add(id); pref.set('openGroups', [...openGroups]); paint(q); };
         r.onclick = (e) => { if (e.target.closest('.sel')) return; toggle(); };

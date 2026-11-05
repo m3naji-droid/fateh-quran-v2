@@ -147,6 +147,9 @@ const local = {
   // طلبات إعادة التسميع
   async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
   async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
+  // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
+  async getProgress(pn) { return LS.get('progress_' + pn, null); },
+  async saveProgress(pn, patch) { LS.set('progress_' + pn, { ...(LS.get('progress_' + pn, {}) || {}), ...patch }); },
   // رأيك يهمنا: ملاحظات الطلاب وردود المعلم
   async addFeedback(pn, f) { const all = LS.get('feedback', []); const id = uid(); all.push({ ...f, id, pn, createdAt: now() }); LS.set('feedback', all); return id; },
   async listMyFeedback(pn) { return LS.get('feedback', []).filter((x) => x.pn === pn); },
@@ -422,6 +425,8 @@ async function makeCloud() {
     async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
     async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
     async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },
+    async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
+    async saveProgress(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'map'), { ...patch, at: now() }, { merge: true }); },
     async addFeedback(pn, f) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'feedback', id), { ...f, pn, createdAt: now() }); return id; },
     async listMyFeedback(pn) { await ensureAnon(); return list(`roster/${pn}/feedback`); },
     async listAllFeedback() { return (await getDocs(query(collectionGroup(db, 'feedback'), limit(2000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
