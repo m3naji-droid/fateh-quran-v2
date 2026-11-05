@@ -708,6 +708,7 @@ function render() {
   if (!$('#modal').hidden) closeModal(); // لا تبقى نافذة صفحة سابقة مفتوحة
   const r = location.hash.replace(/^#\/?/, '').split('/')[0];
   const fn = routes[r] || viewHome;
+  document.body.classList.toggle('home-green', fn === viewHome);
   $('#nav').innerHTML = [['', 'الرئيسية'], ['student', 'الطالب'], ['teacher', 'المعلم']]
     .map(([k, l]) => `<a href="#/${k}" class="${k === r || (!routes[r] && !k) ? 'on' : ''}">${l}</a>`).join('');
   const app = $('#app');
