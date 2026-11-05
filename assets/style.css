@@ -619,3 +619,29 @@ body.home-green .foot a { color: #d9b45a; }
 .ch-tile b { font: 700 30px var(--f-display); color: var(--green); }
 .ch-tile i { position: absolute; top: -12px; font-style: normal; font-size: 22px; }
 .ch-tile small { color: var(--muted); }
+
+/* ================= التلقين المتدرج ================= */
+.talqeen { display: flex; flex-direction: column; gap: 12px; }
+.tq-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tq-bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.tq-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--green), var(--gold)); transition: width .3s; }
+.tq-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.tq-steps span { font-size: 13px; padding: 4px 12px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); background: var(--card); }
+.tq-steps span.on { border-color: var(--green); background: var(--green-2); color: var(--green); font-weight: 700; }
+.tq-steps span.done { color: var(--ok); }
+.tq-steps span.done::before { content: "✓ "; }
+.tq-card { background: var(--sheet); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.tq-hint { margin: 0; color: var(--muted); }
+.tq-text { font-size: 30px; line-height: 2.1; text-align: center; }
+.tq-w { transition: color .2s, background .2s; border-radius: 6px; padding: 0 2px; }
+.tq-w.hi { background: color-mix(in srgb, var(--gold) 28%, transparent); color: var(--ink); }
+.tq-w.ok { color: var(--ok); }
+.tq-w.bad { color: var(--bad); }
+.tq-hidden .tq-w:not(.ok) { color: transparent; background: var(--line); }
+.tq-play { text-align: center; color: var(--green); font-weight: 600; min-height: 1.6em; }
+.tq-mic { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.ok-t { color: var(--ok); }
+.tq-done { text-align: center; align-items: center; }
+.tq-big { font-size: 56px; }
+.tq-invite { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 12px; border: 1px dashed var(--gold); border-radius: 14px; background: color-mix(in srgb, var(--gold-soft) 45%, var(--card)); }
+.tq-invite span { flex: 1 1 260px; font-size: 14px; }

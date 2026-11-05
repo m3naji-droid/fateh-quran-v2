@@ -6,6 +6,7 @@ import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
+import { mountTalqeen } from './talqeen.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge } from './push.js';
@@ -198,6 +199,7 @@ function mountRecite(root, opts) {
         <div class="seg" role="group" aria-label="نوع التدريب" ${opts.lockMode ? 'hidden' : ''}>
           <button type="button" data-mode="recite" class="${mode === 'recite' ? 'on' : ''}">تلاوة نظراً</button>
           <button type="button" data-mode="hifz" class="${mode === 'hifz' ? 'on' : ''}">تسميع غيباً</button>
+          ${opts.onTalqeen ? '<button type="button" data-mode="talqeen">تلقين متدرج</button>' : ''}
         </div>
         <label class="btn sm"><input type="checkbox" id="rcTaj" ${tajOn ? 'checked' : ''}> ألوان التجويد</label>
         <button class="btn sm" id="rcHint" type="button" ${mode === 'hifz' && !opts.noHint ? '' : 'hidden'}>تلميح بالكلمة التالية</button>
@@ -255,6 +257,7 @@ function mountRecite(root, opts) {
 
   // أدوات العرض
   $$('[data-mode]', root).forEach((b) => (b.onclick = () => {
+    if (b.dataset.mode === 'talqeen') { opts.onTalqeen({ surah, from, to }); return; }
     mode = b.dataset.mode;
     $$('[data-mode]', root).forEach((x) => x.classList.toggle('on', x === b));
     text.classList.toggle('hide', mode === 'hifz');
@@ -763,7 +766,13 @@ function mountPractice(host, learn, onActivity, onResult) {
     <div class="card" style="margin-bottom:16px">${rangePicker('pr', init)}</div>
     <div id="prBody"></div>`;
   let comp = null;
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: init.mode, learn, onActivity, onResult }); };
+  let mode0 = init.mode;
+  const talqeen = (r) => {
+    comp?.destroy();
+    comp = mountTalqeen($('#prBody', host), { ...r, reciter: pref.get('reciter', RECITERS[0].id), onActivity, onAyahDone: onResult,
+      onExit: () => mount(r), onFinish: () => { mode0 = 'hifz'; mount(r); } });
+  };
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, onTalqeen: onResult ? talqeen : null }); };
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
   return { destroy: () => comp?.destroy() };
@@ -1489,6 +1498,16 @@ function viewStudent(app) {
     app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="tkBack" type="button">→ رجوع للواجبات</button><h1>${rt ? 'إعادة: ' : ''}${esc(t?.title || rt?.taskTitle || 'تسميع')}</h1>
       <p class="muted" style="margin:4px 0 0">${rt ? esc(rangeLabel(range.surah, range.from, range.to)) + ' · ' : ''}${esc(note)}</p></div></div><div id="tkBody"></div>`;
     $('#tkBack', app).onclick = () => { comp?.destroy(); comp = null; load(); };
+    // واجب تسميع غيباً: يمكن حفظه أولاً بالتلقين المتدرج (لا يُستهلك به التسميع)
+    if (!already && (rt?.mode || t?.mode) === 'hifz') {
+      $('#tkBody', app).insertAdjacentHTML('beforebegin', '<div class="tq-invite"><span>📖 لم تحفظه بعد؟ احفظه خطوة بخطوة بالتلقين المتدرج، ثم ارجع للتسميع. التلقين لا يُرسل للمعلم ولا يستهلك محاولتك.</span><button class="btn gold" type="button" id="tkTalq">احفظه بالتلقين أولاً</button></div>');
+      $('#tkTalq', app).onclick = () => {
+        comp?.destroy();
+        $('.tq-invite', app)?.remove();
+        comp = mountTalqeen($('#tkBody', app), { ...range, reciter: pref.get('reciter', RECITERS[0].id), onActivity: (sec) => logAct('practice', sec), onAyahDone: (x) => recordProgress(x),
+          onExit: () => openTask(t, rt), onFinish: () => openTask(t, rt), finishLabel: '🎙️ إلى التسميع (محاولتك الواحدة)' });
+      };
+    }
     if (already) { $('#tkBody', app).innerHTML = `<div class="empty">أرسلت محاولتك لهذا ${rt ? 'الطلب' : 'الواجب'}. لكل ${rt ? 'طلب' : 'واجب'} محاولة واحدة، ويمكن لمعلمك أن يطلب منك إعادته.</div>`; return; }
     const cls = data.classes.find((c) => c.id === me.classId);
     comp = mountRecite($('#tkBody', app), {
