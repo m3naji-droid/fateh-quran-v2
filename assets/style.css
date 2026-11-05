@@ -645,3 +645,14 @@ body.home-green .foot a { color: #d9b45a; }
 .tq-big { font-size: 56px; }
 .tq-invite { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 12px; border: 1px dashed var(--gold); border-radius: 14px; background: color-mix(in srgb, var(--gold-soft) 45%, var(--card)); }
 .tq-invite span { flex: 1 1 260px; font-size: 14px; }
+
+/* ================= يحتاجون انتباهك ================= */
+.attn { margin: 14px 0 6px; padding: 0; border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); overflow: hidden; }
+.attn-head { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; border: 0; background: color-mix(in srgb, var(--warn-bg) 70%, var(--card)); font: inherit; color: var(--ink); cursor: pointer; text-align: start; }
+.attn-list { list-style: none; margin: 0; padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.attn-list li { display: grid; grid-template-columns: minmax(140px, 1fr) 2fr; gap: 6px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.attn-who { display: flex; flex-direction: column; }
+.attn-why { display: flex; flex-wrap: wrap; gap: 6px; }
+.attn-why .chip { cursor: default; }
+.attn-act { grid-column: 1 / -1; gap: 6px; }
+@media (max-width: 640px) { .attn-list li { grid-template-columns: 1fr; } }

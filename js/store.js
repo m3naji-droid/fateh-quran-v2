@@ -201,6 +201,8 @@ const local = {
   async saveMonthResult(ym, r) { const all = LS.get('results', {}); all[ym] = r; LS.set('results', all); },
   async addStudentNotifId(pn, id, n) { const all = LS.get('notifs', []).filter((x) => !(x.id === id && x.studentId === pn)); all.push({ id, createdAt: now(), ...n, classId: 'stu:' + pn, studentId: pn }); LS.set('notifs', all.slice(-400)); return id; },
   async getNotifySettings() { return LS.get('notifySettings', {}); },
+  async getAttention() { return LS.get('attention', {}); },
+  async saveAttention(pn, v) { const a = LS.get('attention', {}); a[pn] = v; LS.set('attention', a); },
   async setNotifySettings(v) { LS.set('notifySettings', { ...LS.get('notifySettings', {}), ...v }); },
   async pushToken() { return null; },
   async savePushToken() {},
@@ -522,6 +524,8 @@ async function makeCloud() {
     async saveMonthResult(ym, r) { await setDoc(doc(db, 'results', ym), r); },
     async addStudentNotifId(pn, id, n) { await setDoc(doc(db, 'roster', pn, 'notifs', id), { ...n, studentId: pn, createdAt: now() }); return id; },
     async getCronStatus() { const d = await getDoc(doc(db, 'settings', 'cron')); return d.exists() ? d.data() : null; },
+    async getAttention() { const d = await getDoc(doc(db, 'settings', 'attention')).catch(() => null); return d?.exists() ? d.data() : {}; },
+    async saveAttention(pn, v) { await setDoc(doc(db, 'settings', 'attention'), { [pn]: v }, { merge: true }); },
     async getNotifySettings() { const d = await getDoc(doc(db, 'settings', 'notify')).catch(() => null); return d?.exists() ? d.data() : {}; },
     async setNotifySettings(v) { await setDoc(doc(db, 'settings', 'notify'), v, { merge: true }); },
     // الإشعارات على الجوال (Firebase Cloud Messaging)

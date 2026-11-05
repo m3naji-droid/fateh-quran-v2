@@ -12,7 +12,7 @@ import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtK
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
-import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle } from './leaderboard.js';
+import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle, subScore } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
@@ -1160,8 +1160,8 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
@@ -1169,6 +1169,7 @@ function viewStudent(app) {
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
         if (n?.type === 'fbReply') { openFeedback(n.fid); return; }
+        if (n?.type === 'cheer') { openModal(`<div class="stack"><h2>💚 رسالة من معلمك</h2><p style="margin:0;line-height:2;white-space:pre-wrap">${esc(n.body || '')}</p><div class="row"><button class="btn primary" type="button" data-close>جزاك الله خيراً</button></div></div>`); return; }
         if (n?.type === 'challenge') { loadChallenges().then(() => openChallenge(n.chId)); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
         if (n?.type === 'month') { openMonth(n); return; }
@@ -1718,6 +1719,7 @@ function viewTeacher(app) {
       <div id="dbWarn"></div>
       <div id="monthBar"></div>
       <div class="kpis" id="tKpis"></div>
+      <div id="attn"></div>
       <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['fb', 'رأيك يهمنا'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'fb' ? '<span class="tab-n" id="fbTabN"></span>' : ''}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
@@ -1746,6 +1748,7 @@ function viewTeacher(app) {
     const ka = $('#kpiAi', app);
     if (ka) ka.onclick = () => { toSettings(); $('#aiUse', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     loadAiDoc();
+    paintAttention();
     const u = dbUsage(D.subs, D.students);
     const warnBox = $('#dbWarn', app);
     if (warnBox) warnBox.innerHTML = u.level === 'ok' ? '' : `<div class="db-warn ${u.level}" role="alert">
@@ -1762,6 +1765,92 @@ function viewTeacher(app) {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
     ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+  }
+
+  /* --- يحتاجون انتباهك --- */
+  let attnDone = null, attnOpen = false;
+  const ATTN_DAYS = 14;
+  function attentionList() {
+    const today = riyadhDay(), now = Date.now();
+    const byPn = {};
+    D.subs.forEach((x) => (byPn[x.pn] = byPn[x.pn] || []).push(x));
+    const out = [];
+    D.students.filter(hasAcc).forEach((s) => {
+      const subs = (byPn[s.id] || []).slice().sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      const reasons = [];
+      // ١) تراجع: متوسط آخر ٣ أقل من متوسط ما قبلها بـ١٫٥ من ١٠ فأكثر
+      const sc = subs.map(subScore).filter((v) => v != null);
+      if (sc.length >= 5) {
+        const last = sc.slice(-3), prev = sc.slice(0, -3);
+        const a = last.reduce((n, v) => n + v, 0) / last.length, b = prev.reduce((n, v) => n + v, 0) / prev.length;
+        if (b - a >= 1.5) reasons.push({ k: 'drop', t: `📉 تراجعت درجاته: ${fmtQ(Math.round(b * 10) / 10)} ← ${fmtQ(Math.round(a * 10) / 10)}` });
+      }
+      // ٢) انقطاع أسبوع: لا تسميع ولا تدريب منذ ٧ أيام
+      const lastSub = subs.length ? riyadhDay(new Date(subs[subs.length - 1].createdAt)) : '';
+      const lastAct = [lastSub, s.streak?.on || ''].sort().pop() || '';
+      const since = lastAct || (s.accountAt || s.createdAt ? riyadhDay(new Date(s.accountAt || s.createdAt)) : '');
+      if (since && since <= addDays(today, -7)) {
+        const d = Math.round((new Date(today) - new Date(since)) / 864e5);
+        reasons.push({ k: 'idle', t: lastAct ? `💤 منقطع منذ ${nWord(d, 'يوم', 'يومين', 'أيام', 'يوماً')}` : `💤 لم يبدأ بعد (حسابه منذ ${nWord(d, 'يوم', 'يومين', 'أيام', 'يوماً')})` });
+      }
+      // ٣) فاته واجبان فأكثر انتهى موعدهما
+      const done = new Set(subs.map((x) => x.taskId).filter(Boolean));
+      const missed = D.tasks.filter((t) => t.due && t.due < today && (t.classId === 'all' || t.classId === s.classId) && !done.has(t.id) && (t.createdAt || '') >= (s.accountAt || s.createdAt || '')).length; // لا يُحاسب على واجبات قبل إضافته
+      if (missed >= 2) reasons.push({ k: 'miss', t: `📋 فاته ${nWord(missed, 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')}` });
+      if (!reasons.length) return;
+      const keys = reasons.map((r) => r.k).sort().join(',');
+      const dn = attnDone?.[s.id];
+      if (dn && now - new Date(dn.at).getTime() < ATTN_DAYS * 864e5 && reasons.every((r) => dn.keys.split(',').includes(r.k))) return; // تابعه المعلم ولم يظهر سبب جديد
+      out.push({ s, reasons, keys });
+    });
+    return out.sort((a, b) => b.reasons.length - a.reasons.length || a.s.name.localeCompare(b.s.name, 'ar'));
+  }
+  const CHEER = {
+    drop: (n) => `${n}، لاحظتُ أن درجاتك الأخيرة أقل من مستواك المعتاد. أنا واثق أنك قادر على العودة أقوى؛ راجع المقطع جيداً وسمّع من جديد بإذن الله 🌱`,
+    idle: (n) => `${n}، افتقدناك في المقرأة هذه الأيام! دقيقة واحدة من التدريب اليوم تعيدك إلى سلسلتك، وأنا أنتظر تسميعك 🔥`,
+    miss: (n) => `${n}، فاتتك بعض الواجبات. لا بأس، ابدأ بأقربها اليوم، وأنا معك خطوة بخطوة 🤍`,
+  };
+  async function paintAttention() {
+    const host = $('#attn', app); if (!host) return;
+    if (attnDone === null) { attnDone = {}; store.getAttention().then((v) => { attnDone = v || {}; paintAttention(); }).catch(() => {}); return; }
+    const L = attentionList();
+    if (!L.length) { host.innerHTML = ''; return; }
+    host.innerHTML = `<div class="attn card">
+      <button type="button" class="attn-head" id="attnT" aria-expanded="${attnOpen}"><span>👀 <b>${nWord(L.length, 'طالب واحد يحتاج', 'طالبان يحتاجان', 'طلاب يحتاجون', 'طالباً يحتاجون')} انتباهك</b></span><span class="small muted">${attnOpen ? 'إخفاء ▴' : 'عرض ▾'}</span></button>
+      ${attnOpen ? `<ul class="attn-list">${L.map(({ s, reasons }) => `<li>
+        <div class="attn-who"><b>${esc(s.name)}</b><span class="small muted">${esc(className(s.classId))}</span></div>
+        <div class="attn-why">${reasons.map((r) => `<span class="chip">${esc(r.t)}</span>`).join('')}</div>
+        <div class="row attn-act"><button class="btn sm gold" type="button" data-cheer="${esc(s.id)}">💚 رسالة تشجيع</button><button class="btn sm" type="button" data-asubs="${esc(s.id)}">📋 تسليماته</button><button class="btn sm" type="button" data-amf="${esc(s.id)}">📖 مصحفه</button><button class="btn sm ghost" type="button" data-adone="${esc(s.id)}">✓ تمت المتابعة</button></div></li>`).join('')}</ul>` : ''}</div>`;
+    $('#attnT', host).onclick = () => { attnOpen = !attnOpen; paintAttention(); };
+    const find = (id) => L.find((x) => x.s.id === id);
+    $$('[data-amf]', host).forEach((b) => (b.onclick = () => openStudentMushaf(find(b.dataset.amf).s)));
+    $$('[data-asubs]', host).forEach((b) => (b.onclick = () => { const s = find(b.dataset.asubs).s; filters = { cls: 'all', task: 'all', q: s.name, status: 'all' }; tab = 'subs'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'subs')); drawBody(); $('#tBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+    $$('[data-adone]', host).forEach((b) => (b.onclick = async () => {
+      const it = find(b.dataset.adone); const v = { at: new Date().toISOString(), keys: it.keys };
+      attnDone[it.s.id] = v; paintAttention();
+      try { await store.saveAttention(it.s.id, v); toast(`تمت متابعة ${it.s.name}. يعود إلى القائمة بعد ${ar(ATTN_DAYS)} يوماً إن بقي السبب، أو فوراً إن ظهر سبب جديد.`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    }));
+    $$('[data-cheer]', host).forEach((b) => (b.onclick = () => {
+      const it = find(b.dataset.cheer), first = it.s.name.split(' ')[0];
+      openModal(`<form class="stack" id="chrF"><h2>💚 رسالة تشجيع إلى ${esc(it.s.name)}</h2>
+        <div class="row" style="gap:6px">${it.reasons.map((r) => `<span class="chip">${esc(r.t)}</span>`).join('')}</div>
+        <label class="field">نص الرسالة (يمكنك تعديله)<textarea id="chrT" rows="4" maxlength="400" required>${esc(CHEER[it.reasons[0].k](first))}</textarea></label>
+        <p class="small muted" style="margin:0">تصل إليه في جرس الموقع وإشعاراً على جواله، ويظهر في الإشعار أنها من معلمه.</p>
+        <div class="row"><button class="btn primary" type="submit">أرسل</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+        $('#chrF', m).onsubmit = async (e) => {
+          e.preventDefault(); const btn = e.submitter; btn.disabled = true;
+          const body = $('#chrT', m).value.trim();
+          try {
+            const nid = await store.addStudentNotif(it.s.id, { type: 'cheer', title: '💚 رسالة من معلمك', body, link: './#/student', tag: 'cheer-' + Date.now() });
+            let msg = `أُرسلت الرسالة إلى ${it.s.name}.`;
+            try { const p = await sendPush(nid, it.s.id); if (p?.sent) msg += ' ووصلت إلى جواله.'; else if (p?.deferred) msg += ' وتصل جواله الساعة ٦ صباحاً.'; } catch {}
+            const v = { at: new Date().toISOString(), keys: it.keys, cheer: true };
+            attnDone[it.s.id] = v; store.saveAttention(it.s.id, v).catch(() => {});
+            closeModal(); toast(msg); paintAttention();
+          } catch (x) { toast('تعذر الإرسال: ' + (x.code || x.message)); btn.disabled = false; }
+        };
+      });
+    }));
   }
 
   /* --- مصحف الطالب (للمعلم) --- */
