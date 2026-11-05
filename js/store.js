@@ -147,6 +147,11 @@ const local = {
   // طلبات إعادة التسميع
   async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
   async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
+  // ختمات الصفوف
+  async listKhatmas() { return LS.get('khatmas', []); },
+  async saveKhatma(k) { const all = LS.get('khatmas', []); const id = k.id || uid(); const i = all.findIndex((x) => x.id === id); const d = { ...(i >= 0 ? all[i] : {}), ...k, id }; if (i >= 0) all[i] = d; else all.push(d); LS.set('khatmas', all); return id; },
+  async deleteKhatma(id) { LS.set('khatmas', LS.get('khatmas', []).filter((x) => x.id !== id)); },
+  async addKhatmaDone(id, entries, completedAt = null) { const all = LS.get('khatmas', []); const k = all.find((x) => x.id === id); if (!k) return; k.done = { ...(k.done || {}) }; Object.entries(entries).forEach(([key, v]) => { if (!k.done[key]) k.done[key] = v; }); if (completedAt) k.completedAt = completedAt; LS.set('khatmas', all); },
   // التحديات الودّية
   async createChallenge(c) { const all = LS.get('challenges', []); const id = uid(); all.push({ ...c, id }); LS.set('challenges', all); return id; },
   async listMyChallenges(pn) { return LS.get('challenges', []).filter((c) => c.pns.includes(pn)); },
@@ -435,6 +440,14 @@ async function makeCloud() {
     async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
     async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
     async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },
+    async listKhatmas() { await ensureAnon(); return list('khatmas'); },
+    async saveKhatma(k) { const id = k.id || uid(); const { id: _, ...rest } = k; await setDoc(doc(db, 'khatmas', id), rest, { merge: true }); return id; },
+    async deleteKhatma(id) { await deleteDoc(doc(db, 'khatmas', id)); },
+    async addKhatmaDone(id, entries, completedAt = null) {
+      const patch = {}; Object.entries(entries).forEach(([key, v]) => (patch['done.' + key] = v));
+      if (completedAt) patch.completedAt = completedAt;
+      await updateDoc(doc(db, 'khatmas', id), patch);
+    },
     async createChallenge(c) { const id = uid(); await setDoc(doc(db, 'challenges', id), c); return id; },
     async listMyChallenges(pn) { await ensureAnon(); return (await getDocs(query(collection(db, 'challenges'), where('pns', 'array-contains', pn), limit(200)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async listAllChallenges() { return (await getDocs(query(collection(db, 'challenges'), limit(5000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },

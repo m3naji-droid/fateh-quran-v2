@@ -2,6 +2,7 @@
 
 - /send      : يرسل تنبيهاً محفوظاً (notifs/{id} لصف، أو roster/{طالب}/notifs/{id}) إلى أجهزة أصحابه.
 - /announce  : ينشر إعلاناً كتبه المعلم (announcements/{id}) في جرس الطلاب ويرسله إلى جوالاتهم.
+- /khatma    : اكتملت ختمة صف: تنبيه واحتفال لكل الصف.
 - /challenge : تحدٍّ ودّي بين زميلين: إشعار بالتحدي الجديد، وبالنتيجة عند انتهائه.
 - /feedback  : الطالب يرسل ملاحظة (رأيك يهمنا) فيصل تنبيهها إلى أجهزة المعلم.
 - /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات.
@@ -483,6 +484,10 @@ def feedback_push(x: dict, ref) -> dict:
     return r
 
 
+class KhatmaReq(BaseModel):
+    id: str
+
+
 class ChallengeReq(BaseModel):
     id: str
     event: str  # new | done
@@ -548,6 +553,32 @@ def send_batch(req: BatchReq, authorization: str | None = Header(None)):
         ref.update({"pushedAt": firestore.SERVER_TIMESTAMP, "push": r})
         stats = add(stats, r)
     return stats
+
+
+@app.post("/khatma")
+def khatma(req: KhatmaReq, authorization: str | None = Header(None)):
+    """يُستدعى عند اكتمال ختمة: يتحقق من الاكتمال فعلاً، ثم ينبّه الصف مرة واحدة."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        auth.verify_id_token(authorization[7:])
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    ref = db.collection("khatmas").document(req.id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "الختمة غير موجودة.")
+    k = snap.to_dict()
+    if k.get("nDone") or not k.get("total") or len(k.get("done") or {}) < k["total"]:
+        return {"sent": 0}
+    ref.update({"nDone": True})
+    cid = k.get("classId") or "all"
+    people = {(v or {}).get("pn") for v in (k.get("done") or {}).values() if isinstance(v, dict)}
+    n = {"type": "khatma", "khId": req.id, "title": "📿 اكتملت ختمة صفكم!",
+         "body": f"{k.get('label') or 'الختمة'}: أتممتم {num(k['total'])} آية بفضل الله، بمشاركة {num(len(people))} طالباً. +٥ نقاط لكل من أسهم 🎉",
+         "link": "./#/student/khatma/" + req.id, "tag": "kh-" + req.id, "createdAt": now_iso()}
+    db.collection("notifs").document(f"kh-{req.id}").set({**n, "classId": cid})
+    return push(tokens_for(class_id=cid), n)
 
 
 @app.post("/challenge")

@@ -61,6 +61,15 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // ختمات الصفوف: ينشئها المعلم، والطالب يضيف آيات أتقنها فقط (لا يحذف ولا يغيّر غيرها)
+    match /khatmas/{kid} {
+      allow read: if signedIn();
+      allow create, delete: if isTeacher();
+      allow update: if isTeacher()
+        || (signedIn() && resource.data.get('completedAt', null) == null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['done', 'completedAt'])
+            && request.resource.data.done.keys().hasAll(resource.data.get('done', {}).keys()));
+    }
     // التحديات الودّية بين زميلين من الصف نفسه: كل طرف يكتب نتيجته مرة واحدة فقط
     match /challenges/{cid} {
       allow read: if signedIn();

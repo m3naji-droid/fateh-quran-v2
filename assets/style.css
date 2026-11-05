@@ -758,3 +758,31 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 .cr-timer i { display: block; height: 100%; width: 0; background: #d9b45a; }
 @keyframes crTimer { from { width: 0; } to { width: 100%; } }
 @media (max-width: 700px) { .cr-heroes { grid-template-columns: 1fr; } .cr-lane { grid-template-columns: 30px 1fr 1fr 50px; } }
+
+/* ================= ختمة الصف ================= */
+.kh-bar { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--green) 40%, var(--line)); background: color-mix(in srgb, var(--green-2) 60%, var(--card)); }
+.kh-bar.done { border-color: var(--gold); background: color-mix(in srgb, var(--gold-soft) 55%, var(--card)); }
+.kh-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.kh-meter { position: relative; height: 22px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.kh-meter i { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 99px; background: linear-gradient(90deg, var(--green), #2fa37a); transition: width .6s; }
+.kh-bar.done .kh-meter i { background: linear-gradient(90deg, #d9b45a, #f3e7c6); }
+.kh-meter span { position: relative; display: block; text-align: center; font-size: 12px; font-weight: 700; line-height: 22px; color: var(--ink); }
+.kh-meter.sm { height: 16px; margin-top: 6px; } .kh-meter.sm span { line-height: 16px; font-size: 11px; }
+.kh-rows { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow: auto; }
+.kh-row { display: grid; grid-template-columns: 90px 1fr 60px; gap: 8px; align-items: center; font-size: 14px; }
+.kh-row i { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; display: block; }
+.kh-row i b { display: block; height: 100%; background: var(--green); border-radius: 99px; }
+.kh-row.full i b { background: var(--gold); }
+.kh-row small { color: var(--muted); text-align: end; }
+.kh-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.kh-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); }
+.kh-list li > div:first-child { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.cr-kh { position: relative; width: min(40vh, 340px); aspect-ratio: 1; margin-top: 2vh; }
+.cr-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.cr-ring circle { fill: none; stroke-width: 22; }
+.cr-ring .bg { stroke: rgba(255,255,255,.12); }
+.cr-ring .fg { stroke: #d9b45a; stroke-linecap: round; stroke-dasharray: var(--c); stroke-dashoffset: var(--c); animation: crRing 2s cubic-bezier(.2,.8,.2,1) .4s forwards; }
+@keyframes crRing { to { stroke-dashoffset: var(--o); } }
+.cr-kh-n { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.cr-kh-n b { font: 800 clamp(44px, 6vw, 90px) var(--f-display); color: #d9b45a; }
+.cr-kh-n span { font-size: clamp(16px, 1.6vw, 26px); color: #cfe0d8; }

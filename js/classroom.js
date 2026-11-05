@@ -26,6 +26,14 @@ function ayahSlide(x) {
   if (!x) return '';
   return `<div class="cr-slide"><h1 class="cr-title">✨ آية اليوم</h1><p class="cr-ayah">${esc(x.text)} <span>﴿${ar(x.a)}﴾</span></p><p class="cr-sub">سورة ${esc(surahName(x.s))} · الآية ${ar(x.a)}</p><p class="cr-mean">${esc(x.t)}</p></div>`;
 }
+function khSlide(k) {
+  if (!k) return '';
+  const pct = Math.round((k.done / k.total) * 100), C = 2 * Math.PI * 120;
+  return `<div class="cr-slide"><h1 class="cr-title">📿 ${k.complete ? 'اكتملت الختمة!' : 'ختمة الصف'}</h1><p class="cr-sub">${esc(k.label)}${k.left && !k.complete ? ' · ' + esc(k.left) : ''}</p>
+    <div class="cr-kh"><svg viewBox="0 0 280 280" class="cr-ring"><circle cx="140" cy="140" r="120" class="bg"/><circle cx="140" cy="140" r="120" class="fg" style="--c:${C};--o:${C * (1 - pct / 100)}"/></svg>
+      <div class="cr-kh-n"><b>${ar(pct)}٪</b><span>${ar(k.done)} من ${ar(k.total)} آية</span></div></div>
+    ${k.top.length ? `<div class="cr-rest">${k.top.map((c, j) => `<div style="--d:${1 + j * 0.2}s">${['🥇', '🥈', '🥉', '⭐', '⭐'][j]} ${esc(c.name)} <span>${ar(c.n)} <small>آية</small></span></div>`).join('')}</div>` : ''}</div>`;
+}
 function heroes(h) {
   const card = (ico, t, x, unit) => `<div class="cr-hero" style="--d:${0.3 + ico.length * 0}s"><div class="cr-hico">${ico}</div><div class="cr-ht">${t}</div>${x ? `<div class="cr-hname">${esc(x.name)}</div><div class="cr-hval">${ar(x.v)} ${unit}</div>` : '<div class="cr-hval muted">— لم يُحسم بعد</div>'}</div>`;
   return `<div class="cr-slide"><h1 class="cr-title">🌟 أبطال الأسبوع</h1><p class="cr-sub">آخر ٧ أيام</p>
@@ -39,6 +47,7 @@ export async function openClassroom(opts) {
   const slides = [
     { html: podium(opts.top, opts.podiumTitle, `${opts.scopeName} · ${opts.monthLabel}`), party: true },
     { html: race(opts.classes, opts.focusClass) },
+    opts.khatma && { html: khSlide(opts.khatma), party: opts.khatma.complete },
     ayah && { html: ayahSlide(ayah) },
     { html: heroes(opts.heroes) },
   ].filter(Boolean);
@@ -57,7 +66,7 @@ export async function openClassroom(opts) {
     stage.innerHTML = slides[i].html;
     box.querySelectorAll('[data-go]').forEach((d, k) => d.classList.toggle('on', k === i));
     clearTimeout(partyT);
-    if (slides[i].party && opts.top.length) partyT = setTimeout(() => { confetti(3500); document.querySelectorAll('.confetti').forEach((c) => (c.style.zIndex = 9700)); }, 2000);
+    if (slides[i].party && (opts.top.length || i > 0)) partyT = setTimeout(() => { confetti(3500); document.querySelectorAll('.confetti').forEach((c) => (c.style.zIndex = 9700)); }, 2000);
     timer.style.animation = 'none'; void timer.offsetWidth; timer.style.animation = paused ? 'none' : `crTimer ${SLIDE_MS}ms linear forwards`;
     clearTimeout(t); if (!paused) t = setTimeout(() => show(i + 1), SLIDE_MS);
   };

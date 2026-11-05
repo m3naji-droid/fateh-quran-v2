@@ -138,3 +138,11 @@ export async function notifyChallenge(id, event) {
   });
   return res.ok ? res.json() : null;
 }
+
+/** اكتملت ختمة صف: الخادم يتحقق ثم ينبّه الصف كله */
+export async function notifyKhatma(id) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/khatma', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ id }) });
+  return res.ok ? res.json() : null;
+}

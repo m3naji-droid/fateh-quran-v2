@@ -9,9 +9,10 @@ import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLe
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
+import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle, subScore } from './leaderboard.js';
@@ -863,7 +864,9 @@ function viewStudent(app) {
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null;
-  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb|challenge)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb|challenge|khatma)\/([\w-]+)/);
+  let openKhId = deep && deep[1] === 'khatma' ? deep[2] : null;
+  let myKh = [];
   let openChId = deep && deep[1] === 'challenge' ? deep[2] : null;
   let myCh = [], chCfg = { off: false };
   let openFbId = deep && deep[1] === 'fb' ? deep[2] : null;
@@ -951,6 +954,48 @@ function viewStudent(app) {
     });
     if (w) setTimeout(() => confetti(), 150);
   }
+  /* --- ختمة الصف --- */
+  async function loadKhatmas() {
+    try { myKh = khForClass(await store.listKhatmas(), me.classId).filter((k) => !k.completedAt || Date.now() - new Date(k.completedAt).getTime() < 7 * 864e5 || openKhId === k.id); } catch (e) { console.warn('khatmas', e); }
+    myKh.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    paintKhBar();
+  }
+  function paintKhBar() {
+    const host = $('#khBar', app); if (!host) return;
+    host.innerHTML = myKh.filter((k) => khActive(k) || k.completedAt).slice(0, 2).map((k) => {
+      const total = khTotal(k), done = khDone(k), mine = contributors(k).find((c) => c.pn === me.id)?.n || 0, pct = Math.round((done / total) * 100);
+      return `<div class="kh-bar${k.completedAt ? ' done' : ''}"><div class="kh-head"><b>📿 ختمة ${k.classId === 'all' ? 'المرحلة' : 'الصف'}: ${esc(khLabel(k))}</b><span class="small">${k.completedAt ? '🎉 اكتملت بفضل الله!' : esc(daysLeft(k))}</span></div>
+        <div class="kh-meter"><i style="width:${Math.max(1, pct)}%"></i><span>${ar(done)} من ${ar(total)} آية (${ar(pct)}٪)</span></div>
+        <div class="row" style="justify-content:space-between"><span class="small">${mine ? `ساهمتَ بـ${ar(mine)} ${mine === 1 ? 'آية' : mine === 2 ? 'آيتين' : 'آيات'} 🌟` : k.completedAt ? 'بارك الله في الجميع' : 'أتقن آية منها (٨٥٪+) لتضيفها لصفك'}</span>
+        <span class="row" style="gap:6px">${k.completedAt ? `<button class="btn sm gold" type="button" data-khcert="${esc(k.id)}">🏅 الشهادة</button>` : `<button class="btn sm gold" type="button" data-khgo="${esc(k.id)}">ساهم الآن</button>`}<button class="btn sm" type="button" data-khinfo="${esc(k.id)}">التفاصيل</button></span></div></div>`;
+    }).join('');
+    $$('[data-khinfo]', host).forEach((b) => (b.onclick = () => openKhatma(b.dataset.khinfo)));
+    $$('[data-khcert]', host).forEach((b) => (b.onclick = () => { const k = myKh.find((x) => x.id === b.dataset.khcert); groupCertificate(k, { className: k.classId === 'all' ? '' : data.classes.find((c) => c.id === k.classId)?.name || '' }); }));
+    $$('[data-khgo]', host).forEach((b) => (b.onclick = () => { const g = nextGap(myKh.find((x) => x.id === b.dataset.khgo)); if (!g) return; pendingPractice = { ...g, mode: 'hifz' }; tab = 'practice'; draw(); scrollTo(0, 0); }));
+  }
+  function openKhatma(id) {
+    const k = myKh.find((x) => x.id === id);
+    if (!k) return toast('هذه الختمة لم تعد موجودة.');
+    openModal(`<div class="stack">${khDetailHtml(k, me.id)}<div class="row"><button class="btn primary" type="button" data-close>حسناً</button></div></div>`);
+    if (k.completedAt) confetti();
+  }
+  async function contributeKhatma(sub) {
+    for (const k of myKh.filter((x) => khActive(x))) {
+      const keys = newKeys(k, sub);
+      if (!keys.length) continue;
+      const entries = Object.fromEntries(keys.map((key) => [key, { pn: me.id, name: me.name }]));
+      const complete = khDone(k) + keys.length >= khTotal(k);
+      const at = complete ? new Date().toISOString() : null;
+      try {
+        await store.addKhatmaDone(k.id, entries, at);
+        k.done = { ...(k.done || {}), ...entries }; if (at) k.completedAt = at;
+        toast(`📿 أضفتَ ${keys.length === 1 ? 'آية' : keys.length === 2 ? 'آيتين' : ar(keys.length) + ' آيات'} إلى ختمة ${k.classId === 'all' ? 'المرحلة' : 'صفك'}!`);
+        if (complete) { notifyKhatma(k.id).catch(() => {}); setTimeout(() => { confetti(); openKhatma(k.id); }, 600); }
+        paintKhBar();
+      } catch (e) { console.warn('khatma', e); }
+    }
+  }
+
   /* --- التحدي الودّي --- */
   async function loadChallenges() {
     try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); } catch (e) { console.warn('challenges', e); }
@@ -1087,6 +1132,7 @@ function viewStudent(app) {
     return (progress = p);
   }
   async function recordProgress(sub) {
+    contributeKhatma(sub);
     try {
       const p = await loadProgress();
       const keys = mergeAttempt(p, sub);
@@ -1164,8 +1210,8 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
-        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚|📿)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
       $$('[data-nid]', m).forEach((b) => (b.onclick = () => {
@@ -1173,6 +1219,7 @@ function viewStudent(app) {
         closeModal();
         if (n?.type === 'grade') { openSub(n.subId); return; }
         if (n?.type === 'fbReply') { openFeedback(n.fid); return; }
+        if (n?.type === 'khatma') { loadKhatmas().then(() => openKhatma(n.khId)); return; }
         if (n?.type === 'cheer') { openModal(`<div class="stack"><h2>💚 رسالة من معلمك</h2><p style="margin:0;line-height:2;white-space:pre-wrap">${esc(n.body || '')}</p><div class="row"><button class="btn primary" type="button" data-close>جزاك الله خيراً</button></div></div>`); return; }
         if (n?.type === 'challenge') { loadChallenges().then(() => openChallenge(n.chId)); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
@@ -1201,6 +1248,7 @@ function viewStudent(app) {
     }
     draw();
     pruneImageCache();
+    loadKhatmas().then(() => { if (openKhId) { const id = openKhId; openKhId = null; openKhatma(id); } });
     loadChallenges().then(() => { if (openChId) { const id = openChId; openChId = null; openChallenge(id); } });
     store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
@@ -1279,7 +1327,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="annBar"></div><div id="chBar"></div><div id="aodStu"></div>
+      <div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -1289,7 +1337,7 @@ function viewStudent(app) {
     paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell(); paintAnnBar(); paintChBar();
+    paintBell(); paintAnnBar(); paintChBar(); paintKhBar();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
@@ -1703,6 +1751,7 @@ function viewTeacher(app) {
     refreshPush(tOwner);
     loadFb();
     store.listAllChallenges().then((L) => { D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
+    store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
@@ -2990,7 +3039,7 @@ function viewTeacher(app) {
   /* --- لوحة الشرف: تُحسب هنا وتُنشر للطلاب --- */
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
-  const boardSubs = () => (D.challenges?.length ? D.subs.concat(chBonus(D.challenges)) : D.subs);
+  const boardSubs = () => D.subs.concat(D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : []);
   function schedulePublish() {
     clearTimeout(boardTimer);
     boardTimer = setTimeout(publishBoard, 2500);
@@ -3018,7 +3067,9 @@ function viewTeacher(app) {
       </div>
       <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
       <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="hbBoard"></div>`;
+    drawKhAdmin($('#khAdm', body));
     $('#crGo', body).onclick = () => startClassroom($('#crScope', body).value);
     drawChAdmin($('#chAdm', body));
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
@@ -3029,6 +3080,59 @@ function viewTeacher(app) {
       $('#mGo', body).onclick = () => openMonthReview(pick.value);
     }
     schedulePublish();
+  }
+
+  /* --- ختمات الصفوف (للمعلم) --- */
+  function drawKhAdmin(host) {
+    const L = (D.khatmas || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">📿 ختمات الصفوف</h3><button class="btn sm primary" type="button" id="khNew">+ ختمة جديدة</button></div>
+      <p class="small muted" style="margin:0">كل آية يسمّعها أي طالب بدقة ٨٥٪ فأكثر (في الواجب أو التدريب أو التلقين أو التحدي) تُملأ في شريط صفه. عند الاكتمال: احتفال وإشعار للصف، و+${ar(KH_PTS)} نقاط لكل من أسهم، وشهادة جماعية.</p>
+      ${L.length ? `<ul class="kh-list">${L.map((k) => { const total = khTotal(k), done = khDone(k), cs = contributors(k); return `<li><div><b>${esc(khLabel(k))}</b><span class="small muted">${esc(className(k.classId))} · ${k.completedAt ? '🎉 اكتملت' : khActive(k) ? esc(daysLeft(k)) || 'جارية' : 'انتهت مدتها'}، والمساهمون ${ar(cs.length)}</span>
+        <div class="kh-meter sm"><i style="width:${Math.max(1, (done / total) * 100)}%"></i><span>${ar(done)} من ${ar(total)}</span></div></div>
+        <div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm" type="button" data-khv="${esc(k.id)}">التفاصيل</button>${k.completedAt ? `<button class="btn sm gold" type="button" data-khc="${esc(k.id)}">🏅 الشهادة</button>` : ''}<button class="btn sm danger" type="button" data-khd="${esc(k.id)}">حذف</button></div></li>`; }).join('')}</ul>` : ''}`;
+    $('#khNew', host).onclick = () => newKhatma(host);
+    $$('[data-khv]', host).forEach((b) => (b.onclick = () => openModal(`<div class="stack">${khDetailHtml(L.find((k) => k.id === b.dataset.khv))}<div class="row"><button class="btn primary" type="button" data-close>حسناً</button></div></div>`)));
+    $$('[data-khc]', host).forEach((b) => (b.onclick = () => { const k = L.find((x) => x.id === b.dataset.khc); groupCertificate(k, { className: k.classId === 'all' ? '' : className(k.classId), teacher: s.name || '' }); }));
+    $$('[data-khd]', host).forEach((b) => (b.onclick = async () => {
+      const k = L.find((x) => x.id === b.dataset.khd);
+      if (!(await confirmBox(`حذف ختمة «${khLabel(k)}»؟${k.completedAt ? ' تُحذف نقاطها من لوحة الشرف.' : ''}`))) return;
+      try { await store.deleteKhatma(k.id); D.khatmas = D.khatmas.filter((x) => x.id !== k.id); schedulePublish(); drawKhAdmin(host); toast('حُذفت الختمة.'); } catch (e) { toast('تعذر الحذف: ' + (e.code || e.message)); }
+    }));
+  }
+  function newKhatma(host) {
+    openModal(`<form class="stack" id="khF"><h2>📿 ختمة جديدة</h2>
+      <label class="field">لمن؟<select id="khCls"><option value="all">المرحلة كلها (ختمة مشتركة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+      <label class="field">المقطع<select id="khType"><option value="amma">جزء عمّ (٥٦٤ آية)</option><option value="tabarak">جزء تبارك</option><option value="qadsami">جزء قد سمع</option><option value="surah">سورة كاملة</option><option value="range">آيات من سورة</option><option value="multi">من سورة إلى سورة</option></select></label>
+      <div id="khSurah" hidden><label class="field">السورة<select id="khS1">${surahOptions(67)}</select></label></div>
+      <div id="khRange" hidden class="card">${rangePicker('kr', { surah: 2, from: 1, to: 20 })}</div>
+      <div id="khMulti" hidden class="row"><label class="field" style="flex:1">من سورة<select id="khM1">${surahOptions(78)}</select></label><label class="field" style="flex:1">إلى سورة<select id="khM2">${surahOptions(114)}</select></label></div>
+      <label class="field">العنوان (اختياري)<input id="khT" maxlength="60" placeholder="مثال: ختمة جزء عمّ في رمضان"></label>
+      <label class="field">آخر موعد (اختياري)<input type="date" id="khEnd" min="${riyadhDay()}"></label>
+      <div id="khInfo" class="small muted"></div>
+      <div class="row"><button class="btn primary" type="submit">أنشئ الختمة</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      let rng = { surah: 2, from: 1, to: 20 };
+      bindRangePicker(m, 'kr', (r) => { rng = r; info(); });
+      const segs = () => {
+        const ty = $('#khType', m).value;
+        if (PRESETS[ty]) return PRESETS[ty].segs;
+        if (ty === 'surah') return [[+$('#khS1', m).value, 1, null]];
+        if (ty === 'range') return [[rng.surah, rng.from, rng.to]];
+        const a = +$('#khM1', m).value, b = +$('#khM2', m).value;
+        return Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => [Math.min(a, b) + i, 1, null]);
+      };
+      const info = () => { const n = khTotal({ segs: segs() }); $('#khInfo', m).textContent = `عدد الآيات: ${ar(n)}`; };
+      const sync = () => { const ty = $('#khType', m).value; $('#khSurah', m).hidden = ty !== 'surah'; $('#khRange', m).hidden = ty !== 'range'; $('#khMulti', m).hidden = ty !== 'multi'; info(); };
+      $('#khType', m).onchange = sync; ['#khS1', '#khM1', '#khM2'].forEach((q) => ($(q, m).onchange = info)); sync();
+      $('#khF', m).onsubmit = async (e) => {
+        e.preventDefault(); const btn = e.submitter; btn.disabled = true;
+        const ty = $('#khType', m).value, sg = segs();
+        const k = { classId: $('#khCls', m).value, preset: PRESETS[ty] ? ty : null, segs: sg.map(([a, f, t]) => [a, f, t]), title: $('#khT', m).value.trim(), endAt: $('#khEnd', m).value || null, startAt: new Date().toISOString(), createdAt: new Date().toISOString(), done: {}, completedAt: null };
+        k.total = khTotal(k); k.label = khLabel(k);
+        if (k.total > 2000) { btn.disabled = false; return toast('المقطع كبير جداً للختمة الواحدة (حتى ٢٠٠٠ آية).'); }
+        try { const id = await store.saveKhatma(k); D.khatmas = [...(D.khatmas || []), { ...k, id }]; closeModal(); drawKhAdmin(host); toast(`أُنشئت ختمة «${k.label}» (${ar(k.total)} آية). تظهر للطلاب أعلى صفحتهم.`); }
+        catch (x) { toast('تعذر الإنشاء: ' + (x.code || x.message)); btn.disabled = false; }
+      };
+    });
   }
 
   /* --- وضع عرض الفصل --- */
@@ -3048,6 +3152,8 @@ function viewTeacher(app) {
       top: isStage ? m.stage : (m.byClass?.[scope] || []),
       classes: m.classes || [], focusClass: isStage ? null : scope,
       heroes: { streak: best(streaks), subs: best(subs), wins: best(wins) },
+      khatma: (() => { const k = (D.khatmas || []).filter((x) => (khActive(x) || (x.completedAt && Date.now() - new Date(x.completedAt) < 7 * 864e5)) && (x.classId === 'all' || x.classId === scope)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+        return k && { label: khLabel(k), done: khDone(k), total: khTotal(k), left: daysLeft(k), complete: !!k.completedAt, top: contributors(k).slice(0, 5) }; })(),
     });
   }
 
