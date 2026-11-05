@@ -531,9 +531,9 @@ tr.grp.open .grp-chev { transform: none; }
 .hero-pill { margin-bottom: 4px; }
 html.splashing .hero-logo { opacity: 0; }
 html.splashing .hero-solo > div > :not(.hero-brand), html.splashing .hero-name, html.splashing .hero-orn, html.splashing .feature-list { opacity: 0; }
-html.hero-arrive .hero-name { animation: spUp .55s ease-out .4s both; }
-html.hero-arrive .hero-orn { animation: spUp .5s ease-out .55s both; }
-html.hero-arrive .hero-tag { animation: spUp .55s ease-out .65s both; }
-html.hero-arrive .hero-pill, html.hero-arrive .hero-solo .lead { animation: spUp .55s ease-out .75s both; }
-html.hero-arrive .hero-solo .grid2 { animation: spUp .6s ease-out .85s both; }
-html.hero-arrive .feature-list { animation: spUp .6s ease-out 1s both; }
+html.hero-arrive .hero-name { animation: spUp .35s ease-out .2s both; }
+html.hero-arrive .hero-orn { animation: spUp .35s ease-out .25s both; }
+html.hero-arrive .hero-tag { animation: spUp .35s ease-out .3s both; }
+html.hero-arrive .hero-pill, html.hero-arrive .hero-solo .lead { animation: spUp .35s ease-out .35s both; }
+html.hero-arrive .hero-solo .grid2 { animation: spUp .35s ease-out .4s both; }
+html.hero-arrive .feature-list { animation: spUp .35s ease-out .45s both; }
