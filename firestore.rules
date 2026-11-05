@@ -61,6 +61,11 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // المواسم والمسابقات: يديرها المعلم، ويقرأ الطلاب ترتيبها
+    match /seasons/{sid} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
     // ختمات الصفوف: ينشئها المعلم، والطالب يضيف آيات أتقنها فقط (لا يحذف ولا يغيّر غيرها)
     match /khatmas/{kid} {
       allow read: if signedIn();

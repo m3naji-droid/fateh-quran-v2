@@ -786,3 +786,21 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 .cr-kh-n { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .cr-kh-n b { font: 800 clamp(44px, 6vw, 90px) var(--f-display); color: #d9b45a; }
 .cr-kh-n span { font-size: clamp(16px, 1.6vw, 26px); color: #cfe0d8; }
+
+/* ================= المواسم والمسابقات ================= */
+.season-bar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px; border-radius: 16px; color: #fff; background: linear-gradient(120deg, var(--sc), color-mix(in srgb, var(--sc) 60%, #000)); box-shadow: 0 8px 24px color-mix(in srgb, var(--sc) 35%, transparent); position: relative; overflow: hidden; }
+.season-bar::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .12; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cg fill='none' stroke='%23fff' stroke-width='1'%3E%3Crect x='10' y='10' width='20' height='20'/%3E%3Crect x='10' y='10' width='20' height='20' transform='rotate(45 20 20)'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 60px 60px; }
+.sb-ico { font-size: 34px; flex: 0 0 auto; }
+.sb-tx { flex: 1; display: flex; flex-direction: column; gap: 2px; position: relative; z-index: 1; }
+.sb-tx b { font-size: 17px; }
+.sb-tx span, .sb-tx small { font-size: 13px; opacity: .92; }
+.sb-tx em { font-style: normal; background: rgba(255,255,255,.22); border-radius: 99px; padding: 0 8px; font-weight: 700; }
+.season-bar .btn { position: relative; z-index: 1; background: rgba(255,255,255,.16); color: #fff; border-color: rgba(255,255,255,.45); }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.badge-pill { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 99px; color: var(--bc); background: color-mix(in srgb, var(--bc) 12%, var(--card)); border: 1px solid color-mix(in srgb, var(--bc) 45%, transparent); }
+.ss-tpl { display: flex; flex-wrap: wrap; gap: 8px; }
+.ss-tpl input { position: absolute; opacity: 0; pointer-events: none; }
+.ss-tpl span { display: inline-block; padding: 7px 14px; border-radius: 12px; border: 1.5px solid var(--line); cursor: pointer; font-weight: 600; font-size: 14px; }
+.ss-tpl input:checked + span { border-color: var(--sc); background: color-mix(in srgb, var(--sc) 14%, var(--card)); color: var(--sc); }
+.kh-list li[style*="--sc"] { border-inline-start: 4px solid var(--sc); }
+.mr-list li.me { background: var(--green-2); border-radius: 8px; font-weight: 700; }

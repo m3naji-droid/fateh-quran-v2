@@ -147,6 +147,11 @@ const local = {
   // طلبات إعادة التسميع
   async addRetake(pn, r) { const all = LS.get('retakes', []); const id = uid(); all.push({ id, pn, createdAt: now(), ...r }); LS.set('retakes', all); return id; },
   async listRetakes(pn) { return LS.get('retakes', []).filter((r) => r.pn === pn); },
+  // المواسم والمسابقات
+  async listSeasons() { return LS.get('seasons', []); },
+  async saveSeason(x) { const all = LS.get('seasons', []); const id = x.id || uid(); const i = all.findIndex((s) => s.id === id); const d = { ...(i >= 0 ? all[i] : {}), ...x, id }; if (i >= 0) all[i] = d; else all.push(d); LS.set('seasons', all); return id; },
+  async deleteSeason(id) { LS.set('seasons', LS.get('seasons', []).filter((s) => s.id !== id)); },
+  async addBadges(map) { const r = LS.get('roster', {}); Object.entries(map).forEach(([pn, b]) => { if (r[pn]) r[pn].badges = [...(r[pn].badges || []).filter((x) => x.id !== b.id), b]; }); LS.set('roster', r); },
   // ختمات الصفوف
   async listKhatmas() { return LS.get('khatmas', []); },
   async saveKhatma(k) { const all = LS.get('khatmas', []); const id = k.id || uid(); const i = all.findIndex((x) => x.id === id); const d = { ...(i >= 0 ? all[i] : {}), ...k, id }; if (i >= 0) all[i] = d; else all.push(d); LS.set('khatmas', all); return id; },
@@ -216,7 +221,7 @@ const local = {
   async setPushMute() {},
   async setBoard(b) { LS.set('board', b); },
   async saveRanks(ranks) { const r = LS.get('roster', {}); Object.entries(ranks).forEach(([id, v]) => { if (r[id]) r[id].rank = v; }); LS.set('roster', r); },
-  async getMyRank(me) { return LS.get('roster', {})[me.id]?.rank || null; },
+  async getMyRank(me) { const r = LS.get('roster', {})[me.id]; return r ? { ...(r.rank || {}), _badges: r.badges || [] } : null; },
 };
 
 /** معرّف ثابت لمستند الجهاز من رمز الإشعار (الرمز طويل وفيه رموز لا تصلح معرّفاً) */
@@ -440,6 +445,20 @@ async function makeCloud() {
     async updateOwnAi(pn, id, ai) { await updateDoc(doc(db, 'roster', pn, 'subs', id), { ai }); },
     async addRetake(pn, r) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'retakes', id), { ...r, pn, createdAt: now() }); return id; },
     async listRetakes(pn) { await ensureAnon(); return list(`roster/${pn}/retakes`); },
+    async listSeasons() { await ensureAnon(); return list('seasons'); },
+    async saveSeason(x) { const id = x.id || uid(); const { id: _, ...rest } = x; await setDoc(doc(db, 'seasons', id), rest, { merge: true }); return id; },
+    async deleteSeason(id) { await deleteDoc(doc(db, 'seasons', id)); },
+    async addBadges(map) {
+      const L = Object.entries(map);
+      for (let i = 0; i < L.length; i += 400) {
+        const b = writeBatch(db);
+        for (const [pn, badge] of L.slice(i, i + 400)) {
+          const cur = (await getDoc(doc(db, 'roster', pn)).catch(() => null))?.data()?.badges || [];
+          b.set(doc(db, 'roster', pn), { badges: [...cur.filter((x) => x.id !== badge.id), badge] }, { merge: true });
+        }
+        await b.commit();
+      }
+    },
     async listKhatmas() { await ensureAnon(); return list('khatmas'); },
     async saveKhatma(k) { const id = k.id || uid(); const { id: _, ...rest } = k; await setDoc(doc(db, 'khatmas', id), rest, { merge: true }); return id; },
     async deleteKhatma(id) { await deleteDoc(doc(db, 'khatmas', id)); },
@@ -567,7 +586,7 @@ async function makeCloud() {
       }
       changed.forEach((s) => (s.rank = ranks[s.id]));
     },
-    async getMyRank(me) { const d = await getDoc(doc(db, 'roster', me.id)); return d.exists() ? d.data().rank || null : null; },
+    async getMyRank(me) { const d = await getDoc(doc(db, 'roster', me.id)); return d.exists() ? { ...(d.data().rank || {}), _badges: d.data().badges || [] } : null; },
     // ترحيل بيانات النسخة القديمة (مقرأة الفاتح) إلى البنية الجديدة
     async migrateLegacy() {
       const oldStudents = await list('students').catch(() => []);

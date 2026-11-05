@@ -54,7 +54,7 @@ export async function renderCertificate(c) {
   for (let i = 0; i < 9; i++) star(ctx, W / 2 + (i - 4) * 46, 150, i === 4 ? 16 : 8, i === 4 ? C.gold : C.gold2);
 
   ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = C.green; ctx.font = `700 34px ${FONT}`; ctx.fillText('مقرأة الفاتح', W / 2, 215);
+  ctx.fillStyle = c.color || C.green; ctx.font = `700 34px ${FONT}`; ctx.fillText(c.season ? `${c.season} · مقرأة الفاتح` : 'مقرأة الفاتح', W / 2, 215);
   ctx.fillStyle = C.gold; ctx.font = `800 96px ${FONT}`; ctx.fillText('شهادة تقدير', W / 2, 330);
   ctx.fillStyle = C.ink; ctx.font = `400 34px ${FONT}`;
   ctx.fillText('يسرّ مقرأة الفاتح أن تقدّم هذه الشهادة إلى الطالب', W / 2, 410);
@@ -70,7 +70,7 @@ export async function renderCertificate(c) {
   star(ctx, W / 2 - ctx.measureText(c.title).width / 2 - 40, 700, 12, C.gold2);
   star(ctx, W / 2 + ctx.measureText(c.title).width / 2 + 40, 700, 12, C.gold2);
   ctx.fillStyle = C.ink; ctx.font = `400 34px ${FONT}`;
-  ctx.fillText(`${c.line} في شهر ${c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`, W / 2, 790);
+  ctx.fillText(`${c.line} ${c.period || 'في شهر ' + c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`, W / 2, 790);
   // الحديث
   ctx.fillStyle = C.green; ctx.font = `400 44px ${QFONT}`;
   ctx.fillText('﴿ وَرَتِّلِ ٱلْقُرْءَانَ تَرْتِيلًا ﴾', W / 2, 880);

@@ -9,13 +9,14 @@ import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLe
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
+import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
-import { computeBoard, boardHtml, rankBadge, computeMonth, monthTitle, subScore } from './leaderboard.js';
+import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
@@ -936,23 +937,33 @@ function viewStudent(app) {
     const r = n.r || {}, w = n.win, cp = n.classPos;
     const tile = (label, val, sub = '') => `<div><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
     openModal(`<div class="stack month-modal">
-      <h2>نتائج شهرك · ${esc(n.label || '')}</h2>
+      <h2>${n.type === 'season' ? `${esc(n.icon || '🏆')} نتائجك في ${esc(n.label || '')}` : `نتائج شهرك · ${esc(n.label || '')}`}</h2>
       ${w ? `<div class="month-win"><div class="mw-badge">${rankBadge(w.rank)}</div><div><b>${esc(w.key === 'stage1' ? 'شيخ المرحلة' : w.key === 'cls1' ? 'قارئ الصف' : w.title)}</b><span>${esc(w.line)}. ما شاء الله تبارك الله!</span></div></div>` : `<p style="margin:0">${esc(n.body || '')}</p>`}
       <div class="usage-grid">
         ${tile('ترتيبك في الصف', r.cls ? `${ar(r.cls)} من ${ar(r.clsOf)}` : '—')}
         ${tile('على المرحلة', r.stage ? `${ar(r.stage)} من ${ar(r.stageOf)}` : '—')}
-        ${tile('نقاطك', fmt10(r.points || 0), 'مجموع أفضل درجاتك في الواجبات')}
-        ${tile('أطول سلسلة', `🔥 ${ar(n.streak || 0)}`, ((k) => (k === 0 ? 'لا أيام بعد' : k === 1 ? 'يوم واحد' : k === 2 ? 'يومان متتاليان' : k <= 10 ? 'أيام متتالية' : 'يوماً متتالياً'))(n.streak || 0))}
+        ${tile('نقاطك', fmt10(r.points || 0), n.type === 'season' ? 'نقاط الموسم' : 'مجموع أفضل درجاتك في الواجبات')}
+        ${n.type === 'season' ? '' : tile('أطول سلسلة', `🔥 ${ar(n.streak || 0)}`, ((k) => (k === 0 ? 'لا أيام بعد' : k === 1 ? 'يوم واحد' : k === 2 ? 'يومان متتاليان' : k <= 10 ? 'أيام متتالية' : 'يوماً متتالياً'))(n.streak || 0))}
         ${cp && cp.pos ? tile('صفك في التحدي', `${ar(cp.pos)} من ${ar(cp.of)}`, esc(n.className || '')) : ''}
       </div>
       ${w ? `<div class="row"><button class="btn gold" type="button" id="cfPng">🏅 حمّل شهادتك (صورة)</button><button class="btn" type="button" id="cfPdf">PDF</button></div>` : ''}
       <div class="row"><button class="btn primary" type="button" data-close>${w ? 'الحمد لله' : 'سأجتهد بإذن الله'}</button></div></div>`, (m) => {
       if (!w) return;
-      const cert = { ym: n.ym, name: me.name, title: w.title, line: w.line, rank: w.rank, month: n.label, points: r.points, className: n.className, teacher: n.teacher, date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+      const cert = { ym: n.ym, name: me.name, title: w.title, line: w.line, rank: w.rank, month: n.label, points: r.points, className: n.className, teacher: n.teacher, ...(n.type === 'season' ? { season: n.label, period: `في ${n.label}`, color: n.color } : {}), date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
       $('#cfPng', m).onclick = (e) => { e.currentTarget.disabled = true; downloadCertificatePNG(cert).catch((x) => toast(x.message)).finally(() => (e.currentTarget.disabled = false)); };
       $('#cfPdf', m).onclick = (e) => { const b = e.currentTarget; b.disabled = true; downloadCertificatesPDF([cert], `certificate-${n.ym}.pdf`).catch((x) => toast(x.message)).finally(() => (b.disabled = false)); };
     });
     if (w) setTimeout(() => confetti(), 150);
+  }
+  /* --- الموسم --- */
+  let mySeasons = [];
+  function paintSeason() {
+    const host = $('#seasonBar', app); if (!host) return;
+    const s = activeSeason(mySeasons) || mySeasons.filter((x) => seasonStatus(x) === 'soon').sort((a, b) => a.from.localeCompare(b.from))[0];
+    if (!s || (tab !== 'tasks' && tab !== 'honor')) { host.innerHTML = ''; return; }
+    const r = me.rankInfo?.season?.id === s.id ? me.rankInfo.season : null;
+    host.innerHTML = seasonBarHtml(s, r);
+    $('[data-season]', host).onclick = () => openModal(`<div class="stack">${seasonBoardHtml(s, me.classId, me.id)}<div class="row"><button class="btn primary" type="button" data-close>حسناً</button></div></div>`);
   }
   /* --- ختمة الصف --- */
   async function loadKhatmas() {
@@ -1210,7 +1221,7 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
         <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚|📿)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
@@ -1223,7 +1234,7 @@ function viewStudent(app) {
         if (n?.type === 'cheer') { openModal(`<div class="stack"><h2>💚 رسالة من معلمك</h2><p style="margin:0;line-height:2;white-space:pre-wrap">${esc(n.body || '')}</p><div class="row"><button class="btn primary" type="button" data-close>جزاك الله خيراً</button></div></div>`); return; }
         if (n?.type === 'challenge') { loadChallenges().then(() => openChallenge(n.chId)); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
-        if (n?.type === 'month') { openMonth(n); return; }
+        if (n?.type === 'month' || n?.type === 'season') { openMonth(n); return; }
         if (n?.type === 'board') { tab = 'honor'; draw(); return; }
         if (n?.type === 'streak') { tab = 'practice'; draw(); return; }
         if (n?.type === 'retake') { store.listRetakes(me.id).then((L) => { data.retakes = L; startRetake(n.retakeId); }).catch(() => startRetake(n.retakeId)); return; }
@@ -1248,6 +1259,7 @@ function viewStudent(app) {
     }
     draw();
     pruneImageCache();
+    store.listSeasons().then((L) => { mySeasons = L; paintSeason(); }).catch(() => {});
     loadKhatmas().then(() => { if (openKhId) { const id = openKhId; openKhId = null; openKhatma(id); } });
     loadChallenges().then(() => { if (openChId) { const id = openChId; openChId = null; openChallenge(id); } });
     store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
@@ -1318,7 +1330,8 @@ function viewStudent(app) {
     app.innerHTML = `
       <div class="page-head">
         <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1>
-          ${me.rankInfo?.month?.stage === 1 ? `<span class="title-pill">${rankBadge(1)} شيخ المرحلة هذا الشهر</span>` : me.rankInfo?.month?.cls === 1 ? `<span class="title-pill">${rankBadge(1)} قارئ الصف هذا الشهر</span>` : ''}</div>
+          ${me.rankInfo?.month?.stage === 1 ? `<span class="title-pill">${rankBadge(1)} شيخ المرحلة هذا الشهر</span>` : me.rankInfo?.month?.cls === 1 ? `<span class="title-pill">${rankBadge(1)} قارئ الصف هذا الشهر</span>` : ''}
+          ${(me.rankInfo?._badges || []).length ? `<div class="badges">${me.rankInfo._badges.slice(-6).map((b) => `<span class="badge-pill" style="--bc:${esc(b.color || '#a77a1c')}" title="${esc(b.title || '')}">${esc(b.icon || '🏅')} ${esc(b.label)}</span>`).join('')}</div>` : ''}</div>
         <div class="row"><button class="btn bell-btn" id="stBell" type="button" aria-label="التنبيهات"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg><span class="bell-n"></span></button><button class="btn gear-btn${tab === 'settings' ? ' on' : ''}" id="stSet" type="button" aria-pressed="${tab === 'settings'}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg> الإعدادات</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div class="kpis">
@@ -1327,7 +1340,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>
+      <div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -1337,7 +1350,7 @@ function viewStudent(app) {
     paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell(); paintAnnBar(); paintChBar(); paintKhBar();
+    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
@@ -1751,6 +1764,7 @@ function viewTeacher(app) {
     refreshPush(tOwner);
     loadFb();
     store.listAllChallenges().then((L) => { D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
+    store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
@@ -3039,14 +3053,28 @@ function viewTeacher(app) {
   /* --- لوحة الشرف: تُحسب هنا وتُنشر للطلاب --- */
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
-  const boardSubs = () => D.subs.concat(D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : []);
+  const boardSubs = () => {
+    const base = D.subs.concat(D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : []);
+    return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
+  };
   function schedulePublish() {
     clearTimeout(boardTimer);
     boardTimer = setTimeout(publishBoard, 2500);
   }
   async function publishBoard() {
     if (!D.students.length) return;
-    const { board, ranks } = computeBoard(boardSubs(), D.students, D.classes);
+    const all = boardSubs();
+    const { board, ranks } = computeBoard(all, D.students, D.classes);
+    // الموسم الجاري: ترتيب كل طالب، وأوائل المرحلة وكل صف للطلاب
+    const ss = activeSeason(D.seasons || []);
+    if (ss) {
+      const [f, to] = seasonRange(ss), res = computeRange(all, D.students, D.classes, f, to);
+      Object.entries(res.ranks).forEach(([pn, r]) => { if (ranks[pn]) ranks[pn].season = { id: ss.id, ...r }; });
+      const cn = (id) => D.classes.find((c) => c.id === id)?.name || '';
+      const live = { stage: res.stage.map((x) => ({ ...x })), byClass: res.byClass };
+      const lj = JSON.stringify(live);
+      if (lj !== publishBoard.liveJson) { publishBoard.liveJson = lj; store.saveSeason({ id: ss.id, live: { ...live, at: new Date().toISOString() } }).catch(() => {}); }
+    }
     lastBoard = board;
     const json = JSON.stringify(board);
     if (json === lastBoardJson) return;
@@ -3067,9 +3095,11 @@ function viewTeacher(app) {
       </div>
       <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="ssAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
       <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="hbBoard"></div>`;
     drawKhAdmin($('#khAdm', body));
+    drawSeasonAdmin($('#ssAdm', body));
     $('#crGo', body).onclick = () => startClassroom($('#crScope', body).value);
     drawChAdmin($('#chAdm', body));
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
@@ -3080,6 +3110,82 @@ function viewTeacher(app) {
       $('#mGo', body).onclick = () => openMonthReview(pick.value);
     }
     schedulePublish();
+  }
+
+  /* --- المواسم والمسابقات (للمعلم) --- */
+  function drawSeasonAdmin(host) {
+    const L = (D.seasons || []).slice().sort((a, b) => (b.from || '').localeCompare(a.from || ''));
+    const st = { soon: '<span class="pill mute">قادم</span>', live: '<span class="pill ok">جارٍ الآن</span>', ended: '<span class="pill warn">انتهى، بانتظار إعلان النتائج</span>', announced: '<span class="pill">أُعلنت النتائج</span>' };
+    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🏆 المواسم والمسابقات</h3><button class="btn sm primary" type="button" id="ssNew">+ موسم جديد</button></div>
+      <p class="small muted" style="margin:0">مسابقة لفترة محددة تُحتسب فيها كل النقاط (الواجبات والتحديات والختمات)، مع مضاعف اختياري. للمرحلة كلها مع ترتيب لكل صف. في نهايتها: إعلان النتائج بإشعار، وشهادة للخمسة الأوائل، وشارة دائمة باسمهم.</p>
+      ${L.length ? `<ul class="kh-list">${L.map((x) => `<li style="--sc:${esc(x.color)}"><div><b>${esc(x.icon)} ${esc(x.name)}</b><span class="small muted">${fmtDay(x.from)} – ${fmtDay(x.to)}${(x.mult || 1) > 1 ? ` · ×${ar(x.mult)}` : ''} · ${st[seasonStatus(x)]}${seasonStatus(x) === 'live' || seasonStatus(x) === 'soon' ? ` <span>${esc(daysLeftText(x))}</span>` : ''}</span></div>
+        <div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm${seasonStatus(x) === 'ended' ? ' gold' : ''}" type="button" data-ssr="${esc(x.id)}">${seasonStatus(x) === 'ended' ? '📣 النتائج' : 'الترتيب'}</button><button class="btn sm danger" type="button" data-ssd="${esc(x.id)}">حذف</button></div></li>`).join('')}</ul>` : ''}`;
+    $('#ssNew', host).onclick = () => newSeason(host);
+    $$('[data-ssr]', host).forEach((b) => (b.onclick = () => seasonReview(L.find((x) => x.id === b.dataset.ssr))));
+    $$('[data-ssd]', host).forEach((b) => (b.onclick = async () => {
+      const x = L.find((y) => y.id === b.dataset.ssd);
+      if (!(await confirmBox(`حذف «${x.name}»؟ تبقى الشارات التي مُنحت.`))) return;
+      try { await store.deleteSeason(x.id); D.seasons = D.seasons.filter((y) => y.id !== x.id); schedulePublish(); drawSeasonAdmin(host); } catch (e) { toast('تعذر الحذف: ' + (e.code || e.message)); }
+    }));
+  }
+  function newSeason(host) {
+    const t0 = todayStr();
+    openModal(`<form class="stack" id="ssF"><h2>🏆 موسم جديد</h2>
+      <div class="ss-tpl" role="radiogroup">${Object.entries(TEMPLATES).map(([k, v], i) => `<label style="--sc:${v.color}"><input type="radio" name="ssT" value="${k}" ${i === 0 ? 'checked' : ''}><span>${v.icon} ${k === 'custom' ? 'مخصّص' : v.name}</span></label>`).join('')}</div>
+      <div class="row"><label class="field" style="flex:3 1 200px">اسم الموسم<input id="ssN" maxlength="40" required></label><label class="field" style="flex:1 1 80px">الرمز<input id="ssI" maxlength="4"></label><label class="field" style="flex:1 1 80px">اللون<input type="color" id="ssC"></label></div>
+      <div class="row"><label class="field" style="flex:1">من<input type="date" id="ssFrom" value="${t0}" required></label><label class="field" style="flex:1">إلى<input type="date" id="ssTo" value="${addDays(t0, 29)}" required></label></div>
+      <label class="field">مضاعف النقاط خلال الموسم<select id="ssM"><option value="1">بدون (×١)</option><option value="2" selected>مضاعفة (×٢)</option><option value="3">ثلاثة أضعاف (×٣)</option></select></label>
+      <p class="small muted" style="margin:0">المضاعف يرفع نقاط لوحة الشرف لكل ما يُنجز خلال الموسم (واجبات وتحديات وختمات)، فيشجع على المشاركة.</p>
+      <div class="row"><button class="btn primary" type="submit">أنشئ الموسم</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      const fill = () => { const v = TEMPLATES[$('input[name=ssT]:checked', m).value]; $('#ssN', m).value = v.name ? `${v.name} ${ar(new Intl.DateTimeFormat('ar-SA-u-ca-islamic', { year: 'numeric' }).format(new Date()).replace(/[^\d٠-٩]/g, ''))}` : ''; $('#ssI', m).value = v.icon; $('#ssC', m).value = v.color; };
+      $$('input[name=ssT]', m).forEach((r) => (r.onchange = fill)); fill();
+      $('#ssF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const x = { name: $('#ssN', m).value.trim(), icon: $('#ssI', m).value.trim() || '🏆', color: $('#ssC', m).value, template: $('input[name=ssT]:checked', m).value, from: $('#ssFrom', m).value, to: $('#ssTo', m).value, mult: +$('#ssM', m).value, createdAt: new Date().toISOString(), announcedAt: null };
+        if (x.to < x.from) return toast('تاريخ النهاية قبل البداية.');
+        if ((D.seasons || []).some((y) => !y.announcedAt && !(x.to < y.from || x.from > y.to))) return toast('يتداخل هذا الموسم مع موسم آخر. اختر فترة مختلفة.');
+        try { const id = await store.saveSeason(x); D.seasons = [...(D.seasons || []), { ...x, id }]; closeModal(); schedulePublish(); drawSeasonAdmin(host); toast(`أُنشئ «${x.name}». يظهر للطلاب شريط الموسم أعلى صفحتهم.`); }
+        catch (er) { toast('تعذر الإنشاء: ' + (er.code || er.message)); }
+      };
+    });
+  }
+  function seasonReview(x) {
+    const [f, to] = seasonRange(x), res = computeRange(boardSubs(), D.students, D.classes, f, to);
+    const ended = seasonStatus(x) === 'ended', done = !!x.announcedAt;
+    const certs = D.students.map((st) => { const w = monthTitle(res.ranks[st.id]); return w && { ym: 'season-' + x.id, name: st.name, title: w.title, line: w.line, rank: w.rank, month: x.name, season: x.name, period: `في ${x.name}`, color: x.color, points: res.ranks[st.id].points, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) }; }).filter(Boolean);
+    const row = (y, i) => `<li><span class="mr-n">${ar(i + 1)}</span><span>${esc(y.name)}</span><b class="num">${fmt10(y.points)}</b></li>`;
+    openModal(`<div class="stack month-review"><h2>${esc(x.icon)} ${esc(x.name)}</h2>
+      <p class="small muted" style="margin:0">${fmtDay(x.from)} – ${fmtDay(x.to)}${(x.mult || 1) > 1 ? ` · النقاط مضاعفة ×${ar(x.mult)}` : ''}</p>
+      ${!ended && !done ? '<div class="notice">الموسم لم ينتهِ بعد. هذا الترتيب الحالي، وتُعلن النتائج بعد انتهائه.</div>' : ''}
+      ${done ? `<div class="pill ok" style="align-self:flex-start">أُعلنت النتائج ${esc(fmtDate(x.announcedAt))}</div>` : ''}
+      <div class="mr-grid"><div class="card"><h3>👑 على المرحلة</h3><ol class="mr-list">${res.stage.map(row).join('') || '<li class="muted">لا نقاط</li>'}</ol></div>
+        ${D.classes.filter((c) => (res.byClass[c.id] || []).length).map((c) => `<div class="card"><h3>🏆 ${esc(c.name)}</h3><ol class="mr-list">${res.byClass[c.id].map(row).join('')}</ol></div>`).join('')}</div>
+      <p class="small muted" style="margin:0">عند الإعلان: يصل لكل طالب إشعار بنتيجته، ويحصل الفائزون (${ar(certs.length)}: الخمسة الأوائل في المرحلة وفي كل صف) على شهادة الموسم وشارة دائمة «${esc(x.icon)} ${esc(x.name)}» بجانب أسمائهم.</p>
+      <div class="row"><button class="btn primary" type="button" id="ssGo" ${ended && !done ? '' : 'disabled'}>📣 أعلن النتائج</button><button class="btn gold" type="button" id="ssCerts" ${certs.length ? '' : 'disabled'}>شهادات الفائزين (PDF)</button></div></div>`, (m) => {
+      $('#ssCerts', m).onclick = async (e) => { const b = e.currentTarget; b.disabled = true; try { await downloadCertificatesPDF(certs, `season-certificates.pdf`, (i, n) => (b.textContent = `جارٍ التجهيز ${ar(i)} من ${ar(n)}…`)); } catch (er) { toast(er.message); } b.disabled = false; b.textContent = 'شهادات الفائزين (PDF)'; };
+      $('#ssGo', m).onclick = () => announceSeason(x, res);
+    });
+  }
+  async function announceSeason(x, res) {
+    if (!(await confirmBox(`إعلان نتائج «${x.name}» لكل الطلاب (${ar(D.students.length)})؟`, 'أعلن النتائج'))) return;
+    const items = [], badges = {};
+    const { ok, fail } = await runBulk('إعلان نتائج الموسم', D.students, async (st) => {
+      const r = res.ranks[st.id] || { points: 0 }, w = monthTitle(r);
+      const title = w ? `${x.icon} مبارك! ${w.key === 'stage1' ? 'الأول على المرحلة' : w.key === 'cls1' ? 'الأول في صفك' : w.title} في ${x.name}` : `${x.icon} نتائج ${x.name}`;
+      const body = w ? `${w.line} بـ${fmt10(r.points)} نقطة. شهادة الموسم وشارتك الدائمة تنتظرانك في المقرأة!` : r.points > 0 ? `ترتيبك ${ar(r.cls)} في صفك بـ${fmt10(r.points)} نقطة. شكراً لمشاركتك، والموسم القادم فرصتك!` : `انتهى ${x.name}. ننتظر مشاركتك في الموسم القادم بإذن الله.`;
+      const id = 'season-' + x.id;
+      await store.addStudentNotifId(st.id, id, { type: 'season', ym: id, label: x.name, icon: x.icon, color: x.color, title, body, link: './#/student', tag: id, r: { points: r.points, cls: r.cls || null, clsOf: r.clsOf || null, stage: r.stage || null, stageOf: r.stageOf || null }, win: w, teacher: s.name || '', className: className(st.classId) });
+      if (w) badges[st.id] = { id: 'season-' + x.id, icon: x.icon, color: x.color, label: x.name, title: w.line, at: new Date().toISOString() };
+      items.push({ notif: id, student: st.id });
+    });
+    try { await store.addBadges(badges); } catch (e) { console.warn('badges', e); }
+    await store.saveSeason({ id: x.id, announcedAt: new Date().toISOString(), results: { stage: res.stage, byClass: res.byClass } });
+    x.announcedAt = new Date().toISOString();
+    let pushed = null;
+    try { for (let i = 0; i < items.length; i += 200) { const r = await sendPushBatch(items.slice(i, i + 200)); if (r) pushed = { sent: (pushed?.sent || 0) + r.sent, deferred: (pushed?.deferred || 0) + (r.deferred || 0) }; } } catch (e) { console.warn(e); }
+    closeModal();
+    toast(`أُعلنت نتائج ${x.name} لـ${nWord(ok, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}، ومُنحت ${nWord(Object.keys(badges).length, 'شارة واحدة', 'شارتان', 'شارات', 'شارة')}${pushed && pushed.sent ? `، ووصل إشعار إلى ${ar(pushed.sent)} جهازاً` : ''}${fail ? `، وتعذر ${ar(fail)}` : ''}.`);
+    if (tab === 'honor') drawBody();
   }
 
   /* --- ختمات الصفوف (للمعلم) --- */

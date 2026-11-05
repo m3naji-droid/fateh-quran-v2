@@ -208,6 +208,18 @@ export function computeMonth(subs, students, classes, ym) {
   return { ym, label, ...p, challenge: allClasses.slice(0, TOP), classPos, ranks };
 }
 
+/** نتائج فترة (موسم) بين تاريخين ISO: الأوائل في المرحلة وكل صف، ومرتبة كل طالب */
+export function computeRange(subs, students, classes, fromIso, toIso) {
+  const p = period(students, subs.filter((x) => (x.createdAt || '') >= fromIso && (x.createdAt || '') <= toIso), classes);
+  const list = p._list, ranks = {};
+  list.forEach((s, i) => {
+    const cls = list.filter((x) => x.classId === s.classId);
+    ranks[s.id] = { points: s.points, stage: s.points > 0 ? i + 1 : null, stageOf: list.length, cls: s.points > 0 ? cls.findIndex((x) => x.id === s.id) + 1 : null, clsOf: cls.length };
+  });
+  delete p._list;
+  return { ...p, ranks };
+}
+
 /** لقب الطالب في نتائج الشهر (للفائزين فقط) */
 export function monthTitle(r) {
   if (!r) return null;
