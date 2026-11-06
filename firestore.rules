@@ -151,6 +151,12 @@ service cloud.firestore {
         || (signedIn() && resource.data.get('uid', '') == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pwChanged', 'pwChangedAt']));
 
+      // طلب تسليم واجب بعد انتهاء موعده: ينشئه الطالب، ويقرّره المعلم
+      match /late/{tid} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create: if isStudent(pn) && request.resource.data.pn == pn && request.resource.data.status == 'pending';
+        allow update, delete: if isTeacher();
+      }
       match /subs/{sid} {
         allow read: if isTeacher() || isStudent(pn);
         // محاولة واحدة لكل واجب: معرّف التسليم ثابت (t_رقم الواجب، أو r_رقم طلب الإعادة)،
@@ -217,6 +223,9 @@ service cloud.firestore {
     }
     // استعلام المعلم عن كل التسليمات
     match /{path=**}/subs/{sid} {
+      allow read: if isTeacher();
+    }
+    match /{path=**}/late/{tid} {
       allow read: if isTeacher();
     }
     // بيانات النسخة القديمة: قراءة فقط للمعلم لأجل النقل

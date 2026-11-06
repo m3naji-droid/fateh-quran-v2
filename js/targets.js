@@ -40,3 +40,13 @@ export function buildTarget({ all, classIds, studentIds }) {
   if (classIds.length === 1 && !studentIds.length) return { classId: classIds[0], classIds: [], studentIds: [] };
   return { classId: 'custom', classIds: [...classIds], studentIds: [...studentIds] };
 }
+
+/* ---------- وقت البداية والنهاية ---------- */
+/** نهاية الواجب: endAt، أو آخر يوم due بتوقيت الرياض للواجبات القديمة */
+export const taskEnd = (t) => t?.endAt || (t?.due ? `${t.due}T23:59:59+03:00` : null);
+export const taskStarted = (t, now = Date.now()) => !t?.startAt || new Date(t.startAt).getTime() <= now;
+export const taskClosed = (t, now = Date.now()) => { const e = taskEnd(t); return !!e && new Date(e).getTime() < now; };
+/** تاريخ اليوم بتوقيت الرياض لوقت ISO */
+export const riyadhDate = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date(iso));
+/** قيمة حقل datetime-local من ISO (بتوقيت الجهاز) */
+export const toLocalInput = (iso) => { if (!iso) return ''; const d = new Date(iso); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };

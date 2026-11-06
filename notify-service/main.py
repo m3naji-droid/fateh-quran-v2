@@ -226,6 +226,37 @@ def notify_cfg() -> dict:
     return c.to_dict() if c.exists else {}
 
 
+def run_task_starts() -> list[dict]:
+    """الواجبات المجدولة: إشعار الطلاب عند حلول وقت بدايتها، مرة واحدة."""
+    now, done = now_iso(), []
+    for d in where(db.collection("tasks"), "startPending", "==", True).stream():
+        t = d.to_dict()
+        if (t.get("startAt") or "9999") > now:
+            continue
+        title = t.get("title") or "واجب"
+        end = t.get("due")
+        n = {"type": "task", "taskId": d.id, "title": f"واجب جديد: {title}",
+             "body": f"بدأ الآن واجب «{title}»" + (f"، والتسليم حتى {day_label(end)}" if end else "") + ".",
+             "link": "./#/student/task/" + d.id, "tag": "task-" + d.id, "createdAt": now_iso()}
+        stats = {"sent": 0, "failed": 0, "removed": 0}
+        try:
+            if simple_target(t):
+                cid = t.get("classId") or "all"
+                db.collection("notifs").document(f"start-{d.id}").set({**n, "classId": cid})
+                stats = push(tokens_for(class_id=cid), n)
+            else:
+                pns = task_students(t)
+                for pn in pns:
+                    db.collection("roster").document(pn).collection("notifs").document(f"start-{d.id}").set({**n, "studentId": pn})
+                if pns:
+                    stats = push(tokens_for(students=pns), n)
+        except Exception as e:
+            stats = {"error": str(e)[:200]}
+        d.reference.update({"startPending": False, "startSent": {"at": now_iso(), **stats}})
+        done.append({"task": d.id, **stats})
+    return done
+
+
 def run_reminders(local: dt.datetime, cfg: dict | None = None) -> list[dict]:
     """تذكير مساء اليوم السابق لموعد التسليم، في الوقت الذي يضبطه المعلم."""
     cfg = notify_cfg() if cfg is None else cfg
@@ -236,7 +267,7 @@ def run_reminders(local: dt.datetime, cfg: dict | None = None) -> list[dict]:
     done = []
     for d in where(db.collection("tasks"), "remindEve", "==", True).stream():
         t = d.to_dict()
-        if t.get("due") != tomorrow or (t.get("remindSent") or {}).get("eve") == t.get("due"):
+        if t.get("startPending") or t.get("due") != tomorrow or (t.get("remindSent") or {}).get("eve") == t.get("due"):
             continue
         cid = t.get("classId") or "all"
         title = t.get("title") or "واجب"
@@ -491,6 +522,11 @@ class FeedbackReq(BaseModel):
     feedback: str
 
 
+class LateReq(BaseModel):
+    student: str
+    task: str
+
+
 FB_KINDS = {"comment": "💬 تعليق", "complaint": "⚠️ شكوى", "suggest": "💡 اقتراح", "note": "📝 ملاحظة"}
 
 
@@ -665,6 +701,31 @@ def feedback(req: FeedbackReq, authorization: str | None = Header(None)):
     return feedback_push(x, ref)
 
 
+@app.post("/late")
+def late(req: LateReq, authorization: str | None = Header(None)):
+    """طلب تسليم واجب بعد انتهاء موعده: يتحقق أن الطالب صاحب الطلب، وينبّه المعلم مرة واحدة."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    r = db.collection("roster").document(req.student).get()
+    if not r.exists or r.to_dict().get("uid") != uid:
+        raise HTTPException(403, "غير مسموح.")
+    ref = r.reference.collection("late").document(req.task)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "الطلب غير موجود.")
+    x = snap.to_dict()
+    if x.get("notified") or x.get("status") != "pending":
+        return {"sent": 0, "already": True}
+    who = x.get("name") or r.to_dict().get("name") or "طالب"
+    out = to_teachers(f"⏰ طلب تسليم متأخر من {who}", f"يطلب السماح بتسليم «{x.get('taskTitle') or 'واجب'}» بعد انتهاء موعده.", "late-" + req.student + "-" + req.task, "./#/teacher/late")
+    ref.update({"notified": True})
+    return out
+
+
 @app.post("/announce")
 def announce(req: AnnReq, authorization: str | None = Header(None)):
     teacher_uid(authorization)
@@ -692,6 +753,10 @@ def cron(x_cron_secret: str | None = Header(None)):
             flushed = flush_deferred()
         except Exception as e:
             print("flush error", e, flush=True)
+    try:
+        starts = run_task_starts()
+    except Exception as e:
+        starts = [{"error": str(e)[:200]}]
     reminders = run_reminders(local, cfg)
     try:
         streaks = run_streaks(local, cfg)
@@ -706,4 +771,4 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         teacher = {"error": str(e)[:200]}
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
-    return {"announcements": anns, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "deferredSent": flushed}
+    return {"announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "deferredSent": flushed}

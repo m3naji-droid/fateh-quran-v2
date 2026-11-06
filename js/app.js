@@ -10,17 +10,18 @@ import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
 import { LIVE_MIN, AI_PENALTY, AI_MAX, PTS as HPTS, matchWinner, sideOf, tiebreak, rangeText as hRange, firstRound, advance as heroAdvance, heroBonus, stageLabel, bracketHtml } from './heroes.js';
-import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents } from './targets.js';
+import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents, taskEnd, taskStarted, taskClosed, riyadhDate, toLocalInput } from './targets.js';
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
+import { G, autoGrade, coverage, readEnd, gradeV2 } from './grading.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -444,7 +445,8 @@ function mountRecite(root, opts) {
       const color = sc.percent >= 85 ? 'var(--ok)' : sc.percent >= 60 ? 'var(--warn)' : 'var(--bad)';
       box.innerHTML = `<div class="card stack" style="gap:14px">
         ${sendBox}
-        ${cheerHtml(sc.outOf10)}
+        ${cheerHtml(opts.graded ? autoGrade({ statuses: buildSubmission().statuses }).total : sc.outOf10)}
+        ${opts.graded ? '<div class="grade-card" id="rcGrade"></div>' : ''}
         <div class="score-ring" style="--p:${sc.percent};--c:${color}"><div><div><b>${ar(sc.percent)}٪</b><br><span class="small muted">${sc.grade}</span></div></div></div>
         <div class="stats">
           <div><b style="color:var(--ok)">${ar(last.counts.correct)}</b><span>صحيحة</span></div>
@@ -456,12 +458,13 @@ function mountRecite(root, opts) {
           <li><span><span class="qw">${esc(words[i].text)}</span> <span class="small muted">آية ${ar(words[i].ayah)}${last.heard[i] ? ` · سُمعت «${esc(last.heard[i])}»` : ''}</span></span>
           <button class="btn sm" type="button" data-play="${words[i].ayah}">استمع</button></li>`).join('')}</ul></div>` : '<div class="pill ok">لا أخطاء في الكلمات. بارك الله فيك.</div>'}
         ${audioUrl ? `<div><b class="small">تسجيلك</b><audio controls src="${audioUrl}" style="width:100%"></audio></div>` : ''}
-        ${L ? `<div class="learn-note">الدرجة المتوقعة من معلمك: <b>${ar(predict(L.model, { surah, from, to, percent: sc.percent, wpm: sc.wpm }, L.rates))} / ١٠</b><br><span class="small">تقدير يتعلمه النظام من تقييمات المعلم السابقة، والدرجة النهائية للمعلم.</span></div>` : ''}
-        <div class="small muted">التصحيح الآلي يقيس صحة الكلمات والحفظ. أحكام التجويد والمخارج يقيّمها المعلم بالاستماع.</div>
+        ${L && !opts.graded ? `<div class="learn-note">الدرجة المتوقعة من معلمك: <b>${ar(predict(L.model, { surah, from, to, percent: sc.percent, wpm: sc.wpm }, L.rates))} / ١٠</b><br><span class="small">تقدير يتعلمه النظام من تقييمات المعلم السابقة، والدرجة النهائية للمعلم.</span></div>` : ''}
+        ${opts.graded ? '' : '<div class="small muted">التصحيح الآلي يقيس صحة الكلمات والحفظ. أحكام التجويد والمخارج يقيّمها المعلم بالاستماع.</div>'}
         <div class="row">${submitBtn}${retryBtn}</div>
       </div>`;
       $$('[data-play]', box).forEach((b) => (b.onclick = () => playRange(+b.dataset.play, +b.dataset.play)));
-      if (sc.outOf10 >= 8) confetti();
+      if ((opts.graded ? autoGrade({ statuses: buildSubmission().statuses }).total : sc.outOf10) >= 8) confetti();
+      paintGrade();
       box.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
       opts.onResult && opts.onResult(buildSubmission());
     }
@@ -477,6 +480,18 @@ function mountRecite(root, opts) {
     };
   }
 
+  /** درجة الواجب الآلية الميسّرة: تظهر فوراً، وتكتمل بعد تحليل التجويد */
+  let aiFailed = false;
+  function paintGrade() {
+    const el = $('#rcGrade', root); if (!el || !last) return;
+    const sub = buildSubmission();
+    const g = autoGrade({ ...sub, hasAudio: !!lastBlob, taskId: 'x', createdAt: new Date().toISOString() });
+    const wait = g.pending && aiEnabled() && !aiFailed;
+    el.innerHTML = `<div class="gc-num"><b>${fmtQ(g.total)}</b><span>/ ١٠</span></div><div class="gc-tx"><b>${wait ? 'درجتك المبدئية' : 'درجتك'}</b>
+      <span class="small">${g.v ? `${ar(g.v)} ${g.v === 1 ? 'خطأ' : g.v === 2 ? 'خطآن' : 'أخطاء'} في الكلمات` : 'كلماتك سليمة'}${sub.ai ? ` · ${g.t ? `${ar(g.t)} ${g.t <= 10 ? 'ملاحظات' : 'ملاحظة'} تجويد` : 'تجويدك سليم'}` : ''}${g.cov < G.full ? ` · قرأت ${ar(Math.round(g.cov * 100))}٪ من المقطع` : ''}</span>
+      <span class="small muted">${wait ? '⏳ تكتمل بعد تحليل التجويد الآلي (دقيقة أو دقيقتان). يمكنك الخروج، وتُحسب تلقائياً.' : 'تقييم آلي ميسّر، ولمعلمك أن يراجعه.'}</span></div>`;
+  }
+
   let sentId = null;
   async function autoSend(box) {
     const st = $('#rcSendState', box);
@@ -486,7 +501,7 @@ function mountRecite(root, opts) {
       try {
         sentId = await opts.onSubmit(sub, blob);
         sent = true;
-        st.className = 'send-state ok'; st.innerHTML = '✓ أُرسل تسميعك إلى المعلم. جزاك الله خيراً، وانتظر تقييمه.';
+        st.className = 'send-state ok'; st.innerHTML = opts.graded && last ? '✓ أُرسل تسميعك. جزاك الله خيراً، ودرجتك تُحسب آلياً ولمعلمك أن يراجعها.' : '✓ أُرسل تسميعك إلى المعلم. جزاك الله خيراً، وانتظر تقييمه.';
         if (aiRes && opts.onAi) opts.onAi(sentId, aiRes).catch(() => {});
       } catch (e) {
         st.className = 'send-state bad';
@@ -509,20 +524,21 @@ function mountRecite(root, opts) {
       $('#aiGo', card).onclick = start;
     };
     const start = async () => {
-      if (!(await ensureAiNotice())) return;
+      if (!opts.graded && !(await ensureAiNotice())) return;
       aiCtl = new AbortController();
       card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="small" id="aiProg">جارٍ التحضير…</div><div class="progress"><i class="indet"></i></div>${opts.oneShot ? '<p class="small muted" style="margin:0">أُرسل تسميعك، وتُضاف نتيجة التحليل إليه عند انتهائه.</p>' : opts.onSubmit ? '<p class="small muted" style="margin:0">يمكنك الإرسال الآن؛ إن لم ينتهِ التحليل فسيُجريه المعلم لاحقاً.</p>' : ''}`;
       try {
         aiRes = await aiAnalyze(lastBlob, { surah, from, to }, (t) => { const el = $('#aiProg', card); if (el) el.textContent = t; }, aiCtl.signal);
-        renderAi(card);
+        renderAi(card); paintGrade();
         if (sentId && opts.onAi) opts.onAi(sentId, aiRes).catch((e) => console.warn('ai save', e));
       } catch (e) {
         if (aiCtl.signal.aborted) return;
-        card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="notice">${esc(e.message)}</div><button class="btn" type="button" id="aiGo">أعد المحاولة</button>`;
+        aiFailed = true; paintGrade();
+        card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="notice">${esc(e.message)}${opts.graded ? ' لا تقلق: أُرسل تسميعك، وسيُكمل النظام التحليل لاحقاً.' : ''}</div><button class="btn" type="button" id="aiGo">أعد المحاولة</button>`;
         $('#aiGo', card).onclick = start;
       }
     };
-    if (pref.get('aiNoticeOk', false)) start(); else idle();
+    if (opts.graded || pref.get('aiNoticeOk', false)) start(); else idle(); // الواجب: التحليل إلزامي
   }
 
   function renderAi(card) {
@@ -560,6 +576,7 @@ function mountRecite(root, opts) {
 const fmt10 = (v) => ar(Number.isInteger(v) ? v : Number(v).toFixed(1).replace('.', '٫'));
 /** للخصومات والدرجات بالربع: حتى منزلتين بلا أصفار زائدة */
 const negQ = (v) => `<bdi dir="ltr">−${fmtQ(v)}</bdi>`;
+const fmtDT = (iso) => { try { return ar(new Date(iso).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })); } catch { return iso; } };
 const fmtQ = (v) => ar(String(Math.round(Number(v || 0) * 100) / 100).replace('.', '٫'));
 function cheerHtml(score10, { who = 'auto' } = {}) {
   if (score10 >= 8) {
@@ -1379,7 +1396,7 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'late' ? '⏰' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
         <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚|📿)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
@@ -1407,11 +1424,11 @@ function viewStudent(app) {
     app.innerHTML = '<div class="loading">جارٍ تحميل بياناتك…</div>';
     if (!(await store.isStudentAuthed(me))) { session.set(null); studentLogin(app, 'انتهت جلسة الدخول. اختر صفك واسمك واكتب كلمة السر من جديد.'); return; }
     try {
-      const [tasks, subs, classes, rank, retakes, activity] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null), store.listRetakes(me.id).catch(() => []), store.listActivity(me.id, addDays(riyadhDay(), -400)).catch(() => [])]);
+      const [tasks, subs, classes, rank, retakes, activity, late] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null), store.listRetakes(me.id).catch(() => []), store.listActivity(me.id, addDays(riyadhDay(), -400)).catch(() => []), store.listMyLate(me.id).catch(() => [])]);
       data.retakes = retakes;
       me.rankInfo = rank;
-      knownTasks = new Set(tasks.map((t) => t.id)); loadedAt = new Date().toISOString();
-      data = { retakes, activity, tasks: tasks.filter((t) => taskFor(t, me)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
+      knownTasks = new Set(tasks.filter((t) => taskStarted(t)).map((t) => t.id)); loadedAt = new Date().toISOString();
+      data = { retakes, activity, late, tasks: tasks.filter((t) => taskFor(t, me) && taskStarted(t)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
     } catch (e) {
       console.error(e);
       app.innerHTML = `<div class="empty">تعذر تحميل البيانات: ${esc(e.message)}</div>`;
@@ -1454,10 +1471,14 @@ function viewStudent(app) {
       const mDeep = openMonthYm && months.find((n) => n.ym === openMonthYm);
       if (mDeep) { openMonthYm = null; openMonth(mDeep); }
       else if ($('#stBody', app)) { const seen = new Set(pref.get('monthSeen_' + me.id, [])); const fresh = months.find((n) => !seen.has(n.ym)); if (fresh && !openMonth.pending) { openMonth.pending = true; whenModalFree(() => { openMonth.pending = false; if ($('#stBody', app) && !new Set(pref.get('monthSeen_' + me.id, [])).has(fresh.ym)) openMonth(fresh); }); } }
+      if (L.some((n) => n.type === 'late' && (n.createdAt || '') > (loadedAt || '') && !(data.lateSeen || new Set()).has(n.id))) {
+        data.lateSeen = new Set(L.filter((n) => n.type === 'late').map((n) => n.id));
+        store.listMyLate(me.id).then((x) => { data.late = x; if ($('#stBody', app) && tab === 'tasks') draw(); }).catch(() => {});
+      }
       const onList = $('#stBody', app) && tab === 'tasks';
       // واجب جديد وصل والطالب على صفحة الواجبات: نحدّث القائمة
       if (L.some((n) => n.taskId && !knownTasks.has(n.taskId))) {
-        try { const tasks = await store.listTasks(); knownTasks = new Set(tasks.map((t) => t.id)); data.tasks = tasks.filter((t) => taskFor(t, me)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
+        try { const tasks = await store.listTasks(); knownTasks = new Set(tasks.filter((t) => taskStarted(t)).map((t) => t.id)); data.tasks = tasks.filter((t) => taskFor(t, me) && taskStarted(t)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
         if ($('#stBody', app) && tab === 'tasks') draw();
       } else if (onList && first) draw();
     }, me.id);
@@ -1699,22 +1720,40 @@ function viewStudent(app) {
     const fresh = new Set(notifs.filter((n) => n.taskId && (n.createdAt || '') > pref.get(seenKey, '')).map((n) => n.taskId));
     body.innerHTML = pushInvite() + retakeCards() + `<div class="stack">${data.tasks.map((t) => {
       const mySubs = data.subs.filter((x) => x.taskId === t.id);
-      const best = mySubs.reduce((m, x) => Math.max(m, x.percent ?? -1), -1);
-      const overdue = t.due && !done.has(t.id) && new Date(t.due) < new Date(new Date().toDateString());
+      const best = mySubs.reduce((m, x) => Math.max(m, subScore(x) ?? -1), -1);
+      const overdue = !done.has(t.id) && taskClosed(t);
+      const lr = (data.late || []).find((x) => x.id === t.id), allowed = lr?.status === 'ok';
       return `<div class="card task">
         <div class="t-main"><h3>${esc(t.title)}${fresh.has(t.id) && !done.has(t.id) ? ' <span class="pill new-pill">جديد</span>' : ''}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
-          <div class="small muted">${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'}${t.due ? ` · التسليم ${fmtDate(t.due)}` : ''}${t.notes ? ` · ${esc(t.notes)}` : ''}</div></div>
-        <div class="row">${done.has(t.id) ? `<span class="pill ok">أُرسل${best >= 0 ? ` · ${ar(best)}٪` : ''}</span>` : overdue ? '<span class="pill bad">متأخر</span>' : '<span class="pill warn">لم يُنجز</span>'}
-        ${done.has(t.id) ? `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>` : `<button class="btn primary" type="button" data-task="${esc(t.id)}">ابدأ التسميع</button>`}</div></div>`;
+          <div class="small muted">${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'}${taskEnd(t) ? ` · ${overdue ? 'انتهى' : 'التسليم حتى'} ${esc(fmtDT(taskEnd(t)))}` : ''}${t.notes ? ` · ${esc(t.notes)}` : ''}</div></div>
+        <div class="row">${done.has(t.id) ? `<span class="pill ok">أُرسل${best >= 0 ? ` · ${fmtQ(best)} من ١٠` : ''}</span>` : overdue ? (allowed ? '<span class="pill ok">✓ سمح لك المعلم</span>' : lr?.status === 'pending' ? '<span class="pill warn">⏳ بانتظار موافقة المعلم</span>' : lr?.status === 'no' ? '<span class="pill mute">اعتذر المعلم</span>' : '<span class="pill bad">انتهى الموعد</span>') : '<span class="pill warn">لم يُنجز</span>'}
+        ${done.has(t.id) ? `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>` : overdue && !allowed ? (!lr ? `<button class="btn gold" type="button" data-lreq="${esc(t.id)}">اطلب السماح بالتسليم</button>` : `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>`) : `<button class="btn primary" type="button" data-task="${esc(t.id)}">ابدأ التسميع</button>`}</div></div>`;
     }).join('')}</div>`;
     $$('[data-task]', body).forEach((b) => (b.onclick = () => openTask(data.tasks.find((t) => t.id === b.dataset.task))));
+    $$('[data-lreq]', body).forEach((b) => (b.onclick = () => requestLate(data.tasks.find((x) => x.id === b.dataset.lreq))));
     $$('[data-prac]', body).forEach((b) => (b.onclick = () => { const t = data.tasks.find((x) => x.id === b.dataset.prac); pendingPractice = { surah: t.surah, from: t.from, to: t.to, mode: t.mode }; tab = 'practice'; draw(); }));
     $$('[data-retake]', body).forEach((b) => (b.onclick = () => startRetake(b.dataset.retake)));
     bindPushInvite(body);
   }
 
+  async function requestLate(t) {
+    if (!t) return;
+    if (!(await confirmBox(`انتهى موعد «${t.title}». أرسل طلباً لمعلمك ليسمح لك بالتسليم؟`, 'أرسل الطلب'))) return;
+    try {
+      await store.requestLate(me.id, t.id, { taskTitle: t.title, name: me.name, classId: me.classId });
+      data.late = [...(data.late || []).filter((x) => x.id !== t.id), { id: t.id, pn: me.id, status: 'pending', at: new Date().toISOString() }];
+      notifyLate(me.id, t.id).catch(() => {});
+      toast('أُرسل طلبك للمعلم، ويصلك إشعار بقراره.');
+      draw();
+    } catch (e) { toast('تعذر الإرسال: ' + (e.code || e.message)); }
+  }
   /** واجب أو طلب إعادة: محاولة واحدة تُرسل تلقائياً */
   async function openTask(t, rt = null) {
+    // انتهى الموعد: لا يُقبل التسليم إلا بإذن المعلم
+    if (t && !rt && taskClosed(t) && !data.subs.some((x) => x.taskId === t.id && !x.retakeId)) {
+      try { data.late = await store.listMyLate(me.id); } catch {}
+      if ((data.late || []).find((x) => x.id === t.id)?.status !== 'ok') { tab = 'tasks'; draw(); toast('انتهى موعد هذا الواجب. اطلب من معلمك السماح بالتسليم.'); return; }
+    }
     comp?.destroy();
     const sid = rt ? 'r_' + rt.id : 't_' + t.id;
     const already = rt ? data.subs.some((x) => x.retakeId === rt.id) : data.subs.some((x) => x.taskId === t.id && !x.retakeId);
@@ -1742,11 +1781,11 @@ function viewStudent(app) {
     if (already) { $('#tkBody', app).innerHTML = `<div class="empty">أرسلت محاولتك لهذا ${rt ? 'الطلب' : 'الواجب'}. لكل ${rt ? 'طلب' : 'واجب'} محاولة واحدة، ويمكن لمعلمك أن يطلب منك إعادته.</div>`; return; }
     const cls = data.classes.find((c) => c.id === me.classId);
     comp = mountRecite($('#tkBody', app), {
-      ...range, mode: rt?.mode || t?.mode, learn, oneShot: true,
+      ...range, mode: rt?.mode || t?.mode, learn, oneShot: true, graded: true,
       onPractice: () => { comp?.destroy(); comp = null; pendingPractice = { ...range, mode: rt?.mode || t?.mode }; tab = 'practice'; draw(); },
       onSubmit: async (sub, blob) => {
         const extra = rt ? { retakeId: rt.id, retakeOf: rt.subId || null } : {};
-        const id = await store.addSubmission(me.id, { ...sub, ...range, taskId: t?.id || rt?.taskId || null, taskTitle: t?.title || rt?.taskTitle || '', studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null, ...extra }, blob, sid);
+        const id = await store.addSubmission(me.id, { ...sub, ...range, taskId: t?.id || rt?.taskId || null, taskTitle: t?.title || rt?.taskTitle || '', studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null, ...extra, ...(t && !rt && taskClosed(t) ? { late: true } : {}) }, blob, sid);
         data.subs.unshift({ ...sub, id, pn: me.id, taskId: t?.id || rt?.taskId, ...extra, createdAt: new Date().toISOString() });
         logAct('task', sub.duration || 0);
         recordProgress({ ...sub, ...range });
@@ -1758,15 +1797,17 @@ function viewStudent(app) {
 
   function drawHistory(body) {
     if (!data.subs.length) { body.innerHTML = '<div class="empty">لم تُرسل أي تسميع بعد.</div>'; return; }
-    body.innerHTML = `<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>المقطع</th><th>الدقة الآلية</th><th>تقييم المعلم</th><th>ملاحظات</th></tr></thead><tbody>
+    const gradeCell = (x) => { if (x.teacher) return `${x.teacher.total >= 8 ? '<span class="star" title="درجة متميزة">★</span> ' : ''}<b class="num">${fmtQ(x.teacher.total)}</b>/١٠ <small class="muted">المعلم</small>`; const g = (x.taskId || x.retakeId) && autoGrade(x); return g ? `<b class="num">${fmtQ(g.total)}</b>/١٠ <small class="muted">${g.pending && aiEnabled() ? '⏳ مبدئية' : 'آلية'}</small>` : '<span class="muted">—</span>'; };
+    body.innerHTML = `<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>المقطع</th><th>الدقة الآلية</th><th>الدرجة</th><th>ملاحظات</th></tr></thead><tbody>
       ${data.subs.map((x, i) => `<tr class="click" data-i="${i}"><td class="num">${fmtDate(x.createdAt)}</td><td>${esc(x.taskTitle || rangeLabel(x.surah, x.from, x.to))}</td>
       <td>${x.percent == null ? '<span class="pill mute">بانتظار المعلم</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td>
-      <td>${x.teacher ? `${x.teacher.total >= 8 ? '<span class="star" title="درجة متميزة">★</span> ' : ''}<b class="num">${ar(x.teacher.total)}</b>/١٠` : '<span class="muted">—</span>'}</td><td style="white-space:normal;min-width:160px">${esc(x.teacher?.notes || '')}</td></tr>`).join('')}
+      <td>${gradeCell(x)}${x.late ? ' <span class="pill warn">متأخر</span>' : ''}</td><td style="white-space:normal;min-width:160px">${esc(x.teacher?.notes || '')}</td></tr>`).join('')}
     </tbody></table></div>`;
     $$('tr[data-i]', body).forEach((r) => (r.onclick = () => {
       const x = data.subs[+r.dataset.i];
       openModal(`<h2>${esc(x.taskTitle || 'تسميع')}</h2><p class="muted">${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)}</p>
-        ${x.teacher ? `<div class="card" style="margin-bottom:12px"><b>درجة المعلم: ${ar(x.teacher.total)} / ١٠</b>${x.teacher.notes ? `<p style="margin:8px 0 0">${esc(x.teacher.notes)}</p>` : ''}</div>` : ''}
+        ${!x.teacher && (x.taskId || x.retakeId) && autoGrade(x) ? (() => { const g = autoGrade(x); return `<div class="card" style="margin-bottom:12px"><b>الدرجة الآلية: ${fmtQ(g.total)} / ١٠</b><div class="small muted">${ar(g.v)} خطأ في الكلمات${x.ai ? ` · ${ar(g.t)} ملاحظة تجويد` : g.pending && aiEnabled() ? ' · ⏳ تكتمل بعد تحليل التجويد' : ''}</div></div>`; })() : ''}
+        ${x.teacher ? `<div class="card" style="margin-bottom:12px"><b>درجة المعلم: ${fmtQ(x.teacher.total)} / ١٠</b>${x.teacher.notes ? `<p style="margin:8px 0 0">${esc(x.teacher.notes)}</p>` : ''}</div>` : ''}
         <div class="stack">${x.statuses || x.tj?.length || x.ai ? wordMapHtml(x, { colored: true }) : ''}${tjMarksHtml(x)}${aiListHtml(x)}</div>`);
     }));
   }
@@ -1875,6 +1916,36 @@ function viewTeacher(app) {
   if (!s || s.role !== 'teacher') return teacherLogin(app);
   let tab = pref.get('tTab', 'subs');
   if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; history.replaceState(null, '', '#/teacher'); }
+  if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
+  let lateReqs = [];
+  /* تحليل التجويد الإلزامي: ما لم يكتمل على جهاز الطالب (أغلق الصفحة أو انقطع) يُكمله جهاز المعلم في الخلفية */
+  let aiQIv = null, aiQBusy = false;
+  function pendingAiQueue() {
+    clearInterval(aiQIv);
+    const tick = async () => {
+      if (aiQBusy || !aiEnabled() || document.hidden) return;
+      const x = D.subs.find((y) => { const g = autoGrade(y); return g?.pending && (y.aiTries || 0) < 3 && Date.now() - new Date(y.createdAt || 0) > 8 * 60e3; });
+      if (!x) return;
+      aiQBusy = true;
+      try {
+        const blob = await store.getAudio(x.pn, x.id);
+        if (!blob) { await store.updateSubmission(x.pn, x.id, { aiFail: true }); x.aiFail = true; }
+        else {
+          const ai = await aiAnalyze(blob, x, () => {});
+          await store.updateSubmission(x.pn, x.id, { ai }); x.ai = ai;
+        }
+        schedulePublish();
+      } catch (e) {
+        console.warn('ai queue', e);
+        const n = (x.aiTries || 0) + 1;
+        await store.updateSubmission(x.pn, x.id, { aiTries: n, ...(n >= 3 ? { aiFail: true } : {}) }).catch(() => {});
+        x.aiTries = n; if (n >= 3) x.aiFail = true;
+      }
+      aiQBusy = false;
+    };
+    aiQIv = setInterval(tick, 90e3); setTimeout(tick, 20e3);
+  }
+  const loadLate = () => store.listAllLate().then((L) => { lateReqs = L; if (tab === 'tasks') drawBody(); else drawHead?.(); }).catch((e) => console.warn('late', e));
   let D = { classes: [], students: [], tasks: [], subs: [] };
   let errCat = defaultCatalog();
   store.getErrorCatalog().then((c) => { errCat = mergeCatalog(c); }).catch(() => {});
@@ -1926,13 +1997,13 @@ function viewTeacher(app) {
       return;
     }
     refreshPush(tOwner);
-    loadFb();
+    loadFb(); loadLate(); pendingAiQueue();
     store.listAllChallenges().then((L) => { D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
     store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
     unsub?.();
-    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
+    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); setTimeout(migrateGrades, 1500); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
   }
   const reload = async (redraw = true) => {
@@ -2028,7 +2099,7 @@ function viewTeacher(app) {
       }
       // ٣) فاته واجبان فأكثر انتهى موعدهما
       const done = new Set(subs.map((x) => x.taskId).filter(Boolean));
-      const missed = D.tasks.filter((t) => t.due && t.due < today && taskFor(t, s) && !done.has(t.id) && (t.createdAt || '') >= (s.accountAt || s.createdAt || '')).length; // لا يُحاسب على واجبات قبل إضافته
+      const missed = D.tasks.filter((t) => taskClosed(t) && taskFor(t, s) && !done.has(t.id) && (t.createdAt || '') >= (s.accountAt || s.createdAt || '')).length; // لا يُحاسب على واجبات قبل إضافته
       if (missed >= 2) reasons.push({ k: 'miss', t: `📋 فاته ${nWord(missed, 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')}` });
       if (!reasons.length) return;
       const keys = reasons.map((r) => r.k).sort().join(',');
@@ -2180,7 +2251,7 @@ function viewTeacher(app) {
       <input type="search" id="fQ" placeholder="بحث باسم الطالب أو رقمه" value="${esc(filters.q)}" style="flex:2 1 200px">
       <select id="fC" style="flex:1 1 140px">${opt('all', 'كل الصفوف', filters.cls)}${D.classes.map((c) => opt(c.id, c.name, filters.cls)).join('')}</select>
       <select id="fT" style="flex:1 1 160px">${opt('all', 'كل الواجبات', filters.task)}${opt('free', 'بدون واجب', filters.task)}${D.tasks.map((t) => opt(t.id, t.title, filters.task)).join('')}</select>
-      <select id="fS" style="flex:1 1 140px">${opt('all', 'كل الحالات', filters.status)}${opt('pending', 'بانتظار التقييم', filters.status)}${opt('graded', 'مُقيَّمة', filters.status)}</select>
+      <select id="fS" style="flex:1 1 140px">${opt('all', 'كل الحالات', filters.status)}${opt('pending', 'لم تراجعها بعد', filters.status)}${opt('graded', 'راجعتها', filters.status)}</select>
       <button class="btn" id="fX" type="button">تصدير Excel</button>
     </div><div id="subList"></div>`;
     const list = () => D.subs.filter((x) =>
@@ -2197,7 +2268,7 @@ function viewTeacher(app) {
         ${L.map((x) => `<tr class="click ${selSubs.has(subKey(x)) ? 'picked' : ''}" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td class="sel"><input type="checkbox" data-sk="${esc(subKey(x))}" ${selSubs.has(subKey(x)) ? 'checked' : ''} aria-label="تحديد"></td><td><b>${esc(x.studentName)}</b>${x.retakeId ? ' <span class="pill gold-pill">إعادة</span>' : ''}${x.retakeRequested && !D.subs.some((y) => y.retakeId === x.retakeRequested.id) ? ' <span class="pill mute">طُلبت إعادته</span>' : ''}<div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
         <td>${esc(x.taskTitle || 'تدريب')}<div class="small muted">${esc(rangeLabel(x.surah, x.from, x.to))}</div></td><td class="num">${fmtDate(x.createdAt)}</td>
         <td>${x.percent == null ? '<span class="pill mute">يدوي</span>' : `<span class="pill ${pctClass(x.percent)}">${ar(x.percent)}٪</span>`}</td><td class="num">${fmtTime(x.duration || 0)}</td>
-        <td>${x.teacher ? `<span class="pill ok">${ar(x.teacher.total)}/١٠</span>` : '<span class="pill warn">بانتظارك</span>'}</td></tr>`).join('')}
+        <td>${x.teacher ? `<span class="pill ok">${fmtQ(x.teacher.total)}/١٠</span>` : (() => { const g = (x.taskId || x.retakeId) && autoGrade(x); return g ? `<span class="pill" title="درجة آلية، ولك أن تراجعها">🤖 ${fmtQ(g.total)}/١٠${g.pending && aiEnabled() ? ' ⏳' : ''}</span>` : '<span class="pill warn">بانتظارك</span>'; })()}${x.late ? ' <span class="pill warn">متأخر</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">لا توجد تسليمات مطابقة.</div>');
       $$('tr[data-id]', body).forEach((r) => (r.onclick = (e) => { if (e.target.closest('.sel')) return; openSubmission(D.subs.find((x) => x.id === r.dataset.id && x.pn === r.dataset.pn)); }));
       $$('[data-sk]', body).forEach((c) => (c.onchange = () => { c.checked ? selSubs.add(c.dataset.sk) : selSubs.delete(c.dataset.sk); paint(); }));
@@ -2240,9 +2311,13 @@ function viewTeacher(app) {
     const riskSet = new Set(risky.map((r) => r.i));
     const words = rangeWords(x.surah, x.from, x.to);
     const segRules = segmentRules(x.surah, x.from, x.to);
-    let marks = (x.tj || []).map((m) => (m.n ? { ...m } : makeMark(errCat, m.i, m.r)));
-    let manual = !!x.teacher && x.teacher.total !== gradeFrom(deduction(marks, errCat).total);
+    const cov = coverage(x.statuses), rEnd = x.statuses ? readEnd(x.statuses) : Infinity;
+    const autoErr = [...(x.statuses || '')].map((c, i) => (i >= rEnd ? null : c === 'w' ? { i, r: 'v_wrong' } : c === 'm' ? { i, r: 'v_missing' } : null)).filter(Boolean);
     let aiRes = x.ai || null;
+    // لم يقيّمه المعلم بعد: التقييم الآلي هو الأساس (أخطاء الكلمات وملاحظات التجويد محددة مسبقاً، ويستطيع إلغاء ما يراه)
+    let marks = x.teacher || (x.tj || []).length ? (x.tj || []).map((m) => (m.n ? { ...m } : makeMark(errCat, m.i, m.r))) : [...autoErr, ...(aiRes ? aiRes.errors.filter((e) => e.i < rEnd && findErr(errCat, e.r)) : [])].map((e) => ({ ...makeMark(errCat, e.i, e.r), p: 1 }));
+    const gradeOf = () => gradeFrom(deduction(marks, errCat), cov);
+    let manual = !!x.teacher && x.teacher.total !== gradeOf();
     const weak = weakRules(model, mine, 3);
     openModal(`
       <div class="stack">
@@ -2282,7 +2357,6 @@ function viewTeacher(app) {
         } catch (e) { $('#sbAudio', m).innerHTML = `<span class="muted small">تعذر تحميل التسجيل: ${esc(e.message)}</span>`; }
       };
       const toggleMark = (i, r) => { if (marks.some((k) => k.i === i && k.r === r)) marks = marks.filter((k) => !(k.i === i && k.r === r)); else marks.push(makeMark(errCat, i, r)); };
-      const autoErr = [...(x.statuses || '')].map((c, i) => (c === 'w' ? { i, r: 'v_wrong' } : c === 'm' ? { i, r: 'v_missing' } : null)).filter(Boolean);
       const paintMarks = () => {
         $('#sbMap', m).innerHTML = wordMapHtml({ ...x, tj: marks }, { colored: true, risky: riskSet, ai: aiRes ? new Set(aiRes.errors.map((e) => e.i)) : null });
         const ded = deduction(marks, errCat);
@@ -2298,8 +2372,10 @@ function viewTeacher(app) {
           ${Object.entries(CATS).map(([c, label]) => { const gs = ded.groups.filter((g) => g.c === c); return gs.length ? `<div><b class="small">${label} · ${negQ(ded[c])}</b><ul class="ded-list">${gs.map((g) => `<li><span>${esc(g.name)}${g.count > 1 ? ` ×${ar(g.count)}` : ''}</span><span class="small muted">${marks.filter((k) => k.r === g.key).map((k) => `<button type="button" class="word-x" data-rm="${k.i}|${esc(k.r)}" title="إزالة">${esc(words[k.i]?.text || '')} ✕</button>`).join(' ')}</span><b class="num">${negQ(g.sum)}${g.max && g.count * g.d > g.max ? ' <span class="small muted">(الحد)</span>' : ''}</b></li>`).join('')}</ul></div>` : ''; }).join('')}
           </div>` : '';
         $$('[data-rm]', m).forEach((b) => (b.onclick = () => { const [i, r] = b.dataset.rm.split('|'); marks = marks.filter((k) => !(k.i === +i && k.r === r)); paintMarks(); }));
-        const g = gradeFrom(ded.total);
-        $('#gDed', m).innerHTML = `<div class="ded-sum"><span>١٠</span><span>− ${fmtQ(ded.total)} خصم${ded.total ? ` <small>(لفظي ${fmtQ(ded.verbal)} · تجويد ${fmtQ(ded.tajweed)})</small>` : ''}</span><b>= ${fmtQ(g)}</b></div>`;
+        const g = gradeOf();
+        const capV = Math.min(ded.verbal, G.vmax), capT = Math.min(ded.tajweed, G.tmax);
+        $('#gDed', m).innerHTML = `<div class="ded-sum"><span>١٠</span><span>− ${fmtQ(capV + capT)} خصم${ded.total ? ` <small>(لفظي ${fmtQ(capV)}${ded.verbal > G.vmax ? ' بحده الأقصى' : ''} · تجويد ${fmtQ(capT)}${ded.tajweed > G.tmax ? ' بحده الأقصى' : ''})</small>` : ''}</span><b>= ${fmtQ(g)}</b></div>
+          <div class="small muted">التقييم الميسّر: أقصى خصم للفظي ${ar(G.vmax)} وللتجويد ${ar(G.tmax)}، ومن أكمل المقطع لا تقل درجته عن ${ar(G.floor)}.${cov < G.full ? ` <b>قرأ ${ar(Math.round(cov * 100))}٪ من المقطع فقط، فالدرجة بنسبة ما قرأ.</b>` : ''}</div>`;
         const inp = $('#gTotal', m);
         if (!manual) inp.value = g;
         $('#gHint', m).innerHTML = manual && +inp.value !== g ? `عدّلتها يدوياً · حسب الأخطاء: <b>${fmtQ(g)}</b> <button type="button" class="btn sm" id="gUse">استخدمها</button>` : 'تتحدّث تلقائياً مع كل خطأ، ويمكنك تعديلها';
@@ -2321,6 +2397,7 @@ function viewTeacher(app) {
               const blob = await store.getAudio(x.pn, x.id);
               if (!blob) throw new Error('لم يُعثر على التسجيل.');
               aiRes = await aiAnalyze(blob, x, (t) => { const el = $('#aiProg', box); if (el) el.textContent = t; });
+              if (!x.teacher && !manual) aiRes.errors.filter((e) => e.i < rEnd && findErr(errCat, e.r) && !has(e)).forEach((e) => marks.push({ ...makeMark(errCat, e.i, e.r), p: 1 }));
               paintMarks();
             } catch (err) { const el = $('#aiProg', box); if (el) el.textContent = err.message; b.disabled = false; }
           };
@@ -2379,7 +2456,7 @@ function viewTeacher(app) {
         e.preventDefault();
         const v = parseFloat($('#gTotal', m).value);
         if (isNaN(v)) return toast('اكتب الدرجة من ١٠.');
-        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 4) / 4)), notes: $('#gN', m).value.trim(), suggested, deduction: deduction(marks, errCat).total, at: new Date().toISOString() };
+        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 4) / 4)), notes: $('#gN', m).value.trim(), suggested, deduction: deduction(marks, errCat).total, v: 2, at: new Date().toISOString() };
         const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked, ...(aiRes ? { ai: aiRes } : {}) };
         const prevTotal = x.teacher ? x.teacher.total : null;
         const wantNotify = $('#gNotify', m).checked && prevTotal !== teacher.total;
@@ -2759,8 +2836,12 @@ function viewTeacher(app) {
         ${rangePicker('tk', r0)}
         <div class="row">
           <label class="field" style="flex:1 1 140px">النوع<select id="tkMode"><option value="hifz">تسميع غيباً</option><option value="recite">تلاوة نظراً</option></select></label>
-          <label class="field" style="flex:1 1 140px">آخر موعد<input type="date" id="tkDue"></label>
         </div>
+        <div class="row tk-time">
+          <label class="field" style="flex:1 1 200px">يبدأ <small class="muted">(فارغ = الآن، أو وقت قادم لجدولته)</small><input type="datetime-local" id="tkStart"></label>
+          <label class="field" style="flex:1 1 200px">ينتهي <small class="muted">(بعده بإذنك فقط)</small><input type="datetime-local" id="tkEnd"></label>
+        </div>
+        <div class="small muted" id="tkWhen"></div>
         <div class="field"><span>لمن الواجب؟</span><div class="tgt" id="tkTgt"></div></div>
         <label class="field">تعليمات للطلاب (اختياري)<input type="text" id="tkNotes" placeholder="مثال: ركّز على أحكام النون الساكنة"></label>
         <div class="remind-opt"><label class="row small" style="gap:8px"><input type="checkbox" id="tkRemind" ${E ? (E.remindEve ? 'checked' : '') : 'checked'}> <span>⏰ ذكّر الطلاب مساء اليوم السابق للموعد <span class="muted">(الساعة ${esc(remindTimeLabel())}، يحتاج موعداً)</span></span></label>
@@ -2768,16 +2849,25 @@ function viewTeacher(app) {
         <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="tkNotify" checked> <span>${E ? 'أشعر الطلاب بالتعديل <span class="muted">(يُرسل فقط إن تغيّر الموعد أو الآيات)</span>' : 'أرسل إشعاراً للطلاب <span class="muted">(في الجرس داخل الموقع، وعلى جوالات من فعّلها)</span>'}</span></label>
         <div class="row"><button class="btn primary" type="submit">${E ? 'حفظ التعديل' : 'إضافة الواجب'}</button>${E ? '<button class="btn" type="button" id="tkCancel">إلغاء التعديل</button>' : ''}</div>
       </form>
-      <div class="stack" id="tkList"></div>
+      <div class="stack"><div id="tkLate"></div><div class="stack" id="tkList"></div></div>
     </div>`;
+    drawLateCard($('#tkLate', body));
     const readRange = bindRangePicker(body, 'tk', (r) => { if (!$('#tkTitle', body).dataset.touched) $('#tkTitle', body).value = `${surahName(r.surah)} ${ar(r.from)}–${ar(r.to)}`; });
     if (E) {
       $('#tkTitle', body).value = E.title; $('#tkTitle', body).dataset.touched = '1';
       $('#tkMode', body).value = E.mode || 'hifz';
-      $('#tkDue', body).value = E.due || ''; $('#tkNotes', body).value = E.notes || '';
+      $('#tkStart', body).value = E.startAt && !taskStarted(E) ? toLocalInput(E.startAt) : ''; $('#tkEnd', body).value = toLocalInput(taskEnd(E)); $('#tkNotes', body).value = E.notes || '';
       $('#tkCancel', body).onclick = () => { editTask = null; drawTasks(body); };
     } else $('#tkTitle', body).value = `${surahName(last.surah)} ${ar(last.from)}–${ar(last.to)}`;
     $('#tkTitle', body).oninput = (e) => (e.target.dataset.touched = '1');
+    // افتراضياً: ينتهي بعد ٣ أيام الساعة ١١:٥٩ مساءً
+    if (!E) { const d = new Date(Date.now() + 3 * 864e5); d.setHours(23, 59, 0, 0); $('#tkEnd', body).value = toLocalInput(d.toISOString()); }
+    const when = () => {
+      const s = $('#tkStart', body).value, e = $('#tkEnd', body).value, el = $('#tkWhen', body);
+      const sD = s ? new Date(s) : null, eD = e ? new Date(e) : null;
+      el.innerHTML = eD && eD <= (sD || new Date()) ? '<span style="color:var(--bad)">وقت الانتهاء قبل وقت البداية.</span>' : sD && sD > new Date() ? `⏳ يُجدول الواجب ويظهر للطلاب ${esc(fmtDT(sD.toISOString()))}، ويصلهم الإشعار حينها.` : '';
+    };
+    $('#tkStart', body).oninput = when; $('#tkEnd', body).oninput = when; when();
     const tgt = targetPicker($('#tkTgt', body), E ? { all: E.classId === 'all', classIds: tClasses(E).filter((c) => c !== 'all' && !(E.exClasses || []).includes(c)), studentIds: tStudents(E).filter((x) => !(E.exStudents || []).includes(x)) } : { all: true, classIds: [], studentIds: [] });
     $('#tkForm', body).onsubmit = async (e) => {
       e.preventDefault();
@@ -2785,7 +2875,12 @@ function viewTeacher(app) {
       const r = readRange();
       const sel = tgt.value();
       if (!sel.all && !sel.classIds.length && !sel.studentIds.length) { btn.disabled = false; return toast('اختر لمن الواجب: كل الصفوف، أو صفاً، أو طالباً.'); }
-      const t = { title: $('#tkTitle', body).value.trim(), ...r, ...buildTarget(sel), mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() };
+      const sv = $('#tkStart', body).value, ev = $('#tkEnd', body).value;
+      const startAt = sv ? new Date(sv).toISOString() : (E?.startAt && taskStarted(E) ? E.startAt : new Date().toISOString());
+      const endAt = ev ? new Date(ev).toISOString() : null;
+      if (endAt && endAt <= startAt) { btn.disabled = false; return toast('وقت الانتهاء يجب أن يكون بعد وقت البداية.'); }
+      const scheduled = new Date(startAt) > Date.now() + 60e3;
+      const t = { title: $('#tkTitle', body).value.trim(), ...r, ...buildTarget(sel), mode: $('#tkMode', body).value, startAt, endAt, due: endAt ? riyadhDate(endAt) : '', startPending: scheduled, notes: $('#tkNotes', body).value.trim() };
       // ما اختاره المعلم صراحةً يُلغي حذفاً سابقاً عنه
       if (E) { t.exClasses = (E.exClasses || []).filter((c) => !sel.classIds.includes(c) && !sel.all); t.exStudents = (E.exStudents || []).filter((x) => !sel.studentIds.includes(x)); }
       t.remindEve = $('#tkRemind', body).checked && !!t.due;
@@ -2795,15 +2890,18 @@ function viewTeacher(app) {
         if (E) {
           const changes = [];
           if (t.surah !== E.surah || t.from !== E.from || t.to !== E.to) changes.push('تغيّرت الآيات');
-          if ((t.due || '') !== (E.due || '')) changes.push(t.due ? 'تغيّر موعد التسليم' : 'أُلغي موعد التسليم');
+          if ((t.endAt || '') !== (taskEnd(E) || '')) changes.push(t.endAt ? 'تغيّر موعد التسليم' : 'أُلغي موعد التسليم');
+          if (!scheduled && E.startPending) t.startPending = false; // صار يبدأ الآن
           await store.saveTask({ id: E.id, ...t });
           editTask = null;
-          const extra = wantNotify && changes.length ? await notifyTask({ id: E.id, ...t }, 'edit', changes.join(' و')) : '';
-          toast(`حُفظ التعديل${wantNotify && changes.length ? ' وأُرسل التنبيه' + extra : wantNotify ? '. لم يتغير الموعد أو الآيات، فلم يُرسل تنبيه' : ''}.`);
+          const startNow = !scheduled && E.startPending && taskStarted(E) === false; // كان مجدولاً وبدأ الآن بالتعديل
+          const extra = wantNotify && !scheduled && (changes.length || startNow) ? await notifyTask({ id: E.id, ...t }, startNow ? 'new' : 'edit', changes.join(' و')) : '';
+          toast(scheduled ? `حُفظ التعديل. الواجب مجدول ويبدأ ${fmtDT(startAt)}.` : `حُفظ التعديل${wantNotify && (changes.length || startNow) ? ' وأُرسل التنبيه' + extra : wantNotify ? '. لم يتغير الموعد أو الآيات، فلم يُرسل تنبيه' : ''}.`);
         } else {
+          if (scheduled && !wantNotify) t.startPending = false;
           const id = await store.saveTask(t);
-          const extra = wantNotify ? await notifyTask({ id, ...t }, 'new') : '';
-          toast(`أُضيف الواجب لـ${targetLabel(t, className, stuName)}${wantNotify ? ' ووصل تنبيه للطلاب' + extra : ' دون إشعار'}.`);
+          if (scheduled) toast(`⏳ جُدول الواجب لـ${targetLabel(t, className, stuName)}: يظهر للطلاب ${fmtDT(startAt)}${wantNotify ? ' ويصلهم الإشعار حينها' : ''}.`);
+          else { const extra = wantNotify ? await notifyTask({ id, ...t }, 'new') : ''; toast(`أُضيف الواجب لـ${targetLabel(t, className, stuName)}${wantNotify ? ' ووصل تنبيه للطلاب' + extra : ' دون إشعار'}.`); }
         }
       } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); btn.disabled = false; return; }
       await reload();
@@ -2814,13 +2912,67 @@ function viewTeacher(app) {
       const doneSet = new Set(D.subs.filter((x) => x.taskId === t.id).map((x) => x.pn));
       const done = target.filter((st) => doneSet.has(st.id)).length;
       return `<div class="card task${E && E.id === t.id ? ' editing' : ''}"><div class="t-main"><h3>${esc(t.title)}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
-        <div class="small muted">👥 ${esc(targetLabel(t, className, stuName))} · ${t.mode === 'hifz' ? 'غيباً' : 'نظراً'}${t.due ? ` · حتى ${fmtDate(t.due)}` : ''}</div>
+        <div class="small muted">👥 ${esc(targetLabel(t, className, stuName))} · ${t.mode === 'hifz' ? 'غيباً' : 'نظراً'}${taskEnd(t) ? ` · حتى ${esc(fmtDT(taskEnd(t)))}` : ''}</div>
+        ${!taskStarted(t) ? `<span class="pill gold-pill">⏳ مجدول: يبدأ ${esc(fmtDT(t.startAt))}</span>` : taskClosed(t) ? '<span class="pill mute">انتهى موعده</span>' : ''}${(lateReqs || []).filter((x) => x.id === t.id && x.status === 'pending').length ? ` <span class="pill warn">⏰ ${ar((lateReqs || []).filter((x) => x.id === t.id && x.status === 'pending').length)} طلب تسليم متأخر</span>` : ''}
         <div class="progress" style="margin-top:8px;max-width:260px"><i style="width:${target.length ? (done / target.length) * 100 : 0}%"></i></div><div class="small muted">${ar(done)} من ${ar(target.length)} طالباً أرسلوا</div></div>
         <div class="row"><button class="btn sm gold" type="button" data-dist="${esc(t.id)}">👥 التوزيع</button><button class="btn sm" type="button" data-edit="${esc(t.id)}">تعديل</button><button class="btn sm danger" type="button" data-del="${esc(t.id)}">حذف</button></div></div>`;
     }).join('') : '<div class="empty">لم تُنشئ أي واجب بعد. أنشئ الأول من النموذج.</div>';
     $$('[data-edit]', body).forEach((b) => (b.onclick = () => { editTask = D.tasks.find((t) => t.id === b.dataset.edit); drawTasks(body); $('#tkForm', body).scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#tkTitle', body).focus({ preventScroll: true }); }));
     $$('[data-del]', body).forEach((b) => (b.onclick = () => deleteTaskDialog(D.tasks.find((x) => x.id === b.dataset.del))));
     $$('[data-dist]', body).forEach((b) => (b.onclick = () => taskDistribution(D.tasks.find((x) => x.id === b.dataset.dist))));
+  }
+
+  /* --- التقييم الميسّر: إعادة حساب الدرجات السابقة مرة واحدة (لا تنزل أي درجة) --- */
+  async function migrateGrades() {
+    try {
+      const cfg = await store.getNotifySettings();
+      if (cfg.gradingV2At) return;
+      const cat = mergeCatalog(await store.getErrorCatalog().catch(() => null));
+      const ups = [];
+      D.subs.filter((x) => x.teacher && typeof x.teacher.total === 'number' && !x.teacher.v2).forEach((x) => {
+        const end = x.statuses ? readEnd(x.statuses) : Infinity;
+        const marks = (x.tj || []).filter((k) => !(k.r === 'v_missing' && k.i >= end)).map(({ d, max, ...k }) => k); // بالخصم الجديد
+        const g = marks.length ? gradeFrom(deduction(marks, cat), coverage(x.statuses)) : autoGrade(x)?.total ?? x.teacher.total;
+        const total = Math.max(x.teacher.total, g);
+        ups.push({ x, teacher: { ...x.teacher, total, v2: true, ...(total !== x.teacher.total ? { prevTotal: x.teacher.total } : {}) }, up: total > x.teacher.total });
+      });
+      let raised = 0;
+      if (ups.length) {
+        const r = await runBulk('تحديث الدرجات السابقة بالتقييم الميسّر', ups, async (u) => { await store.updateSubmission(u.x.pn, u.x.id, { teacher: u.teacher }); u.x.teacher = u.teacher; if (u.up) raised++; });
+        if (r.fail) { toast(`تعذر تحديث ${ar(r.fail)} من الدرجات، وسيُعاد المحاولة لاحقاً.`); return; }
+      }
+      await store.setNotifySettings({ gradingV2At: new Date().toISOString() });
+      schedulePublish();
+      const autoN = D.subs.filter((x) => !x.teacher && (x.taskId || x.retakeId) && x.statuses).length;
+      if (ups.length || autoN) toast(`✓ طُبّق التقييم الميسّر على الدرجات السابقة: ارتفعت ${ar(raised)} من درجاتك، و${ar(autoN)} درجة آلية، ولم تنزل أي درجة.`);
+      if (tab === 'subs' || tab === 'honor') drawBody();
+    } catch (e) { console.warn('grades v2', e); }
+  }
+
+  /* --- التسليم بعد انتهاء الموعد: طلبات الطلاب وقرار المعلم --- */
+  function drawLateCard(host) {
+    const P = lateReqs.filter((x) => x.status === 'pending' && D.tasks.some((t) => t.id === x.id));
+    if (!P.length) { host.innerHTML = ''; return; }
+    host.innerHTML = `<div class="card stack late-card" style="gap:8px"><h3 style="margin:0">⏰ طلبات تسليم بعد انتهاء الموعد (${ar(P.length)})</h3>
+      ${P.map((x) => `<div class="row" style="justify-content:space-between;gap:6px"><span><b>${esc(stuName(x.pn))}</b> <span class="small muted">${esc(className(D.students.find((s) => s.id === x.pn)?.classId))} · ${esc(D.tasks.find((t) => t.id === x.id)?.title || x.taskTitle || '')} · ${fmtDate(x.at)}</span></span>
+        <span class="row" style="gap:4px"><button class="btn sm primary" type="button" data-lok="${esc(x.pn)}|${esc(x.id)}">اسمح</button><button class="btn sm" type="button" data-lno="${esc(x.pn)}|${esc(x.id)}">اعتذر</button></span></div>`).join('')}</div>`;
+    $$('[data-lok]', host).forEach((b) => (b.onclick = () => { const [pn, id] = b.dataset.lok.split('|'); decideLate(pn, id, 'ok'); }));
+    $$('[data-lno]', host).forEach((b) => (b.onclick = () => { const [pn, id] = b.dataset.lno.split('|'); decideLate(pn, id, 'no'); }));
+  }
+  async function decideLate(pn, taskId, status, after) {
+    const t = D.tasks.find((x) => x.id === taskId);
+    try {
+      await store.decideLate(pn, taskId, status, { taskTitle: t?.title || '', name: stuName(pn) });
+      const i = lateReqs.findIndex((x) => x.pn === pn && x.id === taskId);
+      const d = { ...(i >= 0 ? lateReqs[i] : { id: taskId, pn }), status, decidedAt: new Date().toISOString() };
+      if (i >= 0) lateReqs[i] = d; else lateReqs.push(d);
+      const n = status === 'ok'
+        ? { type: 'late', title: `✓ سمح لك معلمك بتسليم «${t?.title || 'الواجب'}»`, body: 'يمكنك الآن تسجيل تسميعك رغم انتهاء الموعد. لا تؤجّل!', taskId, link: `./#/student/task/${taskId}`, tag: 'late-' + taskId }
+        : { type: 'late', title: `اعتذر معلمك عن قبول «${t?.title || 'الواجب'}» متأخراً`, body: 'حاول في الواجبات القادمة أن تسلّم قبل انتهاء الموعد، بارك الله فيك.', taskId, link: './#/student', tag: 'late-' + taskId };
+      try { const id = await store.addStudentNotif(pn, n); await sendPush(id, pn); } catch (e) { console.warn(e); }
+      toast(status === 'ok' ? `سُمح لـ${stuName(pn)} بالتسليم، ووصله إشعار.` : 'أُبلغ الطالب بالاعتذار.');
+      if (after) after(); else if (tab === 'tasks') drawBody();
+    } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
   }
 
   /* --- لمن الواجب: الاختيار، والتوزيع، والحذف عن صف أو طالب --- */
@@ -2863,17 +3015,20 @@ function viewTeacher(app) {
     const stuState = (s) => {
       if (!taskFor(t, s)) return exS.has(s.id) || (ex.has(s.classId) && (cl.includes('all') || cl.includes(s.classId))) ? 'removed' : 'none';
       const x = subOf(s.id);
-      return !x ? 'pending' : x.teacher?.total != null ? 'graded' : 'done';
+      return !x ? 'pending' : x.teacher?.total != null ? 'graded' : autoGrade(x) ? 'auto' : 'done';
     };
     const lbl = { on: '<span class="pill ok">✓ موجود</span>', removed: '<span class="pill bad">✕ محذوف عنه</span>', partial: '<span class="pill warn">طلاب بأسمائهم</span>', none: '<span class="pill mute">غير مُرسل</span>' };
-    const sl = { pending: '<span class="pill warn">⏳ لم يسلّم</span>', done: '<span class="pill">🎙️ سلّم</span>', graded: (s) => `<span class="pill ok">✓ قيّمته ${fmt10(subOf(s.id).teacher.total)}</span>`, removed: '<span class="pill bad">✕ محذوف عنه</span>', none: '<span class="pill mute">غير مُرسل</span>' };
+    const sl = { pending: '<span class="pill warn">⏳ لم يسلّم</span>', done: '<span class="pill">🎙️ سلّم</span>', graded: (s) => `<span class="pill ok">✓ قيّمته ${fmtQ(subOf(s.id).teacher.total)}</span>`, auto: (s) => { const g = autoGrade(subOf(s.id)); return `<span class="pill">🤖 ${fmtQ(g.total)}${g.pending && aiEnabled() ? ' ⏳' : ''}</span>`; }, removed: '<span class="pill bad">✕ محذوف عنه</span>', none: '<span class="pill mute">غير مُرسل</span>' };
     const tot = taskStudents(t, D.students), doneN = tot.filter((s) => subOf(s.id)).length;
     openModal(`<div class="stack dist"><h2>👥 توزيع الواجب: ${esc(t.title)}</h2>
-      <p class="small muted" style="margin:0">${esc(rangeLabel(t.surah, t.from, t.to))} · موجّه الآن إلى <b>${ar(tot.length)}</b> طالباً، سلّم منهم ${ar(doneN)}.</p>
+      <p class="small muted" style="margin:0">${esc(rangeLabel(t.surah, t.from, t.to))}${taskEnd(t) ? ` · ${taskClosed(t) ? 'انتهى موعده' : 'ينتهي'} ${esc(fmtDT(taskEnd(t)))}` : ''}${!taskStarted(t) ? ` · ⏳ يبدأ ${esc(fmtDT(t.startAt))}` : ''} · موجّه الآن إلى <b>${ar(tot.length)}</b> طالباً، سلّم منهم ${ar(doneN)}.</p>
       <div class="dist-legend small"><span>✓ موجود</span><span>✕ محذوف عنه (تسليماته السابقة محفوظة)</span><span>غير مُرسل</span></div>
       ${classRows.map(({ c, state, studs, recv }) => `<details class="dist-c ${state}" ${state === 'partial' ? 'open' : ''}><summary><b>${esc(c.name)}</b> ${lbl[state]} <span class="small muted">${ar(recv.length)} من ${ar(studs.length)}</span>
           <span class="dist-act">${state === 'on' ? `<button class="btn sm danger" type="button" data-rmc="${esc(c.id)}">احذفه عن الصف</button>` : `<button class="btn sm" type="button" data-adc="${esc(c.id)}">${state === 'removed' ? '↺ أعِده للصف' : '+ أرسله للصف'}</button>`}</span></summary>
-        <ul class="dist-s">${studs.map((s) => { const k = stuState(s); return `<li><span>${esc(s.name)}</span>${typeof sl[k] === 'function' ? sl[k](s) : sl[k]}<span class="dist-act">${k === 'removed' || k === 'none' ? `<button class="btn sm ghost" type="button" data-ads="${esc(s.id)}">${k === 'removed' ? '↺ أعِده' : '+ أرسله'}</button>` : `<button class="btn sm ghost danger" type="button" data-rms="${esc(s.id)}">احذفه عنه</button>`}</span></li>`; }).join('') || '<li class="muted">لا طلاب</li>'}</ul></details>`).join('')}
+        <ul class="dist-s">${studs.map((s) => { const k = stuState(s); const lr = lateReqs.find((x) => x.pn === s.id && x.id === t.id), closed = k === 'pending' && taskClosed(t);
+          const lateUi = closed ? (lr?.status === 'ok' ? '<span class="pill ok">مسموح له متأخراً</span>' : lr?.status === 'pending' ? `<span class="pill warn">⏰ يطلب السماح</span><button class="btn sm primary" type="button" data-lok="${esc(s.id)}">اسمح</button><button class="btn sm" type="button" data-lno="${esc(s.id)}">اعتذر</button>` : `${lr?.status === 'no' ? '<span class="pill mute">اعتذرت له</span>' : ''}<button class="btn sm" type="button" data-lok="${esc(s.id)}">اسمح له بالتسليم</button>`) : '';
+          const late = subOf(s.id)?.late ? ' <span class="pill warn">متأخر</span>' : '';
+          return `<li><span>${esc(s.name)}</span>${typeof sl[k] === 'function' ? sl[k](s) : sl[k]}${late}${lateUi}<span class="dist-act">${k === 'removed' || k === 'none' ? `<button class="btn sm ghost" type="button" data-ads="${esc(s.id)}">${k === 'removed' ? '↺ أعِده' : '+ أرسله'}</button>` : `<button class="btn sm ghost danger" type="button" data-rms="${esc(s.id)}">احذفه عنه</button>`}</span></li>`; }).join('') || '<li class="muted">لا طلاب</li>'}</ul></details>`).join('')}
       <div class="row"><button class="btn primary" type="button" data-close>تم</button></div></div>`, (m) => {
       const apply = async (patch, msg, notifyPns = []) => {
         const nt = { ...t, ...patch };
@@ -2886,6 +3041,8 @@ function viewTeacher(app) {
           toast(msg + extra + '.'); await reload(); taskDistribution(D.tasks.find((x) => x.id === t.id));
         } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
       };
+      $$('[data-lok]', m).forEach((b) => (b.onclick = () => decideLate(b.dataset.lok, t.id, 'ok', () => taskDistribution(t))));
+      $$('[data-lno]', m).forEach((b) => (b.onclick = () => decideLate(b.dataset.lno, t.id, 'no', () => taskDistribution(t))));
       const cls = () => (t.classId === 'custom' ? [...(t.classIds || [])] : t.classId === 'all' ? [] : [t.classId]);
       $$('[data-rmc]', m).forEach((b) => (b.onclick = () => apply({ exClasses: [...new Set([...(t.exClasses || []), b.dataset.rmc])], exStudents: (t.exStudents || []), studentIds: tStudents(t).filter((pn) => D.students.find((x) => x.id === pn)?.classId !== b.dataset.rmc), ...(t.classId === 'custom' ? {} : {}) }, `حُذف الواجب عن ${className(b.dataset.rmc)}`)));
       $$('[data-adc]', m).forEach((b) => (b.onclick = () => {
@@ -3691,7 +3848,6 @@ function viewTeacher(app) {
       paint(m);
     });
   }
-  const toLocalInput = (iso) => { const d = new Date(iso); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
   /** شاشة البروجكتر: الشجرة، أو السباق المباشر لمباراة */
   function heroProjector(tid, mid) {
     closeModal(); projOff?.();
@@ -3966,7 +4122,7 @@ function viewTeacher(app) {
   }
 
   load();
-  return { destroy: () => { unsub?.(); heroOffs.forEach((f) => f()); clearInterval(heroIv); projOff?.(); } };
+  return { destroy: () => { unsub?.(); heroOffs.forEach((f) => f()); clearInterval(heroIv); clearInterval(aiQIv); projOff?.(); } };
 }
 
 async function teacherLogin(app) {

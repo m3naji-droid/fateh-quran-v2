@@ -127,6 +127,19 @@ export async function notifyFeedback(pn, id) {
   return res.json();
 }
 
+/** طلب تسليم متأخر: الخادم يتحقق من الطالب ثم ينبّه المعلم */
+export async function notifyLate(pn, taskId) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/late', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ student: pn, task: taskId }),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 /** تحدٍّ ودّي: يُبلغ خادم الإشعارات بتحدٍّ جديد أو بانتهائه (الخادم يتحقق ويقرأ التفاصيل من قاعدة البيانات) */
 export async function notifyChallenge(id, event) {
   if (!PUSH.url || store.mode !== 'cloud') return null;

@@ -903,3 +903,13 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 .hero-proj .hb-col { min-width: 220px; }
 .hero-proj .hb-p { font-size: 18px; padding: 10px 14px; }
 .hero-proj .hb-p.win { background: #1d4d33; }
+
+/* ===== الدرجة الآلية الميسّرة والتسليم المتأخر ===== */
+.grade-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 16px; background: linear-gradient(135deg, var(--green-2, #e6f2ec), var(--card)); border: 1px solid color-mix(in srgb, var(--green, #0d5c46) 30%, transparent); }
+.grade-card:empty { display: none; }
+.gc-num { display: flex; align-items: baseline; gap: 4px; color: var(--green, #0d5c46); }
+.gc-num b { font: 700 40px/1 'IBM Plex Sans Arabic', sans-serif; }
+.gc-tx { display: flex; flex-direction: column; gap: 2px; }
+.late-card { border-inline-start: 4px solid var(--warn); }
+.tk-time input[type="datetime-local"] { width: 100%; }
+.dist-s li .btn.sm { margin-inline-start: 4px; }

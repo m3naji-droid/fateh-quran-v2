@@ -1,13 +1,17 @@
 // لوحة الشرف: تحدي الصفوف، وقارئ الصف، وشيخ المرحلة
-// نقاط الطالب = مجموع أفضل درجة له في كل واجب (درجة المعلم إن وُجدت، وإلا الدرجة الآلية من ١٠)
+// نقاط الطالب = مجموع أفضل درجة له في كل واجب (درجة المعلم إن وُجدت، وإلا الدرجة الآلية الميسّرة من ١٠)
 // + نقاط التحديات الودّية (مُدخلات فيها bonus)
 // نقاط الصف = مجموع نقاط كل طلابه
+
+import { autoGrade } from './grading.js';
 
 const TOP = 5;
 const round1 = (v) => Math.round(v * 10) / 10;
 
 export function subScore(x) {
   if (x.teacher && typeof x.teacher.total === 'number') return x.teacher.total;
+  const g = autoGrade(x); // التقييم الآلي الميسّر (يشمل تحليل التجويد إن وُجد)
+  if (g) return g.total;
   if (x.percent != null) return x.percent / 10;
   return null;
 }
