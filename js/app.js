@@ -9,6 +9,7 @@ import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLe
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
+import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents } from './targets.js';
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
@@ -875,7 +876,7 @@ function viewStudent(app) {
     openTask(data.tasks.find((t) => t.id === r.taskId) || null, r);
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
-  let notifs = [], offNotifs = null;
+  let notifs = [], offNotifs = null, knownTasks = new Set(), loadedAt = '';
   const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb|challenge|khatma)\/([\w-]+)/);
   let openKhId = deep && deep[1] === 'khatma' ? deep[2] : null;
   let myKh = [];
@@ -1262,7 +1263,8 @@ function viewStudent(app) {
       const [tasks, subs, classes, rank, retakes, activity] = await Promise.all([store.listTasks(), store.studentSubmissions(me.id), store.listClasses(), store.getMyRank(me).catch(() => null), store.listRetakes(me.id).catch(() => []), store.listActivity(me.id, addDays(riyadhDay(), -400)).catch(() => [])]);
       data.retakes = retakes;
       me.rankInfo = rank;
-      data = { retakes, activity, tasks: tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
+      knownTasks = new Set(tasks.map((t) => t.id)); loadedAt = new Date().toISOString();
+      data = { retakes, activity, tasks: tasks.filter((t) => taskFor(t, me)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), subs: subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), classes };
     } catch (e) {
       console.error(e);
       app.innerHTML = `<div class="empty">تعذر تحميل البيانات: ${esc(e.message)}</div>`;
@@ -1296,7 +1298,9 @@ function viewStudent(app) {
         if ($('#stBody', app)) { draw(); announceGrades(); }
       }
       const first = !notifs.length && !paintBell.done;
-      notifs = L; paintBell(); paintBell.done = true; paintAnnBar();
+      // تنبيهات واجب حُذف أو حُذف عن الطالب أو صفه: لا تظهر
+      notifs = L.filter((n) => !(n.taskId && ['task', 'task-edit', 'remind'].includes(n.type) && knownTasks.has(n.taskId) && !data.tasks.some((x) => x.id === n.taskId)) && !(n.taskId && ['task', 'task-edit', 'remind'].includes(n.type) && knownTasks.size && !knownTasks.has(n.taskId) && n.createdAt < (loadedAt || '')));
+      paintBell(); paintBell.done = true; paintAnnBar();
       if (openAnnId && anns().some((n) => n.annId === openAnnId)) { const id = openAnnId; openAnnId = null; openAnn(id); }
       const months = L.filter((n) => n.type === 'month');
       const mDeep = openMonthYm && months.find((n) => n.ym === openMonthYm);
@@ -1304,8 +1308,8 @@ function viewStudent(app) {
       else if ($('#stBody', app)) { const seen = new Set(pref.get('monthSeen_' + me.id, [])); const fresh = months.find((n) => !seen.has(n.ym)); if (fresh && !openMonth.pending) { openMonth.pending = true; whenModalFree(() => { openMonth.pending = false; if ($('#stBody', app) && !new Set(pref.get('monthSeen_' + me.id, [])).has(fresh.ym)) openMonth(fresh); }); } }
       const onList = $('#stBody', app) && tab === 'tasks';
       // واجب جديد وصل والطالب على صفحة الواجبات: نحدّث القائمة
-      if (L.some((n) => n.taskId && !data.tasks.some((t) => t.id === n.taskId))) {
-        try { const tasks = await store.listTasks(); data.tasks = tasks.filter((t) => t.classId === 'all' || t.classId === me.classId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
+      if (L.some((n) => n.taskId && !knownTasks.has(n.taskId))) {
+        try { const tasks = await store.listTasks(); knownTasks = new Set(tasks.map((t) => t.id)); data.tasks = tasks.filter((t) => taskFor(t, me)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch {}
         if ($('#stBody', app) && tab === 'tasks') draw();
       } else if (onList && first) draw();
     }, me.id);
@@ -1874,7 +1878,7 @@ function viewTeacher(app) {
       }
       // ٣) فاته واجبان فأكثر انتهى موعدهما
       const done = new Set(subs.map((x) => x.taskId).filter(Boolean));
-      const missed = D.tasks.filter((t) => t.due && t.due < today && (t.classId === 'all' || t.classId === s.classId) && !done.has(t.id) && (t.createdAt || '') >= (s.accountAt || s.createdAt || '')).length; // لا يُحاسب على واجبات قبل إضافته
+      const missed = D.tasks.filter((t) => t.due && t.due < today && taskFor(t, s) && !done.has(t.id) && (t.createdAt || '') >= (s.accountAt || s.createdAt || '')).length; // لا يُحاسب على واجبات قبل إضافته
       if (missed >= 2) reasons.push({ k: 'miss', t: `📋 فاته ${nWord(missed, 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')}` });
       if (!reasons.length) return;
       const keys = reasons.map((r) => r.k).sort().join(',');
@@ -2578,10 +2582,20 @@ function viewTeacher(app) {
     const n = kind === 'new'
       ? { type: 'task', title: `واجب جديد: ${t.title}`, body: taskNotifBody(t) }
       : { type: 'task-edit', title: `تعديل على واجب: ${t.title}`, body: `${changes} · ${taskNotifBody(t)}` };
-    const id = await store.addNotif({ ...n, classId: t.classId, taskId: t.id, link: `./#/student/task/${t.id}`, tag: 'task-' + t.id });
+    const base = { ...n, taskId: t.id, link: `./#/student/task/${t.id}`, tag: 'task-' + t.id };
     try {
-      const r = await sendPush(id);
-      return !r ? '' : r.sent ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}${deferNote(r)}` : r.deferred ? deferNote(r) : '، ولم يفعّل أحد من طلاب الصف إشعارات الجوال بعد';
+      // صف أو كل الصفوف: تنبيه واحد للصف. واستهداف مخصص: تنبيه لكل صف مختار، ولكل طالب بعينه
+      let r = { sent: 0, deferred: 0 };
+      const addUp = (x) => { if (x) { r.sent += x.sent || 0; r.deferred += x.deferred || 0; } };
+      const cls = tClasses(t).filter((c) => !(t.exClasses || []).includes(c));
+      for (const c of cls) { const id = await store.addNotif({ ...base, classId: c }); addUp(await sendPush(id)); }
+      const solo = tStudents(t).filter((pn) => !(t.exStudents || []).includes(pn) && !cls.includes(D.students.find((x) => x.id === pn)?.classId));
+      if (solo.length) {
+        const items = [];
+        for (const pn of solo) items.push({ notif: await store.addStudentNotif(pn, base), student: pn });
+        addUp(await sendPushBatch(items));
+      }
+      return !r.sent && !r.deferred ? '، ولم يفعّل أحد من المستهدفين إشعارات الجوال بعد' : r.sent ? `، ووصل إشعار إلى ${r.sent === 1 ? 'جهاز واحد' : r.sent === 2 ? 'جهازين' : `${ar(r.sent)} ${r.sent <= 10 ? 'أجهزة' : 'جهازاً'}`}${deferNote(r)}` : r.deferred ? deferNote(r) : '، ولم يفعّل أحد من طلاب الصف إشعارات الجوال بعد';
     } catch (e) { console.warn(e); return `. تعذر إرسال إشعار الجوال (${e.message})، لكن التنبيه ظاهر في الموقع`; }
   }
   function drawTasks(body) {
@@ -2594,10 +2608,10 @@ function viewTeacher(app) {
         <label class="field">العنوان<input type="text" id="tkTitle" required placeholder="مثال: حفظ أول سورة يس"></label>
         ${rangePicker('tk', r0)}
         <div class="row">
-          <label class="field" style="flex:1 1 140px">الصف<select id="tkClass"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
           <label class="field" style="flex:1 1 140px">النوع<select id="tkMode"><option value="hifz">تسميع غيباً</option><option value="recite">تلاوة نظراً</option></select></label>
           <label class="field" style="flex:1 1 140px">آخر موعد<input type="date" id="tkDue"></label>
         </div>
+        <div class="field"><span>لمن الواجب؟</span><div class="tgt" id="tkTgt"></div></div>
         <label class="field">تعليمات للطلاب (اختياري)<input type="text" id="tkNotes" placeholder="مثال: ركّز على أحكام النون الساكنة"></label>
         <div class="remind-opt"><label class="row small" style="gap:8px"><input type="checkbox" id="tkRemind" ${E ? (E.remindEve ? 'checked' : '') : 'checked'}> <span>⏰ ذكّر الطلاب مساء اليوم السابق للموعد <span class="muted">(الساعة ${esc(remindTimeLabel())}، يحتاج موعداً)</span></span></label>
           <select id="tkRemindT" aria-label="لمن التذكير"><option value="pending">لمن لم يسلّم فقط</option><option value="all" ${E?.remindTarget === 'all' ? 'selected' : ''}>لكل طلاب الصف</option></select></div>
@@ -2609,16 +2623,21 @@ function viewTeacher(app) {
     const readRange = bindRangePicker(body, 'tk', (r) => { if (!$('#tkTitle', body).dataset.touched) $('#tkTitle', body).value = `${surahName(r.surah)} ${ar(r.from)}–${ar(r.to)}`; });
     if (E) {
       $('#tkTitle', body).value = E.title; $('#tkTitle', body).dataset.touched = '1';
-      $('#tkClass', body).value = E.classId || 'all'; $('#tkMode', body).value = E.mode || 'hifz';
+      $('#tkMode', body).value = E.mode || 'hifz';
       $('#tkDue', body).value = E.due || ''; $('#tkNotes', body).value = E.notes || '';
       $('#tkCancel', body).onclick = () => { editTask = null; drawTasks(body); };
     } else $('#tkTitle', body).value = `${surahName(last.surah)} ${ar(last.from)}–${ar(last.to)}`;
     $('#tkTitle', body).oninput = (e) => (e.target.dataset.touched = '1');
+    const tgt = targetPicker($('#tkTgt', body), E ? { all: E.classId === 'all', classIds: tClasses(E).filter((c) => c !== 'all' && !(E.exClasses || []).includes(c)), studentIds: tStudents(E).filter((x) => !(E.exStudents || []).includes(x)) } : { all: true, classIds: [], studentIds: [] });
     $('#tkForm', body).onsubmit = async (e) => {
       e.preventDefault();
       const btn = e.submitter; btn.disabled = true;
       const r = readRange();
-      const t = { title: $('#tkTitle', body).value.trim(), ...r, classId: $('#tkClass', body).value, mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() };
+      const sel = tgt.value();
+      if (!sel.all && !sel.classIds.length && !sel.studentIds.length) { btn.disabled = false; return toast('اختر لمن الواجب: كل الصفوف، أو صفاً، أو طالباً.'); }
+      const t = { title: $('#tkTitle', body).value.trim(), ...r, ...buildTarget(sel), mode: $('#tkMode', body).value, due: $('#tkDue', body).value || '', notes: $('#tkNotes', body).value.trim() };
+      // ما اختاره المعلم صراحةً يُلغي حذفاً سابقاً عنه
+      if (E) { t.exClasses = (E.exClasses || []).filter((c) => !sel.classIds.includes(c) && !sel.all); t.exStudents = (E.exStudents || []).filter((x) => !sel.studentIds.includes(x)); }
       t.remindEve = $('#tkRemind', body).checked && !!t.due;
       t.remindTarget = $('#tkRemindT', body).value;
       const wantNotify = $('#tkNotify', body).checked;
@@ -2634,23 +2653,135 @@ function viewTeacher(app) {
         } else {
           const id = await store.saveTask(t);
           const extra = wantNotify ? await notifyTask({ id, ...t }, 'new') : '';
-          toast(`أُضيف الواجب${wantNotify ? ' ووصل تنبيه لطلاب الصف' + extra : ' دون إشعار'}.`);
+          toast(`أُضيف الواجب لـ${targetLabel(t, className, stuName)}${wantNotify ? ' ووصل تنبيه للطلاب' + extra : ' دون إشعار'}.`);
         }
       } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); btn.disabled = false; return; }
       await reload();
     };
     const L = [...D.tasks].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     $('#tkList', body).innerHTML = L.length ? L.map((t) => {
-      const target = D.students.filter((st) => t.classId === 'all' || st.classId === t.classId);
+      const target = taskStudents(t, D.students);
       const doneSet = new Set(D.subs.filter((x) => x.taskId === t.id).map((x) => x.pn));
       const done = target.filter((st) => doneSet.has(st.id)).length;
       return `<div class="card task${E && E.id === t.id ? ' editing' : ''}"><div class="t-main"><h3>${esc(t.title)}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
-        <div class="small muted">${esc(className(t.classId))} · ${t.mode === 'hifz' ? 'غيباً' : 'نظراً'}${t.due ? ` · حتى ${fmtDate(t.due)}` : ''}</div>
+        <div class="small muted">👥 ${esc(targetLabel(t, className, stuName))} · ${t.mode === 'hifz' ? 'غيباً' : 'نظراً'}${t.due ? ` · حتى ${fmtDate(t.due)}` : ''}</div>
         <div class="progress" style="margin-top:8px;max-width:260px"><i style="width:${target.length ? (done / target.length) * 100 : 0}%"></i></div><div class="small muted">${ar(done)} من ${ar(target.length)} طالباً أرسلوا</div></div>
-        <div class="row"><button class="btn sm" type="button" data-edit="${esc(t.id)}">تعديل</button><button class="btn sm danger" type="button" data-del="${esc(t.id)}">حذف</button></div></div>`;
+        <div class="row"><button class="btn sm gold" type="button" data-dist="${esc(t.id)}">👥 التوزيع</button><button class="btn sm" type="button" data-edit="${esc(t.id)}">تعديل</button><button class="btn sm danger" type="button" data-del="${esc(t.id)}">حذف</button></div></div>`;
     }).join('') : '<div class="empty">لم تُنشئ أي واجب بعد. أنشئ الأول من النموذج.</div>';
     $$('[data-edit]', body).forEach((b) => (b.onclick = () => { editTask = D.tasks.find((t) => t.id === b.dataset.edit); drawTasks(body); $('#tkForm', body).scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#tkTitle', body).focus({ preventScroll: true }); }));
-    $$('[data-del]', body).forEach((b) => (b.onclick = async () => { if (!(await confirmBox('حذف هذا الواجب؟ تبقى تسليمات الطلاب محفوظة.'))) return; if (editTask?.id === b.dataset.del) editTask = null; await store.deleteTask(b.dataset.del); await reload(); }));
+    $$('[data-del]', body).forEach((b) => (b.onclick = () => deleteTaskDialog(D.tasks.find((x) => x.id === b.dataset.del))));
+    $$('[data-dist]', body).forEach((b) => (b.onclick = () => taskDistribution(D.tasks.find((x) => x.id === b.dataset.dist))));
+  }
+
+  /* --- لمن الواجب: الاختيار، والتوزيع، والحذف عن صف أو طالب --- */
+  const stuName = (pn) => D.students.find((x) => x.id === pn)?.name || 'طالب';
+  /** منتقي المستهدفين: كل الصفوف، أو صفوف، و/أو طلاب بأسمائهم */
+  function targetPicker(host, init) {
+    const st = { all: !!init.all, classIds: new Set(init.classIds), studentIds: new Set(init.studentIds) };
+    let q = '';
+    const count = () => taskStudents(buildTarget({ all: st.all, classIds: [...st.classIds], studentIds: [...st.studentIds] }), D.students).length;
+    const paint = () => {
+      const groups = D.classes.map((c) => ({ c, list: D.students.filter((s) => s.classId === c.id && (!q || s.name.includes(q))) })).filter((g) => g.list.length);
+      host.innerHTML = `<div class="tgt-row"><label class="tgt-chip${st.all ? ' on' : ''}"><input type="checkbox" data-tall ${st.all ? 'checked' : ''}> 🏫 كل الصفوف</label>
+          ${D.classes.map((c) => `<label class="tgt-chip${!st.all && st.classIds.has(c.id) ? ' on' : ''}${st.all ? ' dim' : ''}"><input type="checkbox" data-tcls="${esc(c.id)}" ${!st.all && st.classIds.has(c.id) ? 'checked' : ''} ${st.all ? 'disabled' : ''}> ${esc(c.name)}</label>`).join('')}</div>
+        <details class="tgt-stu" ${st.studentIds.size || q ? 'open' : ''}><summary>👤 طلاب بأسمائهم${st.studentIds.size ? ` (${ar(st.studentIds.size)})` : ''} <span class="muted small">— لإرسال الواجب لطالب معيّن</span></summary>
+          ${st.all ? '<p class="small muted" style="margin:6px 0">«كل الصفوف» تشمل الجميع. ألغِ اختيارها لتختار طلاباً بأعينهم.</p>' : `<input type="search" data-tq placeholder="ابحث باسم الطالب" value="${esc(q)}">
+          <div class="tgt-list">${groups.map((g) => `<div class="tgt-g"><b class="small">${esc(g.c.name)}${st.classIds.has(g.c.id) ? ' <span class="muted">(الصف كله مختار)</span>' : ''}</b>${g.list.map((s) => `<label class="tgt-s"><input type="checkbox" data-tstu="${esc(s.id)}" ${st.studentIds.has(s.id) || st.classIds.has(g.c.id) ? 'checked' : ''} ${st.classIds.has(g.c.id) ? 'disabled' : ''}> ${esc(s.name)}</label>`).join('')}</div>`).join('') || '<span class="small muted">لا نتائج</span>'}</div>`}
+        </details>
+        <div class="small tgt-sum">سيصل الواجب إلى <b>${ar(count())}</b> ${count() === 1 ? 'طالب' : 'طالباً'}</div>`;
+      $('[data-tall]', host).onchange = (e) => { st.all = e.target.checked; paint(); };
+      $$('[data-tcls]', host).forEach((c) => (c.onchange = () => { c.checked ? st.classIds.add(c.dataset.tcls) : st.classIds.delete(c.dataset.tcls); paint(); }));
+      $$('[data-tstu]', host).forEach((c) => (c.onchange = () => { c.checked ? st.studentIds.add(c.dataset.tstu) : st.studentIds.delete(c.dataset.tstu); paint(); }));
+      const qi = $('[data-tq]', host); if (qi) qi.oninput = (e) => { q = e.target.value.trim(); const pos = e.target.selectionStart; paint(); const n = $('[data-tq]', host); n.focus(); n.setSelectionRange(pos, pos); };
+    };
+    paint();
+    return { value: () => ({ all: st.all, classIds: [...st.classIds], studentIds: [...st.studentIds].filter((pn) => !st.classIds.has(D.students.find((x) => x.id === pn)?.classId)) }) };
+  }
+  /** شاشة توزيع الواجب: الصفوف والطلاب (موجود/محذوف) وحالة كل طالب */
+  function taskDistribution(t) {
+    if (!t) return;
+    const subs = D.subs.filter((x) => x.taskId === t.id);
+    const subOf = (pn) => subs.filter((x) => x.pn === pn).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+    const cl = tClasses(t), ex = new Set(t.exClasses || []), exS = new Set(t.exStudents || []), solo = new Set(tStudents(t));
+    const classRows = D.classes.map((c) => {
+      const inT = cl.includes('all') || cl.includes(c.id), removed = inT && ex.has(c.id);
+      const studs = D.students.filter((s) => s.classId === c.id);
+      const recv = studs.filter((s) => taskFor(t, s));
+      if (!inT && !recv.length && !studs.some((s) => solo.has(s.id) || exS.has(s.id))) return { c, state: 'none', studs, recv };
+      return { c, state: removed ? 'removed' : inT ? 'on' : 'partial', studs, recv };
+    });
+    const stuState = (s) => {
+      if (!taskFor(t, s)) return exS.has(s.id) || (ex.has(s.classId) && (cl.includes('all') || cl.includes(s.classId))) ? 'removed' : 'none';
+      const x = subOf(s.id);
+      return !x ? 'pending' : x.teacher?.total != null ? 'graded' : 'done';
+    };
+    const lbl = { on: '<span class="pill ok">✓ موجود</span>', removed: '<span class="pill bad">✕ محذوف عنه</span>', partial: '<span class="pill warn">طلاب بأسمائهم</span>', none: '<span class="pill mute">غير مُرسل</span>' };
+    const sl = { pending: '<span class="pill warn">⏳ لم يسلّم</span>', done: '<span class="pill">🎙️ سلّم</span>', graded: (s) => `<span class="pill ok">✓ قيّمته ${fmt10(subOf(s.id).teacher.total)}</span>`, removed: '<span class="pill bad">✕ محذوف عنه</span>', none: '<span class="pill mute">غير مُرسل</span>' };
+    const tot = taskStudents(t, D.students), doneN = tot.filter((s) => subOf(s.id)).length;
+    openModal(`<div class="stack dist"><h2>👥 توزيع الواجب: ${esc(t.title)}</h2>
+      <p class="small muted" style="margin:0">${esc(rangeLabel(t.surah, t.from, t.to))} · موجّه الآن إلى <b>${ar(tot.length)}</b> طالباً، سلّم منهم ${ar(doneN)}.</p>
+      <div class="dist-legend small"><span>✓ موجود</span><span>✕ محذوف عنه (تسليماته السابقة محفوظة)</span><span>غير مُرسل</span></div>
+      ${classRows.map(({ c, state, studs, recv }) => `<details class="dist-c ${state}" ${state === 'partial' ? 'open' : ''}><summary><b>${esc(c.name)}</b> ${lbl[state]} <span class="small muted">${ar(recv.length)} من ${ar(studs.length)}</span>
+          <span class="dist-act">${state === 'on' ? `<button class="btn sm danger" type="button" data-rmc="${esc(c.id)}">احذفه عن الصف</button>` : `<button class="btn sm" type="button" data-adc="${esc(c.id)}">${state === 'removed' ? '↺ أعِده للصف' : '+ أرسله للصف'}</button>`}</span></summary>
+        <ul class="dist-s">${studs.map((s) => { const k = stuState(s); return `<li><span>${esc(s.name)}</span>${typeof sl[k] === 'function' ? sl[k](s) : sl[k]}<span class="dist-act">${k === 'removed' || k === 'none' ? `<button class="btn sm ghost" type="button" data-ads="${esc(s.id)}">${k === 'removed' ? '↺ أعِده' : '+ أرسله'}</button>` : `<button class="btn sm ghost danger" type="button" data-rms="${esc(s.id)}">احذفه عنه</button>`}</span></li>`; }).join('') || '<li class="muted">لا طلاب</li>'}</ul></details>`).join('')}
+      <div class="row"><button class="btn primary" type="button" data-close>تم</button></div></div>`, (m) => {
+      const apply = async (patch, msg, notifyPns = []) => {
+        const nt = { ...t, ...patch };
+        if (!taskStudents(nt, D.students).length && !(await confirmBox('بعد هذا لن يبقى أحد يصله الواجب. احذفه نهائياً؟', 'احذفه نهائياً'))) return;
+        try {
+          if (!taskStudents(nt, D.students).length) { await store.deleteTask(t.id); toast('حُذف الواجب نهائياً. تبقى تسليمات الطلاب محفوظة.'); await reload(); closeModal(); return; }
+          await store.saveTask({ id: t.id, ...patch }); Object.assign(t, patch);
+          let extra = '';
+          if (notifyPns.length) { const items = []; for (const pn of notifyPns) items.push({ notif: await store.addStudentNotif(pn, { type: 'task', title: `واجب جديد: ${t.title}`, body: taskNotifBody(t), taskId: t.id, link: `./#/student/task/${t.id}`, tag: 'task-' + t.id }), student: pn }); try { const r = await sendPushBatch(items); if (r?.sent) extra = ` ووصل إشعار إلى ${ar(r.sent)} جهازاً`; } catch {} }
+          toast(msg + extra + '.'); await reload(); taskDistribution(D.tasks.find((x) => x.id === t.id));
+        } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+      };
+      const cls = () => (t.classId === 'custom' ? [...(t.classIds || [])] : t.classId === 'all' ? [] : [t.classId]);
+      $$('[data-rmc]', m).forEach((b) => (b.onclick = () => apply({ exClasses: [...new Set([...(t.exClasses || []), b.dataset.rmc])], exStudents: (t.exStudents || []), studentIds: tStudents(t).filter((pn) => D.students.find((x) => x.id === pn)?.classId !== b.dataset.rmc), ...(t.classId === 'custom' ? {} : {}) }, `حُذف الواجب عن ${className(b.dataset.rmc)}`)));
+      $$('[data-adc]', m).forEach((b) => (b.onclick = () => {
+        const c = b.dataset.adc, wasEx = (t.exClasses || []).includes(c);
+        const patch = { exClasses: (t.exClasses || []).filter((x) => x !== c), exStudents: (t.exStudents || []).filter((pn) => D.students.find((x) => x.id === pn)?.classId !== c) };
+        if (!wasEx && t.classId !== 'all') Object.assign(patch, { classId: 'custom', classIds: [...new Set([...cls(), c])], studentIds: tStudents(t).filter((pn) => D.students.find((x) => x.id === pn)?.classId !== c) });
+        const newly = D.students.filter((s) => s.classId === c && !taskFor(t, s)).map((s) => s.id);
+        apply(patch, `${wasEx ? 'أُعيد' : 'أُرسل'} الواجب إلى ${className(c)}`, newly);
+      }));
+      $$('[data-rms]', m).forEach((b) => (b.onclick = () => { const pn = b.dataset.rms; apply({ exStudents: [...new Set([...(t.exStudents || []), pn])], studentIds: tStudents(t).filter((x) => x !== pn), ...(t.classId === 'custom' ? {} : {}) }, `حُذف الواجب عن ${stuName(pn)}`); }));
+      $$('[data-ads]', m).forEach((b) => (b.onclick = () => {
+        const pn = b.dataset.ads, patch = { exStudents: (t.exStudents || []).filter((x) => x !== pn) };
+        const s = D.students.find((x) => x.id === pn);
+        if (!taskFor({ ...t, ...patch }, s)) Object.assign(patch, { classId: 'custom', classIds: t.classId === 'all' ? D.classes.map((c) => c.id).filter((c) => !(t.exClasses || []).includes(c)) : cls(), studentIds: [...new Set([...tStudents(t), pn])], exClasses: t.classId === 'all' ? [] : (t.exClasses || []) });
+        apply(patch, `${(t.exStudents || []).includes(pn) ? 'أُعيد' : 'أُرسل'} الواجب إلى ${stuName(pn)}`, [pn]);
+      }));
+    });
+  }
+  /** حذف الواجب: عن الجميع نهائياً، أو عن صف، أو عن طالب */
+  function deleteTaskDialog(t) {
+    if (!t) return;
+    const studs = taskStudents(t, D.students);
+    const clsIn = [...new Set(studs.map((s) => s.classId))];
+    openModal(`<form class="stack" id="dtF"><h2>🗑️ حذف الواجب «${esc(t.title)}»</h2>
+      <label class="dt-opt"><input type="radio" name="dt" value="all" checked> <span><b>عن الجميع (حذف نهائي)</b><small>يختفي من كل الصفوف والطلاب.</small></span></label>
+      ${clsIn.length ? `<label class="dt-opt"><input type="radio" name="dt" value="cls"> <span><b>عن صف معيّن</b><select id="dtC">${clsIn.map((c) => `<option value="${esc(c)}">${esc(className(c))}</option>`).join('')}</select></span></label>` : ''}
+      ${studs.length ? `<label class="dt-opt"><input type="radio" name="dt" value="stu"> <span><b>عن طالب معيّن</b><select id="dtS">${studs.slice().sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((s) => `<option value="${esc(s.id)}">${esc(s.name)} — ${esc(className(s.classId))}</option>`).join('')}</select></span></label>` : ''}
+      <p class="small muted" style="margin:0">في كل الحالات تبقى التسليمات السابقة ودرجاتها ونقاطها محفوظة في السجل.</p>
+      <div class="row"><button class="btn danger" type="submit">احذف</button><button class="btn" type="button" id="dtDist">👥 افتح التوزيع</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      $$('select', m).forEach((sel) => (sel.onfocus = sel.onchange = () => { const r = sel.closest('.dt-opt').querySelector('input'); r.checked = true; }));
+      $('#dtDist', m).onclick = () => taskDistribution(t);
+      $('#dtF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const how = $('input[name=dt]:checked', m).value;
+        try {
+          if (how === 'all') { if (editTask?.id === t.id) editTask = null; await store.deleteTask(t.id); closeModal(); toast('حُذف الواجب عن الجميع. تبقى التسليمات محفوظة.'); await reload(); return; }
+          const patch = how === 'cls'
+            ? { exClasses: [...new Set([...(t.exClasses || []), $('#dtC', m).value])], studentIds: tStudents(t).filter((pn) => D.students.find((x) => x.id === pn)?.classId !== $('#dtC', m).value) }
+            : { exStudents: [...new Set([...(t.exStudents || []), $('#dtS', m).value])], studentIds: tStudents(t).filter((x) => x !== $('#dtS', m).value) };
+          const nt = { ...t, ...patch };
+          if (!taskStudents(nt, D.students).length) { await store.deleteTask(t.id); closeModal(); toast('لم يبقَ أحد يصله الواجب، فحُذف نهائياً.'); await reload(); return; }
+          await store.saveTask({ id: t.id, ...patch });
+          closeModal(); toast(how === 'cls' ? `حُذف الواجب عن ${className($('#dtC', m).value)}.` : `حُذف الواجب عن ${stuName($('#dtS', m).value)}.`); await reload();
+        } catch (x) { toast('تعذر الحذف: ' + (x.code || x.message)); }
+      };
+    });
   }
 
   /* --- حسابات الطلاب وبطاقات الدخول --- */

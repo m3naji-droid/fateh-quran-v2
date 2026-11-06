@@ -808,3 +808,35 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 /* إطار المصحف في التسميع والتدريب: يتمرر داخلياً ليبقى الميكروفون ظاهراً، ويتبع موضع القراءة */
 .reciter .quran { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; scroll-padding: 40px; padding-inline: 4px; }
 @media (max-width: 980px) { .reciter .quran { max-height: 46vh; } .reciter .sheet { scroll-margin-top: 64px; } }
+
+/* ================= لمن الواجب / التوزيع ================= */
+.tgt { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); }
+.tgt-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.tgt-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 99px; border: 1.5px solid var(--line); background: var(--card); cursor: pointer; font-size: 14px; }
+.tgt-chip.on { border-color: var(--green); background: var(--green-2); color: var(--green); font-weight: 700; }
+.tgt-chip.dim { opacity: .5; }
+.tgt-chip input { accent-color: var(--green); }
+.tgt-stu summary { cursor: pointer; font-size: 14px; }
+.tgt-stu input[type=search] { width: 100%; margin: 8px 0; }
+.tgt-list { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.tgt-g { display: flex; flex-direction: column; gap: 2px; }
+.tgt-s { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+.tgt-s:hover { background: var(--card); }
+.tgt-sum { color: var(--green); }
+.dist { gap: 10px; }
+.dist-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); }
+.dist-c { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.dist-c > summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; cursor: pointer; list-style: none; }
+.dist-c > summary::-webkit-details-marker { display: none; }
+.dist-c > summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+.dist-c[open] > summary::before { transform: rotate(-90deg); }
+.dist-c.removed { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); background: color-mix(in srgb, var(--bad-bg) 40%, var(--card)); }
+.dist-c.none { opacity: .75; }
+.dist-act { margin-inline-start: auto; }
+.dist-s { list-style: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+.dist-s li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--sheet); font-size: 14px; }
+.dist-s li > span:first-child { flex: 1; }
+.dt-opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; cursor: pointer; }
+.dt-opt:has(input:checked) { border-color: var(--bad); background: color-mix(in srgb, var(--bad-bg) 45%, var(--card)); }
+.dt-opt > span { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.dt-opt small { color: var(--muted); }

@@ -188,6 +188,26 @@ def students_of(class_id: str) -> list[str]:
     return [d.id for d in q.stream()]
 
 
+def task_students(t: dict) -> list[str]:
+    """طلاب الواجب: كل الصفوف، أو صف، أو صفوف وطلاب بأسمائهم، مع استثناء من حُذف عنهم."""
+    cid = t.get("classId") or "all"
+    ex_c, ex_s = set(t.get("exClasses") or []), set(t.get("exStudents") or [])
+    classes = ["all"] if cid == "all" else (t.get("classIds") or []) if cid == "custom" else [cid]
+    solo = set(t.get("studentIds") or []) if cid == "custom" else set()
+    out = []
+    for d in db.collection("roster").stream():
+        c = (d.to_dict() or {}).get("classId")
+        if d.id in ex_s:
+            continue
+        if d.id in solo or (c not in ex_c and ("all" in classes or c in classes)):
+            out.append(d.id)
+    return out
+
+
+def simple_target(t: dict) -> bool:
+    return (t.get("classId") or "all") != "custom" and not t.get("exClasses") and not t.get("exStudents")
+
+
 def submitted(pn: str, task_id: str) -> bool:
     subs = db.collection("roster").document(pn).collection("subs")
     return any(True for _ in where(subs, "taskId", "==", task_id).limit(1).stream())
@@ -222,7 +242,7 @@ def run_reminders(local: dt.datetime, cfg: dict | None = None) -> list[dict]:
         title = t.get("title") or "واجب"
         link = "./#/student/task/" + d.id
         stats = {"sent": 0, "failed": 0, "removed": 0}
-        if t.get("remindTarget") == "all":
+        if t.get("remindTarget") == "all" and simple_target(t):
             n = {"type": "remind", "taskId": d.id, "title": f"⏰ تذكير: واجب «{title}» غداً",
                  "body": f"موعد التسليم {day_label(t['due'])}. لا تؤجّل، وتدرّب قبل التسجيل.",
                  "link": link, "tag": "remind-" + d.id, "createdAt": now_iso(), "classId": cid}
@@ -230,9 +250,10 @@ def run_reminders(local: dt.datetime, cfg: dict | None = None) -> list[dict]:
             stats = push(tokens_for(class_id=cid), n)
             count = len(students_of(cid))
         else:
-            pending = [pn for pn in students_of(cid) if not submitted(pn, d.id)]
+            everyone = t.get("remindTarget") == "all"
+            pending = [pn for pn in (students_of(cid) if simple_target(t) else task_students(t)) if everyone or not submitted(pn, d.id)]
             n = {"type": "remind", "taskId": d.id, "title": f"⏰ تذكير: واجب «{title}» غداً",
-                 "body": f"لم تسلّمه بعد. موعد التسليم {day_label(t['due'])}، فلا تؤجّل.",
+                 "body": f"{'موعد التسليم' if everyone else 'لم تسلّمه بعد. موعد التسليم'} {day_label(t['due'])}، فلا تؤجّل.",
                  "link": link, "tag": "remind-" + d.id, "createdAt": now_iso()}
             for pn in pending:
                 db.collection("roster").document(pn).collection("notifs").document(f"remind-{d.id}").set({**n, "studentId": pn})
