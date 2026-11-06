@@ -25,15 +25,16 @@ export class RecitationSession {
     this.active = true;
     this.startedAt = Date.now();
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      // صوت خام قدر الإمكان: كبت الضوضاء وإلغاء الصدى يشوّهان الغنة والمدود فيضعف حكم التحليل الآلي
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true, sampleRate: { ideal: 48000 } } });
     } catch (e) {
       this.active = false;
       throw new Error('لم يُسمح باستخدام الميكروفون. اسمح للموقع بالوصول إلى الميكروفون من إعدادات المتصفح ثم أعد المحاولة.');
     }
-    // التسجيل بجودة كلام مضغوطة ليبقى الملف صغيراً عند الرفع
+    // جودة أعلى للكلام (٣٢ كيلوبت/ث، ضعف وضوح الإعداد السابق تقريباً) ليكون التحليل الآلي أدق
     const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg'];
     const mimeType = types.find((t) => MediaRecorder.isTypeSupported(t)) || '';
-    const opts = mimeType ? { mimeType, audioBitsPerSecond: 20000 } : { audioBitsPerSecond: 20000 };
+    const opts = mimeType ? { mimeType, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 };
     this.rec = new MediaRecorder(this.stream, opts);
     this.rec.ondataavailable = (e) => e.data && e.data.size && this.chunks.push(e.data);
     this.rec.start(500);

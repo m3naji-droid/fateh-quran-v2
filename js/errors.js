@@ -11,8 +11,8 @@ export function defaultCatalog() {
     ['v_missing', 'نسيان كلمة', 0.25, 3],
     ['v_wrong', 'تبديل كلمة', 0.25, 3],
     ['v_extra', 'زيادة كلمة', 0.25, 2],
-    ['haraka', 'خطأ في الحركة', 0.25, 2],
-    ['makhraj', 'خطأ في الحرف أو المخرج', 0.25, 2],
+    ['haraka', 'خطأ في الحركة', 0.125, 2],
+    ['makhraj', 'خطأ في الحرف أو المخرج', 0.125, 2],
     ['v_ayah', 'نسيان آية', 0.5, 3],
     ['v_hesitate', 'تردد أو تكرار', 0.125, 1],
     ['v_prompt', 'فتح المعلم عليه', 0.25, 2],
@@ -23,7 +23,7 @@ export function defaultCatalog() {
     ...['madd_tabii', 'madd_leen', 'tajweed_other'].map((k) => [k, EXTRA[k].name, 0.125, 1]),
   ];
   const map = (arr, cat) => arr.map(([key, name, d, max]) => ({ key, name, d, max, cat, builtin: true }));
-  return { items: [...map(verbal, 'verbal'), ...map(tajweed, 'tajweed')], v: 2 };
+  return { items: [...map(verbal, 'verbal'), ...map(tajweed, 'tajweed')], v: 3 };
 }
 
 /** يدمج قائمة المعلم المحفوظة مع الافتراضية (لتظهر أي أخطاء افتراضية جديدة) */
@@ -32,14 +32,16 @@ export function mergeCatalog(saved) {
   if (!saved?.items?.length) return def;
   // النظام الميسّر: الأخطاء الافتراضية التي لم يغيّر المعلم خصمها تأخذ الخصم الجديد
   const OLD = { v_missing: 0.5, v_wrong: 0.5, v_extra: 0.5, haraka: 0.5, makhraj: 0.5, v_ayah: 1, v_hesitate: 0.25, v_prompt: 0.5 };
-  const items = (saved.v || 1) >= 2 ? saved.items : saved.items.map((x) => {
+  let items = (saved.v || 1) >= 2 ? saved.items : saved.items.map((x) => {
     const nd = def.items.find((d) => d.key === x.key);
     if (!x.builtin || !nd) return x;
     const old = OLD[x.key] ?? (nd.cat === 'tajweed' ? nd.d * 2 : null);
     return x.d === old ? { ...x, d: nd.d } : x;
   });
+  // الإصدار ٣: الحركة والحرف/المخرج ثُمن درجة
+  if ((saved.v || 1) < 3) items = items.map((x) => (x.builtin && (x.key === 'haraka' || x.key === 'makhraj') && [0.5, 0.25].includes(x.d) ? { ...x, d: 0.125, max: 2 } : x));
   const have = new Set(items.map((x) => x.key));
-  return { ...saved, v: 2, items: [...items, ...def.items.filter((x) => !have.has(x.key))] };
+  return { ...saved, v: 3, items: [...items, ...def.items.filter((x) => !have.has(x.key))] };
 }
 
 export const findErr = (cat, key) => cat.items.find((x) => x.key === key);

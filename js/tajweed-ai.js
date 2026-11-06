@@ -85,6 +85,7 @@ function compact(res, { surah, from, to }) {
   const errors = [];
   (res.ayat || []).forEach((ay) => (ay.errors || []).forEach((e) => {
     if (offset[ay.ayah] == null) return;
+    if (e.rule === 'madd_arid' && [2, 4, 6].includes(Number(e.got_len))) return; // العارض للسكون: ٢ أو ٤ أو ٦ كلها صحيحة
     errors.push({ i: offset[ay.ayah] + e.w, r: e.rule, t: e.type, op: e.op, el: e.exp_len ?? null, gl: e.got_len ?? null });
   }));
   return {

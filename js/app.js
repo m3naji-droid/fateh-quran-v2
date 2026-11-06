@@ -21,7 +21,7 @@ import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
-import { G, autoGrade, coverage, readEnd, gradeV2 } from './grading.js';
+import { G, autoGrade, coverage, readEnd, gradeV2, capped, aiErrors } from './grading.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
 import { aiEnabled, analyze as aiAnalyze, describe as aiDescribe, AI_NOTICE, health as aiHealth, setTokenProvider } from './tajweed-ai.js';
 
@@ -488,7 +488,7 @@ function mountRecite(root, opts) {
     const g = autoGrade({ ...sub, hasAudio: !!lastBlob, taskId: 'x', createdAt: new Date().toISOString() });
     const wait = g.pending && aiEnabled() && !aiFailed;
     el.innerHTML = `<div class="gc-num"><b>${fmtQ(g.total)}</b><span>/ ١٠</span></div><div class="gc-tx"><b>${wait ? 'درجتك المبدئية' : 'درجتك'}</b>
-      <span class="small">${g.v ? `${ar(g.v)} ${g.v === 1 ? 'خطأ' : g.v === 2 ? 'خطآن' : 'أخطاء'} في الكلمات` : 'كلماتك سليمة'}${sub.ai ? ` · ${g.t ? `${ar(g.t)} ${g.t <= 10 ? 'ملاحظات' : 'ملاحظة'} تجويد` : 'تجويدك سليم'}` : ''}${g.cov < G.full ? ` · قرأت ${ar(Math.round(g.cov * 100))}٪ من المقطع` : ''}</span>
+      <span class="small">${g.v ? `${ar(g.v)} ${g.v === 1 ? 'خطأ' : g.v === 2 ? 'خطآن' : 'أخطاء'} في الكلمات` : 'كلماتك سليمة'}${sub.ai ? ` · ${g.l ? `${ar(g.l)} في الحركات والحروف · ` : ''}${g.t ? `${ar(g.t)} ${g.t <= 10 ? 'ملاحظات' : 'ملاحظة'} تجويد` : 'تجويدك سليم'}` : ''}${g.cov < G.full ? ` · قرأت ${ar(Math.round(g.cov * 100))}٪ من المقطع` : ''}</span>
       <span class="small muted">${wait ? '⏳ تكتمل بعد تحليل التجويد الآلي (دقيقة أو دقيقتان). يمكنك الخروج، وتُحسب تلقائياً.' : 'تقييم آلي ميسّر، ولمعلمك أن يراجعه.'}</span></div>`;
   }
 
@@ -730,6 +730,7 @@ function wordMapHtml(sub, { colored = false, risky = null, ai = null } = {}) {
 }
 function aiListHtml(sub) {
   if (!sub.ai) return '';
+  sub = { ...sub, ai: { ...sub.ai, errors: aiErrors(sub.ai) } };
   const words = rangeWords(sub.surah, sub.from, sub.to);
   return `<div><b class="small">ملاحظات الذكاء الاصطناعي (${ar(sub.ai.errors.length)})</b>${sub.ai.errors.length ? `<ul class="mistakes">${sub.ai.errors.slice(0, 40).map((e) => `<li><span><span class="qw">${esc(words[e.i]?.text || '')}</span> <span class="small muted">آية ${ar(words[e.i]?.ayah || 0)}</span></span><span class="small">${esc(aiDescribe(e, ruleName))}</span></li>`).join('')}</ul>` : '<div class="small muted">لم يجد النموذج أخطاء.</div>'}<p class="ai-notice small-notice">${AI_NOTICE}</p></div>`;
 }
@@ -2313,7 +2314,7 @@ function viewTeacher(app) {
     const segRules = segmentRules(x.surah, x.from, x.to);
     const cov = coverage(x.statuses), rEnd = x.statuses ? readEnd(x.statuses) : Infinity;
     const autoErr = [...(x.statuses || '')].map((c, i) => (i >= rEnd ? null : c === 'w' ? { i, r: 'v_wrong' } : c === 'm' ? { i, r: 'v_missing' } : null)).filter(Boolean);
-    let aiRes = x.ai || null;
+    let aiRes = x.ai ? { ...x.ai, errors: aiErrors(x.ai) } : null; // العارض للسكون ٢/٤/٦ صحيح
     // لم يقيّمه المعلم بعد: التقييم الآلي هو الأساس (أخطاء الكلمات وملاحظات التجويد محددة مسبقاً، ويستطيع إلغاء ما يراه)
     let marks = x.teacher || (x.tj || []).length ? (x.tj || []).map((m) => (m.n ? { ...m } : makeMark(errCat, m.i, m.r))) : [...autoErr, ...(aiRes ? aiRes.errors.filter((e) => e.i < rEnd && findErr(errCat, e.r)) : [])].map((e) => ({ ...makeMark(errCat, e.i, e.r), p: 1 }));
     const gradeOf = () => gradeFrom(deduction(marks, errCat), cov);
@@ -2373,9 +2374,9 @@ function viewTeacher(app) {
           </div>` : '';
         $$('[data-rm]', m).forEach((b) => (b.onclick = () => { const [i, r] = b.dataset.rm.split('|'); marks = marks.filter((k) => !(k.i === +i && k.r === r)); paintMarks(); }));
         const g = gradeOf();
-        const capV = Math.min(ded.verbal, G.vmax), capT = Math.min(ded.tajweed, G.tmax);
-        $('#gDed', m).innerHTML = `<div class="ded-sum"><span>١٠</span><span>− ${fmtQ(capV + capT)} خصم${ded.total ? ` <small>(لفظي ${fmtQ(capV)}${ded.verbal > G.vmax ? ' بحده الأقصى' : ''} · تجويد ${fmtQ(capT)}${ded.tajweed > G.tmax ? ' بحده الأقصى' : ''})</small>` : ''}</span><b>= ${fmtQ(g)}</b></div>
-          <div class="small muted">التقييم الميسّر: أقصى خصم للفظي ${ar(G.vmax)} وللتجويد ${ar(G.tmax)}، ومن أكمل المقطع لا تقل درجته عن ${ar(G.floor)}.${cov < G.full ? ` <b>قرأ ${ar(Math.round(cov * 100))}٪ من المقطع فقط، فالدرجة بنسبة ما قرأ.</b>` : ''}</div>`;
+        const C = capped(ded), mx = (k, cap) => (C.raw[k] > cap ? ' بحده الأقصى' : '');
+        $('#gDed', m).innerHTML = `<div class="ded-sum"><span>١٠</span><span>− ${fmtQ(C.verbal + C.letters + C.tajweed)} خصم${ded.total ? ` <small>(كلمات ${fmtQ(C.verbal)}${mx('verbal', G.vmax)} · حركات وحروف ${fmtQ(C.letters)}${mx('letters', G.lmax)} · تجويد ${fmtQ(C.tajweed)}${mx('tajweed', G.tmax)})</small>` : ''}</span><b>= ${fmtQ(g)}</b></div>
+          <div class="small muted">التقييم الميسّر: أقصى خصم للكلمات ${ar(G.vmax)}، وللحركات والحروف ${ar(G.lmax)}، وللتجويد ${ar(G.tmax)}، ومن أكمل المقطع لا تقل درجته عن ${ar(G.floor)}. المد العارض للسكون صحيح بـ٢ أو ٤ أو ٦ حركات.${cov < G.full ? ` <b>قرأ ${ar(Math.round(cov * 100))}٪ من المقطع فقط، فالدرجة بنسبة ما قرأ.</b>` : ''}</div>`;
         const inp = $('#gTotal', m);
         if (!manual) inp.value = g;
         $('#gHint', m).innerHTML = manual && +inp.value !== g ? `عدّلتها يدوياً · حسب الأخطاء: <b>${fmtQ(g)}</b> <button type="button" class="btn sm" id="gUse">استخدمها</button>` : 'تتحدّث تلقائياً مع كل خطأ، ويمكنك تعديلها';
@@ -2456,7 +2457,7 @@ function viewTeacher(app) {
         e.preventDefault();
         const v = parseFloat($('#gTotal', m).value);
         if (isNaN(v)) return toast('اكتب الدرجة من ١٠.');
-        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 4) / 4)), notes: $('#gN', m).value.trim(), suggested, deduction: deduction(marks, errCat).total, v: 2, at: new Date().toISOString() };
+        const teacher = { total: Math.max(0, Math.min(10, Math.round(v * 4) / 4)), notes: $('#gN', m).value.trim(), suggested, deduction: deduction(marks, errCat).total, gv: 3, at: new Date().toISOString() };
         const patch = { teacher, tj: marks, tjDone: $('#gTjDone', m).checked, ...(aiRes ? { ai: aiRes } : {}) };
         const prevTotal = x.teacher ? x.teacher.total : null;
         const wantNotify = $('#gNotify', m).checked && prevTotal !== teacher.total;
@@ -2926,22 +2927,22 @@ function viewTeacher(app) {
   async function migrateGrades() {
     try {
       const cfg = await store.getNotifySettings();
-      if (cfg.gradingV2At) return;
+      if (cfg.gradingV3At) return;
       const cat = mergeCatalog(await store.getErrorCatalog().catch(() => null));
       const ups = [];
-      D.subs.filter((x) => x.teacher && typeof x.teacher.total === 'number' && !x.teacher.v2).forEach((x) => {
+      D.subs.filter((x) => x.teacher && typeof x.teacher.total === 'number' && (x.teacher.gv || 0) < 3).forEach((x) => {
         const end = x.statuses ? readEnd(x.statuses) : Infinity;
         const marks = (x.tj || []).filter((k) => !(k.r === 'v_missing' && k.i >= end)).map(({ d, max, ...k }) => k); // بالخصم الجديد
         const g = marks.length ? gradeFrom(deduction(marks, cat), coverage(x.statuses)) : autoGrade(x)?.total ?? x.teacher.total;
         const total = Math.max(x.teacher.total, g);
-        ups.push({ x, teacher: { ...x.teacher, total, v2: true, ...(total !== x.teacher.total ? { prevTotal: x.teacher.total } : {}) }, up: total > x.teacher.total });
+        ups.push({ x, teacher: { ...x.teacher, total, gv: 3, ...(total !== x.teacher.total ? { prevTotal: x.teacher.prevTotal ?? x.teacher.total } : {}) }, up: total > x.teacher.total });
       });
       let raised = 0;
       if (ups.length) {
         const r = await runBulk('تحديث الدرجات السابقة بالتقييم الميسّر', ups, async (u) => { await store.updateSubmission(u.x.pn, u.x.id, { teacher: u.teacher }); u.x.teacher = u.teacher; if (u.up) raised++; });
         if (r.fail) { toast(`تعذر تحديث ${ar(r.fail)} من الدرجات، وسيُعاد المحاولة لاحقاً.`); return; }
       }
-      await store.setNotifySettings({ gradingV2At: new Date().toISOString() });
+      await store.setNotifySettings({ gradingV3At: new Date().toISOString() });
       schedulePublish();
       const autoN = D.subs.filter((x) => !x.teacher && (x.taskId || x.retakeId) && x.statuses).length;
       if (ups.length || autoN) toast(`✓ طُبّق التقييم الميسّر على الدرجات السابقة: ارتفعت ${ar(raised)} من درجاتك، و${ar(autoN)} درجة آلية، ولم تنزل أي درجة.`);

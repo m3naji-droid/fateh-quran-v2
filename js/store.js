@@ -290,6 +290,7 @@ async function makeCloud() {
     }
   }
 
+  const delAudioDocs = async (pn, id) => { const ds = (await getDocs(collection(db, 'roster', pn, 'subs', id, 'audio'))).docs; for (const d of ds) await deleteDoc(d.ref); };
   return {
     mode: 'cloud',
     async init() { await ready; },
@@ -429,22 +430,24 @@ async function makeCloud() {
     async addSubmission(pn, sub, audio, fixedId) {
       await ensureAnon();
       const id = fixedId || uid();
-      let audioDoc = null;
+      let audioDoc = null, extra = [];
       if (audio) {
-        const b64 = await blobToB64(audio);
-        if (b64.length < 950000) audioDoc = { b64, mime: audio.type };
+        // التسجيلات الطويلة تُقسم على أجزاء (حد المستند الواحد نحو ميغابايت)
+        const b64 = await blobToB64(audio), P = 900000, n = Math.ceil(b64.length / P);
+        if (n <= 12) { audioDoc = { b64: b64.slice(0, P), mime: audio.type, ...(n > 1 ? { parts: n } : {}) }; for (let k = 1; k < n; k++) extra.push(b64.slice(k * P, (k + 1) * P)); }
+        audioDoc && (audioDoc.total = b64.length);
       }
       try {
         // الصوت أولاً: إن تعذر رفعه لا يُحسب التسليم، فيستطيع الطالب الإرسال مرة أخرى
         if (audioDoc) {
-          try { await setDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'), audioDoc); }
+          try { for (let k = 0; k < extra.length; k++) await setDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'p' + (k + 1)), { b64: extra[k] }).catch((e) => { if (!(fixedId && e.code === 'permission-denied')) throw e; }); /* جزء مرفوع من محاولة سابقة */ await setDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'), audioDoc); }
           catch (e) {
             // الصوت مرفوع من محاولة سابقة انقطعت قبل حفظ التسليم: نكمل الحفظ
             if (!(fixedId && e.code === 'permission-denied')) throw e;
             if ((await getDoc(doc(db, 'roster', pn, 'subs', id))).exists()) throw e;
           }
         }
-        await setDoc(doc(db, 'roster', pn, 'subs', id), { ...sub, pn, createdAt: now(), hasAudio: !!audioDoc, audioBytes: audioDoc ? audioDoc.b64.length : 0 });
+        await setDoc(doc(db, 'roster', pn, 'subs', id), { ...sub, pn, createdAt: now(), hasAudio: !!audioDoc, audioBytes: audioDoc ? audioDoc.total : 0 });
       } catch (e) {
         if (fixedId && e.code === 'permission-denied') throw new Error(ONCE_MSG);
         throw e;
@@ -473,8 +476,8 @@ async function makeCloud() {
     watchMatches(tid, cb) { return onSnapshot(collection(db, 'tourneys', tid, 'matches'), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.warn('matches', e)); },
     async setLive(tid, mid, side, d) { await setDoc(doc(db, 'tourneys', tid, 'live', mid), { [side]: { ...d, at: now() } }, { merge: true }); },
     watchLive(tid, mid, cb) { return onSnapshot(doc(db, 'tourneys', tid, 'live', mid), (s) => cb(s.exists() ? s.data() : {}), (e) => console.warn('live', e)); },
-    async saveMatchAudio(tid, key, blob) { const b64 = await blobToB64(blob); if (b64.length > 950000) return false; await setDoc(doc(db, 'tourneys', tid, 'audio', key), { b64, mime: blob.type }); return true; },
-    async getMatchAudio(tid, key) { await ensureAnon(); const d = await getDoc(doc(db, 'tourneys', tid, 'audio', key)); return d.exists() ? d.data() : null; },
+    async saveMatchAudio(tid, key, blob) { const b64 = await blobToB64(blob), P = 900000, n = Math.ceil(b64.length / P); if (n > 12) return false; for (let k = 1; k < n; k++) await setDoc(doc(db, 'tourneys', tid, 'audio', key + '_p' + k), { b64: b64.slice(k * P, (k + 1) * P) }); await setDoc(doc(db, 'tourneys', tid, 'audio', key), { b64: b64.slice(0, P), mime: blob.type, parts: n }); return true; },
+    async getMatchAudio(tid, key) { await ensureAnon(); const d = await getDoc(doc(db, 'tourneys', tid, 'audio', key)); if (!d.exists()) return null; const m = d.data(); let b64 = m.b64; for (let k = 1; k < (m.parts || 1); k++) { const p = await getDoc(doc(db, 'tourneys', tid, 'audio', key + '_p' + k)); b64 += p.exists() ? p.data().b64 : ''; } return { ...m, b64 }; },
     async listSeasons() { await ensureAnon(); return list('seasons'); },
     async saveSeason(x) { const id = x.id || uid(); const { id: _, ...rest } = x; await setDoc(doc(db, 'seasons', id), rest, { merge: true }); return id; },
     async deleteSeason(id) { await deleteDoc(doc(db, 'seasons', id)); },
@@ -522,13 +525,16 @@ async function makeCloud() {
     },
     async getAudio(pn, id) {
       const d = await getDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'));
-      return d.exists() ? b64ToBlob(d.data().b64, d.data().mime) : null;
+      if (!d.exists()) return null;
+      const m = d.data(); let b64 = m.b64;
+      for (let k = 1; k < (m.parts || 1); k++) { const p = await getDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'p' + k)); b64 += p.exists() ? p.data().b64 : ''; }
+      return b64ToBlob(b64, m.mime);
     },
     async updateSubmission(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'subs', id), patch); },
-    async deleteSubmission(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main')).catch(() => {}); await deleteDoc(doc(db, 'roster', pn, 'subs', id)); },
+    async deleteSubmission(pn, id) { await delAudioDocs(pn, id).catch(() => {}); await deleteDoc(doc(db, 'roster', pn, 'subs', id)); },
     /** حذف التسجيل الصوتي فقط مع إبقاء التسليم ودرجاته */
     async deleteAudio(pn, id) {
-      await deleteDoc(doc(db, 'roster', pn, 'subs', id, 'audio', 'main'));
+      await delAudioDocs(pn, id);
       await updateDoc(doc(db, 'roster', pn, 'subs', id), { hasAudio: false, audioBytes: 0, audioDeletedAt: now() });
     },
     // نموذج التعلم من تقييمات المعلم (يقرؤه الطلاب، ويكتبه المعلم)
