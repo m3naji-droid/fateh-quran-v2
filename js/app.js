@@ -4,7 +4,7 @@ import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
 import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
-import { registerSW, platform, promptInstall, onInstallChange } from './pwa.js';
+import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
@@ -764,6 +764,20 @@ function render() {
 }
 addEventListener('hashchange', render);
 registerSW();
+// صدر تحديث للموقع: شريط بزر التحديث (لا يُعاد التحميل تلقائياً حتى لا يضيع تسميع جارٍ)
+watchUpdates(() => {
+  if (document.getElementById('updBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'updBar'; bar.className = 'upd-bar'; bar.setAttribute('role', 'status');
+  bar.innerHTML = '<span class="upd-ico">✨</span><div><b>يوجد تحديث جديد للمقرأة</b><span>اضغط هنا لتحصل على أحدث المزايا والإصلاحات.</span></div><button type="button" class="btn sm primary" id="updGo">تحديث الآن</button><button type="button" class="upd-x" id="updX" aria-label="لاحقاً">✕</button>';
+  document.body.appendChild(bar);
+  const go = () => {
+    if (document.querySelector('.mic.rec')) { toast('أكمل تسميعك أولاً، ثم اضغط «تحديث الآن».'); return; }
+    bar.querySelector('#updGo').textContent = 'جارٍ التحديث…';
+    navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {}).finally(() => location.reload());
+  };
+  bar.onclick = (e) => { if (e.target.closest('#updX')) { bar.remove(); return; } go(); };
+});
 navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'open' && e.data.url) location.href = e.data.url; });
 
 /* ================= الرئيسية ================= */

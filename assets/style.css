@@ -913,3 +913,12 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 .late-card { border-inline-start: 4px solid var(--warn); }
 .tk-time input[type="datetime-local"] { width: 100%; }
 .dist-s li .btn.sm { margin-inline-start: 4px; }
+
+/* ===== شريط التحديث ===== */
+.upd-bar { position: fixed; inset-inline: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 9000; margin-inline: auto; max-width: 560px; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: var(--card); color: var(--ink); border: 1px solid var(--gold); box-shadow: 0 12px 32px rgba(0, 0, 0, .22); cursor: pointer; animation: updIn .35s ease-out; }
+.upd-bar > div { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.upd-bar span:not(.upd-ico) { font-size: 13px; color: var(--muted); }
+.upd-ico { font-size: 26px; }
+.upd-x { background: none; border: 0; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; }
+@keyframes updIn { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }

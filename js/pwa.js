@@ -36,3 +36,33 @@ export async function promptInstall() {
   notify();
   return outcome;
 }
+
+/* ---------- تنبيه التحديث ----------
+ * يتحقق كل بضع دقائق (وعند العودة إلى الصفحة) من بصمة ملفات الموقع الأساسية على الخادم (ETag).
+ * إن تغيّرت عما فُتحت به الصفحة: صدر تحديث، فيظهر شريط «يوجد تحديث، اضغط هنا».
+ * لا يحتاج رقم إصدار يدوياً: أي نشر جديد يغيّر البصمة تلقائياً. */
+const WATCH = ['./', 'js/app.js', 'js/store.js', 'assets/style.css'];
+async function fingerprint() {
+  const parts = await Promise.all(WATCH.map((u) => fetch(u, { method: 'HEAD', cache: 'no-store' })
+    .then((r) => (r.ok ? r.headers.get('etag') || r.headers.get('last-modified') || r.headers.get('content-length') || '' : null))
+    .catch(() => null)));
+  return parts.some((p) => p == null) ? null : parts.join('|'); // تعذر الاتصال: لا نحكم
+}
+export function watchUpdates(onUpdate, every = 3 * 60e3) {
+  if (!isSecureContext && location.hostname !== 'localhost') return;
+  let base = null, shown = false, busy = false;
+  const check = async () => {
+    if (busy || shown || document.hidden) return;
+    busy = true;
+    try {
+      const fp = await fingerprint();
+      if (fp && base == null) base = fp;
+      else if (fp && fp !== base) { shown = true; onUpdate(); }
+    } finally { busy = false; }
+  };
+  setTimeout(check, 4000);
+  setInterval(check, every);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  addEventListener('focus', check);
+  addEventListener('online', check);
+}
