@@ -61,6 +61,32 @@ service cloud.firestore {
         allow create: if isStudent(pn);
       }
     }
+    // بطولة «الأبطال»: يديرها البرنامج من لوحة المعلم، والطالب يكتب نتيجته فقط (مرة واحدة)، أو يعيد المباراة عند التعادل
+    match /tourneys/{tid} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+      match /matches/{mid} {
+        allow read: if signedIn();
+        allow create, delete: if isTeacher();
+        allow update: if isTeacher()
+          || (resource.data.a != null && isStudent(resource.data.a.pn) && resource.data.get('ra', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ra']))
+          || (resource.data.b != null && isStudent(resource.data.b.pn) && resource.data.get('rb', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rb']))
+          || ((isStudent(resource.data.a.pn) || isStudent(resource.data.b.pn))
+              && resource.data.get('ra', null) != null && resource.data.get('rb', null) != null
+              && math.abs(resource.data.ra.s - resource.data.rb.s) < 1
+              && request.resource.data.ra == null && request.resource.data.rb == null
+              && request.resource.data.tb == resource.data.get('tb', 0) + 1
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ra', 'rb', 'tb', 'hist', 'surah', 'from', 'to', 'deadline', 'startAt']));
+      }
+      match /live/{mid} {
+        allow read, write: if signedIn();
+      }
+      match /audio/{key} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.b64 is string && request.resource.data.b64.size() < 1000000;
+        allow delete: if isTeacher();
+      }
+    }
     // المواسم والمسابقات: يديرها المعلم، ويقرأ الطلاب ترتيبها
     match /seasons/{sid} {
       allow read: if signedIn();

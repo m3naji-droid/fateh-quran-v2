@@ -9,6 +9,7 @@ import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLe
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
+import { LIVE_MIN, AI_PENALTY, AI_MAX, PTS as HPTS, matchWinner, sideOf, tiebreak, rangeText as hRange, firstRound, advance as heroAdvance, heroBonus, stageLabel, bracketHtml } from './heroes.js';
 import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents } from './targets.js';
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
@@ -230,7 +231,7 @@ function mountRecite(root, opts) {
         <div class="live-text" id="rcLive"></div>
       </div>
       <div id="rcResult"></div>
-      <div class="card stack" style="gap:10px">
+      <div class="card stack" style="gap:10px" ${opts.noListen ? 'hidden' : ''}>
         <h3>استمع للقارئ</h3>
         <label class="field">القارئ<select id="rcReciter">${RECITERS.map((r) => `<option value="${r.id}" ${r.id === reciter ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
         <div class="row">
@@ -282,7 +283,7 @@ function mountRecite(root, opts) {
   let pop;
   text.addEventListener('click', (e) => {
     const end = e.target.closest('.ayah-end');
-    if (end) { playRange(+end.dataset.a, +end.dataset.a); return; }
+    if (end) { if (!opts.noListen) playRange(+end.dataset.a, +end.dataset.a); return; }
     const w = e.target.closest('.w');
     pop?.remove();
     if (!w) return;
@@ -342,6 +343,7 @@ function mountRecite(root, opts) {
       if (s !== 'pending') el.classList.add(s);
     });
     if (live && wEls[res.position]) { wEls[res.position].classList.add('cursor'); follow(wEls[res.position]); }
+    if (live && opts.onLive) opts.onLive(res);
     $('#rcProg', root).style.width = (res.total ? (res.done / res.total) * 100 : 0) + '%';
   }
 
@@ -408,6 +410,7 @@ function mountRecite(root, opts) {
   let sent = false; // في وضع المحاولة الواحدة: أُرسل التسليم
   $('#rcMic', root).onclick = async () => {
     if (sess?.active) return finishRec();
+    if (opts.confirmStart && !(await confirmBox(opts.confirmStart, 'ابدأ'))) return;
     if (opts.oneShot) {
       if (sent) return toast('أرسلت محاولتك لهذا الواجب. انتظر تقييم معلمك.');
       if (!(await confirmBox('هذه محاولتك الوحيدة لهذا الواجب، وستُرسل للمعلم تلقائياً عند إيقاف التسجيل. هل أنت مستعد؟', 'ابدأ التسجيل'))) return;
@@ -419,6 +422,7 @@ function mountRecite(root, opts) {
 
   function showResult() {
     const box = $('#rcResult', root);
+    if (opts.onFinal) { opts.onFinal(buildSubmission(), lastBlob, lastDuration); return; } // المباريات: النتيجة تُدار خارجياً
     const audioUrl = lastBlob ? URL.createObjectURL(lastBlob) : '';
     // المحاولة الواحدة: التسجيل الصامت أو القصير جداً لا يُحسب، وما عداه يُرسل تلقائياً
     const oneShot = !!opts.oneShot;
@@ -877,7 +881,7 @@ function viewStudent(app) {
   }
   const owner = { id: me.id, info: { role: 'student', studentId: me.id, classId: me.classId } };
   let notifs = [], offNotifs = null, knownTasks = new Set(), loadedAt = '';
-  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb|challenge|khatma)\/([\w-]+)/);
+  const deep = location.hash.match(/^#\/student\/(task|grade|retake|ann|month|fb|challenge|khatma|hero)\/([\w-]+)/);
   let openKhId = deep && deep[1] === 'khatma' ? deep[2] : null;
   let myKh = [];
   let openChId = deep && deep[1] === 'challenge' ? deep[2] : null;
@@ -967,6 +971,148 @@ function viewStudent(app) {
     });
     if (w) setTimeout(() => confetti(), 150);
   }
+  /* --- بطولة الأبطال --- */
+  let heroT = null, hM = [], offHero = null, offLive = null, hView = null, heroPend = null;
+  if (deep && deep[1] === 'hero') heroPend = deep[2];
+  async function loadHeroes() {
+    try {
+      const L = (await store.listTourneys()).filter((x) => x.status === 'running' || (x.doneAt && Date.now() - new Date(x.doneAt) < 14 * 864e5) || x.status === 'done').sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      const had = !!heroT; heroT = L[0] || null;
+      if (!heroT) return;
+      offHero?.(); offHero = store.watchMatches(heroT.id, (ms) => {
+        hM = ms; paintHeroBar();
+        if (tab === 'heroes' && $('#stBody', app) && !hView) drawHeroes($('#stBody', app));
+        if (hView?.refresh) hView.refresh();
+      });
+      if (!had && $('#stBody', app)) draw();
+      if (heroPend) { const id = heroPend; heroPend = null; setTimeout(() => openMatch(id), 600); }
+    } catch (e) { console.warn('heroes', e); }
+  }
+  const myMatch = () => hM.filter((m) => !m.done && !m.bye && sideOf(m, me.id)).sort((a, b) => b.round - a.round)[0];
+  function paintHeroBar() {
+    const host = $('#heroBar', app); if (!host) return;
+    const m = heroT?.status === 'running' && myMatch();
+    if (!m || tab !== 'tasks') { host.innerHTML = ''; return; }
+    const side = sideOf(m, me.id), other = side === 'a' ? m.b : m.a, mine = side === 'a' ? m.ra : m.rb;
+    const when = m.live ? (m.startAt ? `📺 مباشرة ${fmtTimeOf(m.startAt)}` : 'مباراة مباشرة، ينتظر تحديد الموعد') : `حتى ${fmtTimeOf(m.deadline)}`;
+    host.innerHTML = `<div class="hero-bar"><span class="hb-ico">🏆</span><div><b>الأبطال: ${mine ? 'سلّمت، بانتظار' : 'مباراتك ضد'} ${esc(other.name)}</b><span class="small">${esc(hRange(m))} · ${esc(when)}</span></div><button class="btn sm gold" type="button" id="hbGo">${mine ? 'المباراة' : 'ابدأ'}</button></div>`;
+    $('#hbGo', host).onclick = () => openMatch(m.id);
+  }
+  const fmtTimeOf = (iso) => { try { return ar(new Date(iso).toLocaleString('ar', { weekday: 'long', hour: 'numeric', minute: '2-digit' })); } catch { return ''; } };
+  let hTab = null;
+  function drawHeroes(body) {
+    if (!heroT) { body.innerHTML = '<div class="empty">لا توجد بطولة الآن.</div>'; return; }
+    const m = myMatch();
+    const lost = hM.find((x) => x.done && !x.bye && sideOf(x, me.id) && x.winner !== me.id);
+    const lives = hM.filter((x) => x.live && !x.done && x.startAt);
+    const myStage = hM.some((x) => x.stage === 'inter') ? 'inter' : 'class';
+    hTab = hTab || (myStage === 'inter' ? 'inter' : me.classId);
+    const clsIds = heroT.classIds || [];
+    body.innerHTML = `<div class="heroes stack">
+      <div class="hero-top"><div><h2 style="margin:0">🏆 ${esc(heroT.name || 'الأبطال')}</h2><span class="small muted">${esc(stageLabel(heroT, hM))}</span></div></div>
+      ${heroT.status === 'done' && heroT.champion ? `<div class="hero-champ"><div class="hc-cup">🏆</div><div><span class="small">بطل الأبطال</span><b>${esc(heroT.champion.name)}</b>${heroT.runnerUp ? `<span class="small">الوصيف: ${esc(heroT.runnerUp.name)}</span>` : ''}</div></div>` : ''}
+      ${m ? (() => { const side = sideOf(m, me.id), other = side === 'a' ? m.b : m.a, mine = side === 'a' ? m.ra : m.rb; return `<div class="card hero-my"><b>⚔️ مباراتك${m.live ? ' المباشرة' : ''}: ضد ${esc(other.name)}</b><span>${esc(hRange(m))}${m.tb ? ` · جولة فاصلة ${ar(m.tb)}` : ''}</span>
+        <span class="small muted">${m.live ? (m.startAt ? `تبدأ ${fmtTimeOf(m.startAt)}، ولديك ${ar(LIVE_MIN)} دقائق للتسليم` : 'ينتظر أن يحدد المعلم موعدها') : `آخر موعد ${fmtTimeOf(m.deadline)}`}</span>
+        <button class="btn primary" type="button" data-om="${esc(m.id)}">${mine ? 'نتيجتي' : 'ادخل المباراة'}</button></div>`; })() : heroT.status === 'running' ? `<div class="card hero-my">${lost ? `<b>انتهت مشاركتك في الدور ${ar(lost.round)} 🌟</b><span class="small muted">بارك الله فيك. تابع المنافسة وشجّع زملاءك!</span>` : '<b>بانتظار الدور القادم…</b>'}</div>` : ''}
+      ${lives.length ? `<div class="card stack" style="gap:8px"><b>📺 مباريات مباشرة</b>${lives.map((x) => `<div class="row" style="justify-content:space-between"><span>${esc(x.a.name)} ⚔️ ${esc(x.b.name)} <small class="muted">${fmtTimeOf(x.startAt)}</small></span><button class="btn sm gold" type="button" data-watch="${esc(x.id)}">شاهد</button></div>`).join('')}</div>` : ''}
+      <div class="hero-tabs">${clsIds.map((c) => `<button type="button" class="chip${hTab === c ? ' on' : ''}" data-ht="${esc(c)}">${esc(data.classes.find((x) => x.id === c)?.name || '')}</button>`).join('')}<button type="button" class="chip${hTab === 'inter' ? ' on' : ''}" data-ht="inter">🌍 النخبة</button></div>
+      ${bracketHtml(hM, { stage: hTab === 'inter' ? 'inter' : 'class', classId: hTab, me: me.id })}
+      <p class="small muted" style="margin:0">التقييم آلي فقط بدقة الكلمات، ولا يتدخل المعلم. فرق أقل من ١٪ تعادل تُعاد فيه المباراة بمقطع آخر. النصف والنهائي مباشران (${ar(LIVE_MIN)} دقائق) ويُخصم فيهما ${ar(AI_PENALTY)} لكل ملاحظة تجويد آلية (حتى ${ar(AI_MAX)}).</p></div>`;
+    $$('[data-om]', body).forEach((b) => (b.onclick = () => openMatch(b.dataset.om)));
+    $$('[data-watch]', body).forEach((b) => (b.onclick = () => watchMatch(b.dataset.watch)));
+    $$('[data-ht]', body).forEach((b) => (b.onclick = () => { hTab = b.dataset.ht; drawHeroes(body); }));
+    $$('.hb-m[data-mid]', body).forEach((b) => (b.onclick = () => { const x = hM.find((y) => y.id === b.dataset.mid); if (x && !x.bye) (sideOf(x, me.id) && !x.done ? openMatch : watchMatch)(x.id); }));
+  }
+  /** صفحة المباراة: تسميع غيباً بمحاولة واحدة، والنتيجة آلية */
+  function openMatch(mid) {
+    const m = hM.find((x) => x.id === mid); if (!m) return toast('المباراة غير موجودة.');
+    const side = sideOf(m, me.id); if (!side || m.done) return watchMatch(mid);
+    const mine = side === 'a' ? m.ra : m.rb;
+    if (mine) return watchMatch(mid);
+    comp?.destroy(); comp = null; offLive?.();
+    const other = side === 'a' ? m.b : m.a;
+    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="hmBack" type="button">→ رجوع</button><h1>⚔️ ${esc(me.name)} ضد ${esc(other.name)}</h1><p class="muted" style="margin:4px 0 0">${esc(heroT.name || 'الأبطال')} · ${esc(hRange(m))}</p></div></div><div id="hmBody"></div>`;
+    const back = () => { comp?.destroy(); comp = null; hView = null; offLive?.(); tab = 'heroes'; draw(); };
+    $('#hmBack', app).onclick = back;
+    const body = $('#hmBody', app);
+    hView = { refresh: () => { const x = hM.find((y) => y.id === mid); if (x && (x.surah !== m.surah || x.from !== m.from || x.tb !== m.tb)) openMatch(mid); } };
+    const startMs = m.startAt ? new Date(m.startAt).getTime() : 0, endMs = startMs + LIVE_MIN * 60e3;
+    if (!hasRecognition) { body.innerHTML = '<div class="notice">التصحيح الآلي غير متاح في هذا المتصفح. افتح المقرأة في Chrome أو Safari الحديث لتخوض المباراة.</div>'; return; }
+    if (m.live && (!m.startAt || Date.now() < startMs)) {
+      body.innerHTML = `<div class="card stack hero-wait"><b>📺 مباراة مباشرة</b><p style="margin:0">${m.startAt ? `تبدأ ${fmtTimeOf(m.startAt)}. ابقَ في هذه الصفحة، وسيُفتح التسميع تلقائياً.` : 'لم يحدد المعلم الموعد بعد.'}</p><div class="hero-count" id="hmCount"></div></div>`;
+      const tick = () => { const s = Math.max(0, Math.round((startMs - Date.now()) / 1000)); const el = $('#hmCount', body); if (!el) return clearInterval(iv); el.textContent = m.startAt ? `${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}` : ''; if (m.startAt && s <= 0) { clearInterval(iv); openMatch(mid); } };
+      const iv = setInterval(tick, 500); tick(); return;
+    }
+    if (m.live && Date.now() > endMs) { body.innerHTML = '<div class="notice">انتهت نافذة المباراة.</div>'; return; }
+    body.innerHTML = `<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً بلا تلميح، <b>محاولة واحدة</b> تُحتسب عند الإيقاف. ${m.live ? `أمامك حتى ${fmtTimeOf(new Date(endMs).toISOString())} (${ar(LIVE_MIN)} دقائق)، ويُحلَّل تجويدك آلياً ويُخصم ${ar(AI_PENALTY)} لكل ملاحظة.` : 'النتيجة بدقة الكلمات الآلية فقط.'}</div>${m.live ? '<div class="hero-count live" id="hmLeft"></div>' : ''}<div id="hmRc"></div>`;
+    if (m.live) { const iv = setInterval(() => { const el = $('#hmLeft', body); if (!el) return clearInterval(iv); const s = Math.max(0, Math.round((endMs - Date.now()) / 1000)); el.textContent = `⏱ ${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}`; }, 500); }
+    let liveT = 0;
+    comp = mountRecite($('#hmRc', body), {
+      surah: m.surah, from: m.from, to: m.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true,
+      maxSeconds: m.live ? Math.max(30, Math.round((endMs - Date.now()) / 1000)) : 600,
+      confirmStart: 'محاولة واحدة فقط تُحتسب عند الإيقاف. هل أنت مستعد؟',
+      onActivity: (sec) => logAct('practice', sec),
+      onLive: m.live ? (res) => { const now = Date.now(); if (now - liveT < 1500) return; liveT = now; store.setLive(heroT.id, m.id, side, { done: res.done, total: res.total, ok: res.counts?.correct || 0, on: true }).catch(() => {}); } : null,
+      onFinal: (sub, blob, dur) => setTimeout(() => submitMatch(m, side, sub, blob, dur, body), 0),
+    });
+  }
+  async function submitMatch(m, side, sub, blob, dur, body) {
+    comp?.destroy(); comp = null;
+    const p = sub.percent == null ? 0 : sub.percent;
+    let ai = null, pen = 0;
+    if (m.live) {
+      store.setLive(heroT.id, m.id, side, { done: 1, total: 1, ok: 0, on: false, fin: true }).catch(() => {});
+      body.innerHTML = '<div class="card stack"><b>🤖 جارٍ تحليل التجويد آلياً (إلزامي في هذه المرحلة)…</b><div class="small" id="hmAi"></div><div class="progress"><i class="indet"></i></div></div>';
+      if (blob && aiEnabled()) {
+        for (let k = 0; k < 2 && !ai; k++) { try { ai = await aiAnalyze(blob, { surah: m.surah, from: m.from, to: m.to }, (x) => { const el = $('#hmAi', body); if (el) el.textContent = x; }); } catch (e) { console.warn('ai', e); } }
+      }
+      pen = ai ? Math.min(AI_MAX, (ai.errors?.length || 0) * AI_PENALTY) : 0;
+      if (blob) store.saveMatchAudio(heroT.id, `${m.id}_${side}_${m.tb || 0}`, blob).catch(() => {});
+    }
+    const r = { p, s: Math.max(0, Math.round((p - pen) * 10) / 10), wpm: sub.wpm || 0, dur: Math.round(dur || 0), at: new Date().toISOString(), ...(m.live ? { ai: ai ? ai.errors.length : null, pen } : {}) };
+    body.innerHTML = '<div class="loading">جارٍ حفظ نتيجتك…</div>';
+    try { await store.updateMatch(heroT.id, m.id, { [side === 'a' ? 'ra' : 'rb']: r }); } catch (e) { body.innerHTML = `<div class="notice">تعذر حفظ النتيجة: ${esc(e.code || e.message)}</div>`; return; }
+    const x = { ...m, [side === 'a' ? 'ra' : 'rb']: r };
+    recordProgress({ ...sub, surah: m.surah, from: m.from, to: m.to });
+    // تعادل: يعيد المباراة بمقطع آخر من سلّم أخيراً
+    if (x.ra && x.rb && matchWinner(x) === 'tie') {
+      const nx = tiebreak(x);
+      try { await store.updateMatch(heroT.id, m.id, { ra: null, rb: null, tb: (x.tb || 0) + 1, hist: [...(x.hist || []), { surah: x.surah, from: x.from, to: x.to, ra: x.ra, rb: x.rb }], ...nx, ...(x.live ? { startAt: new Date(Date.now() + 60e3).toISOString() } : { deadline: new Date(Date.now() + 24 * 3600e3).toISOString() }) }); } catch (e) { console.warn('tie', e); }
+      toast(`🤝 تعادل! جولة فاصلة في ${hRange({ ...x, ...nx })}`);
+    }
+    watchMatch(m.id, r);
+  }
+  /** متابعة مباراة: السباق المباشر، ثم النتيجة وإعادة الاستماع */
+  function watchMatch(mid, fresh = null) {
+    comp?.destroy(); comp = null; offLive?.();
+    const box = document.createElement('div');
+    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="hwBack" type="button">→ رجوع</button><h1 id="hwT"></h1><p class="muted" id="hwS" style="margin:4px 0 0"></p></div></div><div id="hwBody"></div>`;
+    $('#hwBack', app).onclick = () => { hView = null; offLive?.(); tab = 'heroes'; draw(); };
+    let live = {};
+    const paint = () => {
+      const m = hM.find((x) => x.id === mid); if (!m) return;
+      $('#hwT', app).textContent = `${m.a.name} ⚔️ ${m.b?.name || ''}`;
+      $('#hwS', app).textContent = `${hRange(m)}${m.tb ? ` · جولة فاصلة ${ar(m.tb)}` : ''}`;
+      const w = m.done ? m.winner : null;
+      const lane = (p, r, side) => { const L = live[side] || {}; const pct = r ? 100 : L.total ? Math.round((L.done / L.total) * 100) : 0; const acc = r ? r.s : L.done ? Math.round((L.ok / Math.max(1, L.done)) * 100) : 0;
+        return `<div class="race-lane${w === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)}${p.pn === me.id ? ' (أنت)' : ''} ${L.on && !r ? '<span class="rl-on">🎙️ يقرأ الآن</span>' : ''}</div>
+          <div class="rl-track"><i style="width:${pct}%"></i><span>${r ? `النتيجة ${ar(r.s)}٪${r.pen ? ` (دقة ${ar(r.p)}٪ − تجويد ${ar(r.pen)})` : ''}` : L.total ? `${ar(pct)}٪ من المقطع · دقة ${ar(acc)}٪` : 'لم يبدأ بعد'}</span></div>
+          ${r && m.live ? `<button class="btn sm" type="button" data-aud="${esc(`${m.id}_${side}_${m.tb || 0}`)}">🔊 استمع لتلاوته</button>` : ''}</div>`; };
+      $('#hwBody', app).innerHTML = `<div class="race">${lane(m.a, m.ra, 'a')}${m.b ? lane(m.b, m.rb, 'b') : ''}</div>
+        ${w ? `<div class="hero-res">🏆 الفائز: <b>${esc(w === m.a.pn ? m.a.name : m.b.name)}</b>${m.draw ? ' (بالقرعة لغياب الطرفين)' : ''}</div>` : (m.ra || m.rb) ? '<div class="small muted">بانتظار الطرف الآخر…</div>' : ''}
+        ${(m.hist || []).length ? `<details><summary class="small">الجولات السابقة (تعادل)</summary>${m.hist.map((h) => `<div class="small">${esc(hRange(h))}: ${ar(h.ra?.s ?? 0)}٪ مقابل ${ar(h.rb?.s ?? 0)}٪</div>`).join('')}</details>` : ''}
+        ${!m.done && sideOf(m, me.id) && !(sideOf(m, me.id) === 'a' ? m.ra : m.rb) ? `<button class="btn primary" type="button" id="hwGo" style="margin-top:12px">⚔️ ادخل المباراة${m.tb ? ' (جولة فاصلة)' : ''}</button>` : ''}
+        ${fresh ? `<div class="card" style="margin-top:12px">نتيجتك: <b>${ar(fresh.s)}٪</b>${fresh.pen ? ` (دقة ${ar(fresh.p)}٪، خصم تجويد ${ar(fresh.pen)})` : ''}</div>` : ''}`;
+      $('#hwGo', app) && ($('#hwGo', app).onclick = () => openMatch(mid));
+      $$('[data-aud]', app).forEach((b) => (b.onclick = async () => { b.disabled = true; try { const d = await store.getMatchAudio(heroT.id, b.dataset.aud); if (!d) { toast('التسجيل غير متاح.'); b.disabled = false; return; } const a = new Audio(`data:${d.mime};base64,${d.b64}`); a.play(); b.textContent = '▶ يُشغَّل…'; a.onended = () => { b.disabled = false; b.textContent = '🔊 استمع لتلاوته'; }; } catch { b.disabled = false; } }));
+      if (w && !paint.party && (w === me.id)) { paint.party = true; confetti(); }
+    };
+    hView = { refresh: paint };
+    const m = hM.find((x) => x.id === mid);
+    if (m?.live) offLive = store.watchLive(heroT.id, mid, (d) => { live = d || {}; paint(); });
+    paint();
+  }
+
   /* --- الموسم --- */
   let mySeasons = [];
   function paintSeason() {
@@ -1111,7 +1257,7 @@ function viewStudent(app) {
     if (v.mine || st !== 'open') return showChResult(body, c);
     body.innerHTML = '<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً، بلا تلميح، ومحاولة واحدة فقط: النتيجة تُحتسب عند أول إيقاف. استعد جيداً ثم ابدأ.</div><div id="chRc"></div>';
     comp = mountRecite($('#chRc', body), {
-      surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true,
+      surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true,
       onActivity: (sec) => logAct('practice', sec),
       onResult: (sub) => setTimeout(async () => {
         const r = { p: sub.percent, wpm: sub.wpm || 0, dur: Math.round(sub.duration || 0), at: new Date().toISOString() };
@@ -1233,7 +1379,7 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
         <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚|📿)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
@@ -1246,6 +1392,7 @@ function viewStudent(app) {
         if (n?.type === 'cheer') { openModal(`<div class="stack"><h2>💚 رسالة من معلمك</h2><p style="margin:0;line-height:2;white-space:pre-wrap">${esc(n.body || '')}</p><div class="row"><button class="btn primary" type="button" data-close>جزاك الله خيراً</button></div></div>`); return; }
         if (n?.type === 'challenge') { loadChallenges().then(() => openChallenge(n.chId)); return; }
         if (n?.type === 'ann') { openAnn(n.annId); return; }
+        if (n?.type === 'hero') { if (n.mid && hM.some((x) => x.id === n.mid)) openMatch(n.mid); else { tab = 'heroes'; draw(); } return; }
         if (n?.type === 'month' || n?.type === 'season') { openMonth(n); return; }
         if (n?.type === 'board') { tab = 'honor'; draw(); return; }
         if (n?.type === 'streak') { tab = 'practice'; draw(); return; }
@@ -1273,6 +1420,7 @@ function viewStudent(app) {
     draw();
     pruneImageCache();
     store.listSeasons().then((L) => { mySeasons = L; paintSeason(); }).catch(() => {});
+    loadHeroes();
     loadKhatmas().then(() => { if (openKhId) { const id = openKhId; openKhId = null; openKhatma(id); } });
     loadChallenges().then(() => { if (openChId) { const id = openChId; openChId = null; openChallenge(id); } });
     store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
@@ -1355,9 +1503,9 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>
+      <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>
       <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
@@ -1365,7 +1513,7 @@ function viewStudent(app) {
     paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason();
+    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
@@ -1376,6 +1524,7 @@ function viewStudent(app) {
     if (tab === 'practice') drawPractice(body);
     if (tab === 'honor') drawHonor(body);
     if (tab === 'mushaf') drawMushaf(body);
+    if (tab === 'heroes') drawHeroes(body);
     if (tab === 'settings') drawStSettings(body);
   }
 
@@ -1644,7 +1793,7 @@ function viewStudent(app) {
   }
 
   load();
-  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); } };
+  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); offHero?.(); offLive?.(); } };
 }
 
 async function studentLogin(app, msg = '') {
@@ -1781,6 +1930,7 @@ function viewTeacher(app) {
     store.listAllChallenges().then((L) => { D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
     store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
+    loadHeroesT();
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
@@ -3196,7 +3346,7 @@ function viewTeacher(app) {
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
   const boardSubs = () => {
-    const base = D.subs.concat(D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : []);
+    const base = D.subs.concat(D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
   function schedulePublish() {
@@ -3237,10 +3387,12 @@ function viewTeacher(app) {
       </div>
       <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
+      <div class="card stack hero-adm" style="gap:10px;margin-bottom:16px" id="hrAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="ssAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
       <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="hbBoard"></div>`;
     drawKhAdmin($('#khAdm', body));
+    drawHeroAdmin($('#hrAdm', body));
     drawSeasonAdmin($('#ssAdm', body));
     $('#crGo', body).onclick = () => startClassroom($('#crScope', body).value);
     drawChAdmin($('#chAdm', body));
@@ -3381,6 +3533,193 @@ function viewTeacher(app) {
         catch (x) { toast('تعذر الإنشاء: ' + (x.code || x.message)); btn.disabled = false; }
       };
     });
+  }
+
+  /* --- بطولة الأبطال: يديرها جهاز المعلم (حسم المباريات، الأدوار، التتويج) --- */
+  let heroOffs = [], heroIv = null, projOff = null, heroBusy = false, heroDrawT = null;
+  async function loadHeroesT() {
+    try {
+      D.tourneys = (await store.listTourneys()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      D.hMatches = D.hMatches || {};
+      heroOffs.forEach((f) => f()); heroOffs = [];
+      for (const x of D.tourneys) {
+        if (x.status === 'running') heroOffs.push(store.watchMatches(x.id, (ms) => { D.hMatches[x.id] = ms; schedulePublish(); heroTick(x); heroRedraw(); }));
+        else D.hMatches[x.id] = await store.listMatches(x.id).catch(() => []);
+      }
+      clearInterval(heroIv); heroIv = setInterval(() => (D.tourneys || []).filter((x) => x.status === 'running').forEach(heroTick), 60e3);
+      schedulePublish(); heroRedraw();
+    } catch (e) { console.warn('tourneys', e); }
+  }
+  const heroRedraw = () => { clearTimeout(heroDrawT); heroDrawT = setTimeout(() => { const h = document.getElementById('hrAdm'); if (h && tab === 'honor') drawHeroAdmin(h); heroModal?.(); }, 300); };
+  let heroModal = null;
+  async function heroTick(x) {
+    if (heroBusy || x.status !== 'running' || !D.hMatches?.[x.id]) return;
+    heroBusy = true;
+    try {
+      const ms = D.hMatches[x.id].map((m) => ({ ...m }));
+      const r = heroAdvance(x, ms, new Date());
+      for (const u of r.updates) await store.updateMatch(x.id, u.id, u.patch);
+      if (r.creates.length) await store.saveMatches(x.id, r.creates);
+      if (r.tour) { Object.assign(x, r.tour); await store.saveTourney({ id: x.id, ...r.tour }); }
+      await heroNotify(x, r);
+    } catch (e) { console.warn('hero tick', e); }
+    heroBusy = false;
+  }
+  async function heroNotify(x, r) {
+    const items = [], push = async (pn, n) => { try { items.push({ notif: await store.addStudentNotif(pn, { type: 'hero', link: `./#/student/hero/${n.mid || ''}`, tag: 'hero-' + (n.mid || x.id), ...n }), student: pn }); } catch (e) { console.warn(e); } };
+    for (const m of r.creates.filter((y) => !y.bye)) {
+      for (const [me1, op] of [[m.a, m.b], [m.b, m.a]]) {
+        await push(me1.pn, m.live
+          ? { mid: m.id, title: `🔥 تأهلت إلى ${r.creates.filter((y) => !y.bye).length === 1 ? 'النهائي' : 'نصف النهائي'} في ${x.name}!`, body: `مباراتك المباشرة ضد ${op.name} في ${hRange(m)}. سيحدد المعلم موعدها ويصلك إشعار.` }
+          : { mid: m.id, title: `⚔️ ${x.name}: الدور ${ar(m.round)}`, body: `مباراتك ضد ${op.name} في ${hRange(m)}. سلّم تلاوتك خلال ${ar(x.hours || 48)} ساعة.` });
+      }
+    }
+    for (const m of r.creates.filter((y) => y.bye && !y.wait)) await push(m.a.pn, { title: `🍀 ${x.name}: تأهلت بالقرعة`, body: `عدد المتسابقين فردي، فتأهلت مباشرة إلى الدور ${ar(m.round + 1)}. استعد!` });
+    for (const ev of r.events) {
+      if (ev.type === 'ext') for (const p of [ev.m.a, ev.m.b]) await push(p.pn, { mid: ev.m.id, title: `⏳ ${x.name}: تمديد ٢٤ ساعة`, body: `لم يسلّم أي منكما. هذه فرصة أخيرة، وبعدها تُحسم المباراة بالقرعة.` });
+      if (ev.type === 'classChamp') await push(ev.who.pn, { title: `🏅 أنت بطل صفك في ${x.name}!`, body: `مبارك! +${ar(HPTS.classChamp)} نقاط في لوحة الشرف، وتنتقل إلى مرحلة النخبة بين الصفوف.` });
+    }
+    const champ = r.events.find((e) => e.type === 'champ');
+    if (champ) {
+      const now = new Date().toISOString(), badges = { [champ.who.pn]: { id: 'hero-' + x.id, icon: '🏆', color: '#a77a1c', label: `بطل ${x.name}`, title: 'بطل الأبطال', at: now } };
+      if (champ.runnerUp) badges[champ.runnerUp.pn] = { id: 'hero2-' + x.id, icon: '🥈', color: '#6b7a86', label: `وصيف ${x.name}`, title: 'الوصيف', at: now };
+      Object.values(x.classChamps || {}).forEach((c) => { if (!badges[c.pn]) badges[c.pn] = { id: 'heroc-' + x.id, icon: '🏅', color: '#0d5c46', label: `بطل صفه في ${x.name}`, title: 'بطل الصف', at: now }; });
+      try { await store.addBadges(badges); } catch (e) { console.warn('badges', e); }
+      try { const id = await store.addNotif({ type: 'hero', title: `🏆 ${champ.who.name} بطل ${x.name}!`, body: `مبارك للبطل${champ.runnerUp ? ` وللوصيف ${champ.runnerUp.name}` : ''}، وشكراً لكل من شارك. شاهد الشجرة كاملة في تبويب الأبطال.`, link: './#/student', tag: 'hero-' + x.id, classId: 'all' }); await sendPush(id); } catch (e) { console.warn(e); }
+      confetti(); toast(`🏆 انتهت البطولة: ${champ.who.name} بطل ${x.name}!`);
+    }
+    if (items.length) { try { for (let i = 0; i < items.length; i += 200) await sendPushBatch(items.slice(i, i + 200)); } catch (e) { console.warn(e); } }
+  }
+  function heroCerts(x) {
+    const date = ar(new Date(x.doneAt || Date.now()).toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' }));
+    const mk = (p, title, line, rank) => ({ ym: 'hero-' + x.id, name: p.name, title, line, rank, month: x.name, season: x.name, period: `في ${x.name}`, color: '#a77a1c', points: 0, className: className(p.classId), teacher: s.name || '', date });
+    const L = [];
+    if (x.champion) L.push(mk(x.champion, 'بطل الأبطال', `بطل مسابقة ${x.name} على المرحلة`, 1));
+    if (x.runnerUp) L.push(mk(x.runnerUp, 'وصيف البطل', `وصيف مسابقة ${x.name}`, 2));
+    Object.values(x.classChamps || {}).filter((c) => c.pn !== x.champion?.pn && c.pn !== x.runnerUp?.pn).forEach((c) => L.push(mk(c, `بطل ${className(c.classId)}`, `بطل ${className(c.classId)} في ${x.name}`, 3)));
+    return L;
+  }
+  function drawHeroAdmin(host) {
+    const L = D.tourneys || [];
+    const run = L.find((x) => x.status === 'running');
+    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🏆 الأبطال (خروج المغلوب)</h3>${run ? '' : '<button class="btn sm primary" type="button" id="hrNew">+ بطولة جديدة</button>'}</div>
+      <p class="small muted" style="margin:0">يتنافس كل طالبين من الصف نفسه، والفائز يستمر حتى يبقى بطل لكل صف، ثم قرعة بين أبطال الصفوف حتى بطل الأبطال. التقييم آلي بدقة الكلمات فقط ولا يتدخل المعلم. النصف والنهائي مباشران (${ar(LIVE_MIN)} دقائق) مع تحليل تجويد آلي إلزامي.</p>
+      ${L.length ? `<ul class="kh-list">${L.slice(0, 6).map((x) => { const ms = D.hMatches?.[x.id] || [], need = ms.filter((m) => m.live && !m.done && !m.startAt).length;
+        return `<li><div><b>${esc(x.name)}</b><span class="small muted">${esc(stageLabel(x, ms))}${x.champion ? ` · البطل: ${esc(x.champion.name)}` : ''}</span>${need ? `<span class="pill warn">📅 ${need === 1 ? 'مباراة مباشرة تنتظر موعداً' : `${ar(need)} مباريات مباشرة تنتظر مواعيدها`}</span>` : ''}</div>
+        <div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm${need ? ' gold' : ''}" type="button" data-hrv="${esc(x.id)}">إدارة</button>${x.status === 'done' ? `<button class="btn sm gold" type="button" data-hrc="${esc(x.id)}">🏅 الشهادات</button>` : ''}<button class="btn sm danger" type="button" data-hrd="${esc(x.id)}">حذف</button></div></li>`; }).join('')}</ul>` : ''}`;
+    $('#hrNew', host) && ($('#hrNew', host).onclick = newTourney);
+    $$('[data-hrv]', host).forEach((b) => (b.onclick = () => manageTourney(b.dataset.hrv)));
+    $$('[data-hrc]', host).forEach((b) => (b.onclick = async () => { const x = L.find((y) => y.id === b.dataset.hrc); b.disabled = true; try { await downloadCertificatesPDF(heroCerts(x), 'heroes-certificates.pdf', (i, n) => (b.textContent = `${ar(i)}/${ar(n)}…`)); } catch (e) { toast(e.message); } b.disabled = false; b.textContent = '🏅 الشهادات'; }));
+    $$('[data-hrd]', host).forEach((b) => (b.onclick = async () => {
+      const x = L.find((y) => y.id === b.dataset.hrd);
+      if (!(await confirmBox(`حذف بطولة «${x.name}» بكل مبارياتها؟ تُحذف نقاطها من لوحة الشرف.`))) return;
+      try { await store.deleteTourney(x.id); D.tourneys = D.tourneys.filter((y) => y.id !== x.id); delete D.hMatches[x.id]; await loadHeroesT(); toast('حُذفت البطولة.'); } catch (e) { toast('تعذر الحذف: ' + (e.code || e.message)); }
+    }));
+  }
+  const HERO_SURAHS = [87, 88, 89, 90, 91, 92, 93, 94, 95, 96];
+  function newTourney() {
+    const cls = D.classes.filter((c) => D.students.some((x) => x.classId === c.id));
+    const rounds = (ids) => { const mx = Math.max(1, ...ids.map((c) => D.students.filter((x) => x.classId === c).length)); return Math.max(1, Math.ceil(Math.log2(mx)) + Math.ceil(Math.log2(Math.max(1, ids.length)))); };
+    openModal(`<form class="stack" id="hrF"><h2>🏆 بطولة الأبطال</h2>
+      <label class="field">اسم البطولة<input id="hrName" maxlength="50" required value="الأبطال"></label>
+      <div class="field">الصفوف المشاركة (يشترك كل طلابها)<div class="row" style="gap:6px;flex-wrap:wrap">${cls.map((c) => `<label class="chip-ck"><input type="checkbox" value="${esc(c.id)}" checked> ${esc(c.name)} <small class="muted">(${ar(D.students.filter((x) => x.classId === c.id).length)})</small></label>`).join('')}</div></div>
+      <label class="field">مهلة كل دور قبل النصف النهائي<select id="hrH"><option value="24">٢٤ ساعة</option><option value="48" selected>٤٨ ساعة</option><option value="72">٧٢ ساعة</option></select></label>
+      <div class="field">سورة كل دور <span class="small muted">(عند التعادل يختار البرنامج المقطع التالي أو السورة التالية تلقائياً)</span><div id="hrRounds" class="stack" style="gap:6px"></div></div>
+      <div class="small muted" id="hrInfo"></div>
+      <div class="row"><button class="btn primary" type="submit">ابدأ البطولة والقرعة</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      const sel = () => $$('#hrF input[type=checkbox]', m).filter((i) => i.checked).map((i) => i.value);
+      const paintR = () => {
+        const n = rounds(sel()), host = $('#hrRounds', m), old = $$('select', host).map((x) => x.value);
+        host.innerHTML = Array.from({ length: n }, (_, i) => `<label class="row" style="gap:8px"><span style="min-width:90px" class="small">${i === n - 1 ? 'النهائي' : i === n - 2 && n > 2 ? 'نصف النهائي' : `الدور ${ar(i + 1)}`}</span><select data-r="${i}" style="flex:1">${surahOptions(+(old[i] || HERO_SURAHS[i] || 87))}</select></label>`).join('');
+        const N = sel().reduce((k, c) => k + D.students.filter((x) => x.classId === c).length, 0);
+        $('#hrInfo', m).textContent = `${ar(N)} متسابقاً في ${ar(sel().length)} ${sel().length === 1 ? 'صف' : 'صفوف'}، ونحو ${ar(n)} ${n <= 2 ? 'دور' : 'أدوار'}.`;
+      };
+      $$('#hrF input[type=checkbox]', m).forEach((i) => (i.onchange = paintR)); paintR();
+      $('#hrF', m).onsubmit = async (e) => {
+        e.preventDefault(); const btn = e.submitter, ids = sel();
+        const studs = D.students.filter((x) => ids.includes(x.classId));
+        if (studs.length < 2) return toast('يلزم طالبان على الأقل.');
+        btn.disabled = true;
+        const x = { name: $('#hrName', m).value.trim() || 'الأبطال', status: 'running', stage: 'class', classIds: ids, hours: +$('#hrH', m).value, rounds: $$('#hrRounds select', m).map((s1) => ({ surah: +s1.value, from: 1, to: ayahCount(+s1.value) })), classChamps: {}, createdAt: new Date().toISOString() };
+        try {
+          x.id = await store.saveTourney(x);
+          const ms = firstRound(x, studs, new Date());
+          await store.saveMatches(x.id, ms);
+          D.tourneys = [x, ...(D.tourneys || [])]; D.hMatches[x.id] = ms;
+          closeModal();
+          await heroNotify(x, { creates: ms, events: [] });
+          try { const id = await store.addNotif({ type: 'hero', title: `🏆 انطلقت بطولة ${x.name}!`, body: 'جرت القرعة. ادخل تبويب «الأبطال» لترى خصمك في الدور الأول.', link: './#/student', tag: 'hero-' + x.id, classId: ids.length === D.classes.length ? 'all' : ids[0] }); await sendPush(id); } catch {}
+          await loadHeroesT();
+          toast(`انطلقت «${x.name}» بـ${ar(ms.filter((y) => !y.bye).length)} مباراة في الدور الأول.`);
+          manageTourney(x.id);
+        } catch (er) { toast('تعذر الإنشاء: ' + (er.code || er.message)); btn.disabled = false; }
+      };
+    });
+  }
+  function manageTourney(tid) {
+    let view = null;
+    const paint = (m) => {
+      const x = (D.tourneys || []).find((y) => y.id === tid); if (!x) return;
+      const ms = D.hMatches?.[tid] || [];
+      view = view || (ms.some((y) => y.stage === 'inter') ? 'inter' : x.classIds[0]);
+      const need = ms.filter((y) => y.live && !y.done);
+      $('#hmgBody', m).innerHTML = `<p class="small muted" style="margin:0">${esc(stageLabel(x, ms))}${x.champion ? ` · 🏆 ${esc(x.champion.name)}` : ''}</p>
+        ${need.length ? `<div class="card stack" style="gap:8px"><b>📺 المباريات المباشرة</b>${need.map((y) => `<div class="row" style="justify-content:space-between;gap:6px"><span>${esc(y.a.name)} ⚔️ ${esc(y.b.name)} <small class="muted">${esc(hRange(y))}</small></span>
+          <span class="row" style="gap:4px"><input type="datetime-local" data-dt="${esc(y.id)}" value="${y.startAt ? toLocalInput(y.startAt) : ''}"><button class="btn sm primary" type="button" data-sch="${esc(y.id)}">${y.startAt ? 'غيّر الموعد' : 'حدد الموعد'}</button>${y.startAt ? `<button class="btn sm gold" type="button" data-proj="${esc(y.id)}">📺 اعرض</button>` : ''}</span></div>`).join('')}</div>` : ''}
+        <div class="hero-tabs">${x.classIds.map((c) => `<button type="button" class="chip${view === c ? ' on' : ''}" data-v="${esc(c)}">${esc(className(c))}</button>`).join('')}<button type="button" class="chip${view === 'inter' ? ' on' : ''}" data-v="inter">🌍 النخبة</button></div>
+        ${bracketHtml(ms, { stage: view === 'inter' ? 'inter' : 'class', classId: view, me: null })}`;
+      $$('[data-v]', m).forEach((b) => (b.onclick = () => { view = b.dataset.v; paint(m); }));
+      $$('[data-proj]', m).forEach((b) => (b.onclick = () => heroProjector(tid, b.dataset.proj)));
+      $$('[data-sch]', m).forEach((b) => (b.onclick = async () => {
+        const v = $(`[data-dt="${b.dataset.sch}"]`, m).value; if (!v) return toast('اختر الموعد أولاً.');
+        const at = new Date(v); if (at < Date.now() - 60e3) return toast('الموعد في الماضي.');
+        const y = ms.find((z) => z.id === b.dataset.sch); b.disabled = true;
+        try {
+          await store.updateMatch(tid, y.id, { startAt: at.toISOString() });
+          const when = ar(at.toLocaleString('ar', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }));
+          const items = [];
+          for (const [p, o] of [[y.a, y.b], [y.b, y.a]]) items.push({ notif: await store.addStudentNotif(p.pn, { type: 'hero', title: `📺 موعد مباراتك ضد ${o.name}`, body: `${when}. افتح المقرأة قبل الموعد بدقائق، ولديك ${ar(LIVE_MIN)} دقائق للتسليم في ${hRange(y)}.`, link: `./#/student/hero/${y.id}`, tag: 'hero-' + y.id }), student: p.pn });
+          await sendPushBatch(items).catch(() => {});
+          const id = await store.addNotif({ type: 'hero', title: `📺 مباراة مباشرة: ${y.a.name} ⚔️ ${y.b.name}`, body: `${when}. تابعوا السباق مباشرة من تبويب «الأبطال».`, link: './#/student', tag: 'hero-live-' + y.id, classId: 'all' }); await sendPush(id).catch(() => {});
+          toast('حُدد الموعد وأُبلغ المتسابقان والجميع.');
+        } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); b.disabled = false; }
+      }));
+    };
+    openModal(`<div class="stack hero-mg"><h2 style="margin:0">🏆 ${esc((D.tourneys || []).find((y) => y.id === tid)?.name || '')}</h2><div id="hmgBody"></div><div class="row"><button class="btn gold" type="button" id="hmgProj">📺 اعرض على البروجكتر</button><button class="btn" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+      heroModal = () => { if (document.body.contains(m) && !m.contains(document.activeElement?.closest?.('input') || null)) paint(m); else if (!document.body.contains(m)) heroModal = null; };
+      $('#hmgProj', m).onclick = () => heroProjector(tid, null);
+      paint(m);
+    });
+  }
+  const toLocalInput = (iso) => { const d = new Date(iso); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+  /** شاشة البروجكتر: الشجرة، أو السباق المباشر لمباراة */
+  function heroProjector(tid, mid) {
+    closeModal(); projOff?.();
+    const x = D.tourneys.find((y) => y.id === tid);
+    const el = document.createElement('div'); el.className = 'hero-proj'; document.body.appendChild(el);
+    let live = {}, offL = null, view = null;
+    const pickLive = () => mid || (D.hMatches[tid] || []).find((y) => y.live && !y.done && y.startAt && new Date(y.startAt) - Date.now() < 15 * 60e3)?.id || null;
+    const paint = () => {
+      const ms = D.hMatches[tid] || [], cur = pickLive(), m = cur && ms.find((y) => y.id === cur);
+      if (m && !offL) { offL = () => {}; offL = store.watchLive(tid, m.id, (d) => { live = d || {}; if (offL) setTimeout(paint, 0); }); }
+      view = view || (ms.some((y) => y.stage === 'inter') ? 'inter' : x.classIds[0]);
+      const lane = (p, r, side) => { const L = live[side] || {}, pct = r ? 100 : L.total ? Math.round((L.done / L.total) * 100) : 0;
+        return `<div class="race-lane big${m.done && m.winner === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)} <small>${esc(className(p.classId))}</small> ${L.on && !r ? '<span class="rl-on">🎙️</span>' : ''}</div><div class="rl-track"><i style="width:${pct}%"></i><span>${r ? `${ar(r.s)}٪` : L.total ? `${ar(pct)}٪ · دقة ${ar(Math.round((L.ok / Math.max(1, L.done)) * 100))}٪` : 'ينتظر…'}</span></div></div>`; };
+      const left = m?.startAt ? Math.max(0, Math.round((new Date(m.startAt).getTime() + LIVE_MIN * 60e3 - Date.now()) / 1000)) : 0;
+      el.innerHTML = `<button class="hp-x" type="button" aria-label="إغلاق">✕</button><h1>🏆 ${esc(x.name)}</h1><div class="hp-st">${esc(stageLabel(x, ms))}</div>
+        ${x.champion ? `<div class="hero-champ big"><div class="hc-cup">🏆</div><div><span>بطل الأبطال</span><b>${esc(x.champion.name)}</b><span>${esc(className(x.champion.classId))}</span></div></div>` : ''}
+        ${m ? `<div class="hp-race"><div class="hp-rh">${esc(hRange(m))} ${new Date(m.startAt) > Date.now() ? `· تبدأ ${ar(new Date(m.startAt).toLocaleTimeString('ar', { hour: 'numeric', minute: '2-digit' }))}` : m.done ? '' : `· ⏱ ${ar(Math.floor(left / 60))}:${ar(String(left % 60).padStart(2, '0'))}`}</div>${lane(m.a, m.ra, 'a')}${lane(m.b, m.rb, 'b')}${m.done ? `<div class="hero-res big">🏆 ${esc(m.winner === m.a.pn ? m.a.name : m.b.name)}</div>` : ''}</div>` : bracketHtml(ms, { stage: view === 'inter' ? 'inter' : 'class', classId: view, me: null })}
+        ${!m ? `<div class="hero-tabs">${x.classIds.map((c) => `<button type="button" class="chip${view === c ? ' on' : ''}" data-v="${esc(c)}">${esc(className(c))}</button>`).join('')}<button type="button" class="chip${view === 'inter' ? ' on' : ''}" data-v="inter">🌍 النخبة</button></div>` : ''}`;
+      $('.hp-x', el).onclick = () => projOff();
+      $$('[data-v]', el).forEach((b) => (b.onclick = () => { view = b.dataset.v; paint(); }));
+      if (m?.done && !paint.party) { paint.party = true; confetti(); }
+    };
+    const iv = setInterval(paint, 1000);
+    const key = (e) => { if (e.key === 'Escape') projOff(); };
+    document.addEventListener('keydown', key);
+    projOff = () => { clearInterval(iv); offL?.(); el.remove(); document.removeEventListener('keydown', key); projOff = null; };
+    try { el.requestFullscreen?.().catch(() => {}); } catch {}
+    paint();
   }
 
   /* --- وضع عرض الفصل --- */
@@ -3627,7 +3966,7 @@ function viewTeacher(app) {
   }
 
   load();
-  return { destroy: () => unsub?.() };
+  return { destroy: () => { unsub?.(); heroOffs.forEach((f) => f()); clearInterval(heroIv); projOff?.(); } };
 }
 
 async function teacherLogin(app) {
