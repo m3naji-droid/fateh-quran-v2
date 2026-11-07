@@ -3140,7 +3140,7 @@ function viewTeacher(app) {
     try { secrets = await store.listCards(); } catch (e) { $('#modalBody').innerHTML = `<div class="notice">تعذر قراءة كلمات السر: ${esc(e.code || e.message)}. تأكد من نشر قواعد الحماية الجديدة.</div>`; return; }
     const clsName = (id) => D.classes.find((c) => c.id === id)?.name || '';
     const siteUrl = location.origin + location.pathname;
-    const videoUrl = new URL('promo/', location.origin + location.pathname.replace(/[^/]*$/, '')).href;
+    const videoUrl = new URL('guide/', location.origin + location.pathname.replace(/[^/]*$/, '')).href;
     $('#modalBody').innerHTML = `<div class="stack">
       <h2>بطاقات دخول الطلاب</h2>
       <div class="row" style="align-items:flex-end">

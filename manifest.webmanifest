@@ -3,7 +3,7 @@
   "short_name": "مقرأة الفاتح",
   "description": "تصحيح التلاوة وتسميع الحفظ",
   "id": "./",
-  "start_url": "./#/student",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
