@@ -230,7 +230,7 @@ details summary { cursor: pointer; font-weight: 600; }
 .kpi b { display: block; font-family: var(--f-display); font-size: 26px; font-variant-numeric: tabular-nums; }
 .kpi span { color: var(--muted); font-size: 13px; }
 .task { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.task .t-main { min-width: 0; flex: 1; }
+.task .t-main { min-width: 0; flex: 1 1 220px; } /* يلتف تحت الأزرار على الجوال بدل أن ينضغط */
 .task .t-range { font-family: var(--f-quran); color: var(--gold); font-size: 18px; }
 .auth { max-width: 440px; margin: 24px auto; }
 .bar-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) 48px; gap: 10px; align-items: center; font-size: 13px; }
