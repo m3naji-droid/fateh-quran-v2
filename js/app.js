@@ -9,7 +9,7 @@ import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLe
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
-import { LIVE_MIN, AI_PENALTY, AI_MAX, PTS as HPTS, matchWinner, sideOf, tiebreak, rangeText as hRange, firstRound, advance as heroAdvance, heroBonus, stageLabel, bracketHtml } from './heroes.js';
+import { LIVE_MIN, AI_PENALTY, AI_MAX, PTS as HPTS, matchWinner, sideOf, tiebreak, rangeText as hRange, firstRound, advance as heroAdvance, heroBonus, stageLabel, bracketHtml, usedBy as heroUsed, kindLabel } from './heroes.js';
 import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents, taskEnd, taskStarted, taskClosed, riyadhDate, toLocalInput } from './targets.js';
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
@@ -1042,14 +1042,14 @@ function viewStudent(app) {
     const clsIds = heroT.classIds || [];
     body.innerHTML = `<div class="heroes stack">
       <div class="hero-top"><div><h2 style="margin:0">🏆 ${esc(heroT.name || 'الأبطال')}</h2><span class="small muted">${esc(stageLabel(heroT, hM))}</span></div></div>
-      ${heroT.status === 'done' && heroT.champion ? `<div class="hero-champ"><div class="hc-cup">🏆</div><div><span class="small">بطل الأبطال</span><b>${esc(heroT.champion.name)}</b>${heroT.runnerUp ? `<span class="small">الوصيف: ${esc(heroT.runnerUp.name)}</span>` : ''}</div></div>` : ''}
+      ${heroT.status === 'done' && heroT.champion ? `<div class="hero-champ"><div class="hc-cup">🏆</div><div><span class="small">بطل الأبطال</span><b>${esc(heroT.champion.name)}</b>${heroT.runnerUp ? `<span class="small">الوصيف: ${esc(heroT.runnerUp.name)}</span>` : ''}${heroT.third ? `<span class="small">المركز الثالث: ${esc(heroT.third.name)}</span>` : ''}</div></div>` : ''}
       ${m ? (() => { const side = sideOf(m, me.id), other = side === 'a' ? m.b : m.a, mine = side === 'a' ? m.ra : m.rb; return `<div class="card hero-my"><b>⚔️ مباراتك${m.live ? ' المباشرة' : ''}: ضد ${esc(other.name)}</b><span>${esc(hRange(m))}${m.tb ? ` · جولة فاصلة ${ar(m.tb)}` : ''}</span>
         <span class="small muted">${m.live ? (m.startAt ? `تبدأ ${fmtTimeOf(m.startAt)}، ولديك ${ar(LIVE_MIN)} دقائق للتسليم` : 'ينتظر أن يحدد المعلم موعدها') : `آخر موعد ${fmtTimeOf(m.deadline)}`}</span>
         <button class="btn primary" type="button" data-om="${esc(m.id)}">${mine ? 'نتيجتي' : 'ادخل المباراة'}</button></div>`; })() : heroT.status === 'running' ? `<div class="card hero-my">${lost ? `<b>انتهت مشاركتك في الدور ${ar(lost.round)} 🌟</b><span class="small muted">بارك الله فيك. تابع المنافسة وشجّع زملاءك!</span>` : '<b>بانتظار الدور القادم…</b>'}</div>` : ''}
       ${lives.length ? `<div class="card stack" style="gap:8px"><b>📺 مباريات مباشرة</b>${lives.map((x) => `<div class="row" style="justify-content:space-between"><span>${esc(x.a.name)} ⚔️ ${esc(x.b.name)} <small class="muted">${fmtTimeOf(x.startAt)}</small></span><button class="btn sm gold" type="button" data-watch="${esc(x.id)}">شاهد</button></div>`).join('')}</div>` : ''}
       <div class="hero-tabs">${clsIds.map((c) => `<button type="button" class="chip${hTab === c ? ' on' : ''}" data-ht="${esc(c)}">${esc(data.classes.find((x) => x.id === c)?.name || '')}</button>`).join('')}<button type="button" class="chip${hTab === 'inter' ? ' on' : ''}" data-ht="inter">🌍 النخبة</button></div>
       ${bracketHtml(hM, { stage: hTab === 'inter' ? 'inter' : 'class', classId: hTab, me: me.id })}
-      <p class="small muted" style="margin:0">التقييم آلي فقط بدقة الكلمات، ولا يتدخل المعلم. فرق أقل من ١٪ تعادل تُعاد فيه المباراة بمقطع آخر. النصف والنهائي مباشران (${ar(LIVE_MIN)} دقائق) ويُخصم فيهما ${ar(AI_PENALTY)} لكل ملاحظة تجويد آلية (حتى ${ar(AI_MAX)}).</p></div>`;
+      <p class="small muted" style="margin:0">التقييم آلي فقط بدقة الكلمات، ولا يتدخل المعلم. فرق أقل من ١٪ تعادل تُعاد فيه المباراة بمقطع آخر. ${heroT.pool?.length ? 'لكل متنافسَين مقطعهما يختاره البرنامج من سور البطولة، ومقطع النصف والثالث والنهائي مفاجأة يُكشف لحظة البدء. ' : ''}النصف والنهائي${heroT.pool?.length ? ' ومباراة المركز الثالث' : ''} مباشرة (${ar(LIVE_MIN)} دقائق) ويُخصم فيها ${ar(AI_PENALTY)} لكل ملاحظة تجويد آلية (حتى ${ar(AI_MAX)}).</p></div>`;
     $$('[data-om]', body).forEach((b) => (b.onclick = () => openMatch(b.dataset.om)));
     $$('[data-watch]', body).forEach((b) => (b.onclick = () => watchMatch(b.dataset.watch)));
     $$('[data-ht]', body).forEach((b) => (b.onclick = () => { hTab = b.dataset.ht; drawHeroes(body); }));
@@ -1108,7 +1108,7 @@ function viewStudent(app) {
     recordProgress({ ...sub, surah: m.surah, from: m.from, to: m.to });
     // تعادل: يعيد المباراة بمقطع آخر من سلّم أخيراً
     if (x.ra && x.rb && matchWinner(x) === 'tie') {
-      const nx = tiebreak(x);
+      const nx = tiebreak(x, heroT, [...heroUsed(hM, x.a.pn), ...heroUsed(hM, x.b.pn)]);
       try { await store.updateMatch(heroT.id, m.id, { ra: null, rb: null, tb: (x.tb || 0) + 1, hist: [...(x.hist || []), { surah: x.surah, from: x.from, to: x.to, ra: x.ra, rb: x.rb }], ...nx, ...(x.live ? { startAt: new Date(Date.now() + 60e3).toISOString() } : { deadline: new Date(Date.now() + 24 * 3600e3).toISOString() }) }); } catch (e) { console.warn('tie', e); }
       toast(`🤝 تعادل! جولة فاصلة في ${hRange({ ...x, ...nx })}`);
     }
@@ -3742,7 +3742,8 @@ function viewTeacher(app) {
     for (const m of r.creates.filter((y) => !y.bye)) {
       for (const [me1, op] of [[m.a, m.b], [m.b, m.a]]) {
         await push(me1.pn, m.live
-          ? { mid: m.id, title: `🔥 تأهلت إلى ${r.creates.filter((y) => !y.bye).length === 1 ? 'النهائي' : 'نصف النهائي'} في ${x.name}!`, body: `مباراتك المباشرة ضد ${op.name} في ${hRange(m)}. سيحدد المعلم موعدها ويصلك إشعار.` }
+          ? (m.third ? { mid: m.id, title: `🥉 ${x.name}: مباراة المركز الثالث`, body: `تنافس ${op.name} مباشرة على المركز الثالث في ${hRange(m)}. سيحدد المعلم موعدها ويصلك إشعار.` }
+            : { mid: m.id, title: `🔥 تأهلت إلى ${m.kind ? kindLabel(m) : r.creates.filter((y) => !y.bye).length === 1 ? 'النهائي' : 'نصف النهائي'} في ${x.name}!`, body: `مباراتك المباشرة ضد ${op.name} في ${hRange(m)}. سيحدد المعلم موعدها ويصلك إشعار.` })
           : { mid: m.id, title: `⚔️ ${x.name}: الدور ${ar(m.round)}`, body: `مباراتك ضد ${op.name} في ${hRange(m)}. سلّم تلاوتك خلال ${ar(x.hours || 48)} ساعة.` });
       }
     }
@@ -3755,9 +3756,10 @@ function viewTeacher(app) {
     if (champ) {
       const now = new Date().toISOString(), badges = { [champ.who.pn]: { id: 'hero-' + x.id, icon: '🏆', color: '#a77a1c', label: `بطل ${x.name}`, title: 'بطل الأبطال', at: now } };
       if (champ.runnerUp) badges[champ.runnerUp.pn] = { id: 'hero2-' + x.id, icon: '🥈', color: '#6b7a86', label: `وصيف ${x.name}`, title: 'الوصيف', at: now };
+      if (champ.third && !badges[champ.third.pn]) badges[champ.third.pn] = { id: 'hero3-' + x.id, icon: '🥉', color: '#a0612b', label: `المركز الثالث في ${x.name}`, title: 'المركز الثالث', at: now };
       Object.values(x.classChamps || {}).forEach((c) => { if (!badges[c.pn]) badges[c.pn] = { id: 'heroc-' + x.id, icon: '🏅', color: '#0d5c46', label: `بطل صفه في ${x.name}`, title: 'بطل الصف', at: now }; });
       try { await store.addBadges(badges); } catch (e) { console.warn('badges', e); }
-      try { const id = await store.addNotif({ type: 'hero', title: `🏆 ${champ.who.name} بطل ${x.name}!`, body: `مبارك للبطل${champ.runnerUp ? ` وللوصيف ${champ.runnerUp.name}` : ''}، وشكراً لكل من شارك. شاهد الشجرة كاملة في تبويب الأبطال.`, link: './#/student', tag: 'hero-' + x.id, classId: 'all' }); await sendPush(id); } catch (e) { console.warn(e); }
+      try { const id = await store.addNotif({ type: 'hero', title: `🏆 ${champ.who.name} بطل ${x.name}!`, body: `مبارك للبطل${champ.runnerUp ? ` وللوصيف ${champ.runnerUp.name}` : ''}${champ.third ? ` ولصاحب المركز الثالث ${champ.third.name}` : ''}، وشكراً لكل من شارك. شاهد الشجرة كاملة في تبويب الأبطال.`, link: './#/student', tag: 'hero-' + x.id, classId: 'all' }); await sendPush(id); } catch (e) { console.warn(e); }
       confetti(); toast(`🏆 انتهت البطولة: ${champ.who.name} بطل ${x.name}!`);
     }
     if (items.length) { try { for (let i = 0; i < items.length; i += 200) await sendPushBatch(items.slice(i, i + 200)); } catch (e) { console.warn(e); } }
@@ -3768,14 +3770,15 @@ function viewTeacher(app) {
     const L = [];
     if (x.champion) L.push(mk(x.champion, 'بطل الأبطال', `بطل مسابقة ${x.name} على المرحلة`, 1));
     if (x.runnerUp) L.push(mk(x.runnerUp, 'وصيف البطل', `وصيف مسابقة ${x.name}`, 2));
-    Object.values(x.classChamps || {}).filter((c) => c.pn !== x.champion?.pn && c.pn !== x.runnerUp?.pn).forEach((c) => L.push(mk(c, `بطل ${className(c.classId)}`, `بطل ${className(c.classId)} في ${x.name}`, 3)));
+    if (x.third) L.push(mk(x.third, 'المركز الثالث', `صاحب المركز الثالث في مسابقة ${x.name}`, 3));
+    Object.values(x.classChamps || {}).filter((c) => c.pn !== x.champion?.pn && c.pn !== x.runnerUp?.pn && c.pn !== x.third?.pn).forEach((c) => L.push(mk(c, `بطل ${className(c.classId)}`, `بطل ${className(c.classId)} في ${x.name}`, 3)));
     return L;
   }
   function drawHeroAdmin(host) {
     const L = D.tourneys || [];
     const run = L.find((x) => x.status === 'running');
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🏆 الأبطال (خروج المغلوب)</h3>${run ? '' : '<button class="btn sm primary" type="button" id="hrNew">+ بطولة جديدة</button>'}</div>
-      <p class="small muted" style="margin:0">يتنافس كل طالبين من الصف نفسه، والفائز يستمر حتى يبقى بطل لكل صف، ثم قرعة بين أبطال الصفوف حتى بطل الأبطال. التقييم آلي بدقة الكلمات فقط ولا يتدخل المعلم. النصف والنهائي مباشران (${ar(LIVE_MIN)} دقائق) مع تحليل تجويد آلي إلزامي.</p>
+      <p class="small muted" style="margin:0">يتنافس كل طالبين من الصف نفسه، والفائز يستمر حتى يبقى بطل لكل صف، ثم قرعة بين أبطال الصفوف حتى بطل الأبطال. التقييم آلي بدقة الكلمات فقط ولا يتدخل المعلم. يختار البرنامج لكل متنافسَين مقطعاً من السور التي تحددها بعدد الآيات الذي تحدده لكل دور. النصف والنهائي ومباراة المركز الثالث مباشرة (${ar(LIVE_MIN)} دقائق) بمقطع مفاجئ وتحليل تجويد آلي إلزامي.</p>
       ${L.length ? `<ul class="kh-list">${L.slice(0, 6).map((x) => { const ms = D.hMatches?.[x.id] || [], need = ms.filter((m) => m.live && !m.done && !m.startAt).length;
         return `<li><div><b>${esc(x.name)}</b><span class="small muted">${esc(stageLabel(x, ms))}${x.champion ? ` · البطل: ${esc(x.champion.name)}` : ''}</span>${need ? `<span class="pill warn">📅 ${need === 1 ? 'مباراة مباشرة تنتظر موعداً' : `${ar(need)} مباريات مباشرة تنتظر مواعيدها`}</span>` : ''}</div>
         <div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm${need ? ' gold' : ''}" type="button" data-hrv="${esc(x.id)}">إدارة</button>${x.status === 'done' ? `<button class="btn sm gold" type="button" data-hrc="${esc(x.id)}">🏅 الشهادات</button>` : ''}<button class="btn sm danger" type="button" data-hrd="${esc(x.id)}">حذف</button></div></li>`; }).join('')}</ul>` : ''}`;
@@ -3796,23 +3799,40 @@ function viewTeacher(app) {
       <label class="field">اسم البطولة<input id="hrName" maxlength="50" required value="الأبطال"></label>
       <div class="field">الصفوف المشاركة (يشترك كل طلابها)<div class="row" style="gap:6px;flex-wrap:wrap">${cls.map((c) => `<label class="chip-ck"><input type="checkbox" value="${esc(c.id)}" checked> ${esc(c.name)} <small class="muted">(${ar(D.students.filter((x) => x.classId === c.id).length)})</small></label>`).join('')}</div></div>
       <label class="field">مهلة كل دور قبل النصف النهائي<select id="hrH"><option value="24">٢٤ ساعة</option><option value="48" selected>٤٨ ساعة</option><option value="72">٧٢ ساعة</option></select></label>
-      <div class="field">سورة كل دور <span class="small muted">(عند التعادل يختار البرنامج المقطع التالي أو السورة التالية تلقائياً)</span><div id="hrRounds" class="stack" style="gap:6px"></div></div>
+      <div class="field">سور البطولة <span class="small muted">(يختار البرنامج منها مقطعاً لكل متنافسَين)</span>
+        <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" type="button" data-pr="78-114">جزء عمّ</button><button class="btn sm" type="button" data-pr="67-77">جزء تبارك</button><button class="btn sm" type="button" data-pr="58-66">جزء قد سمع</button><button class="btn sm ghost" type="button" data-pr="none">مسح</button></div>
+        <div id="hrPool" class="hr-pool">${getSurahs().map((x, i) => `<label class="chip-ck"><input type="checkbox" value="${i + 1}"${HERO_SURAHS.includes(i + 1) ? ' checked' : ''}> ${ar(i + 1)}. ${esc(x.name)} <small class="muted">(${ar(x.ayahs)})</small></label>`).join('')}</div></div>
+      <div class="field">عدد الآيات <span class="small muted">(مقطع متتالٍ من موضع عشوائي، والسورة الأقصر من العدد تُعطى كاملة. التعادل يُعاد بمقطع جديد بالطول نفسه)</span><div id="hrRounds" class="stack" style="gap:6px"></div></div>
       <div class="small muted" id="hrInfo"></div>
       <div class="row"><button class="btn primary" type="submit">ابدأ البطولة والقرعة</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
-      const sel = () => $$('#hrF input[type=checkbox]', m).filter((i) => i.checked).map((i) => i.value);
+      const sel = () => $$('#hrF .field > .row input[type=checkbox]', m).filter((i) => i.checked).map((i) => i.value);
       const paintR = () => {
-        const n = rounds(sel()), host = $('#hrRounds', m), old = $$('select', host).map((x) => x.value);
-        host.innerHTML = Array.from({ length: n }, (_, i) => `<label class="row" style="gap:8px"><span style="min-width:90px" class="small">${i === n - 1 ? 'النهائي' : i === n - 2 && n > 2 ? 'نصف النهائي' : `الدور ${ar(i + 1)}`}</span><select data-r="${i}" style="flex:1">${surahOptions(+(old[i] || HERO_SURAHS[i] || 87))}</select></label>`).join('');
-        const N = sel().reduce((k, c) => k + D.students.filter((x) => x.classId === c).length, 0);
-        $('#hrInfo', m).textContent = `${ar(N)} متسابقاً في ${ar(sel().length)} ${sel().length === 1 ? 'صف' : 'صفوف'}، ونحو ${ar(n)} ${n <= 2 ? 'دور' : 'أدوار'}.`;
+        const n = rounds(sel()), reg = Math.max(1, n - 2), host = $('#hrRounds', m);
+        const old = {}; $$('input[data-n]', host).forEach((x) => (old[x.dataset.n] = x.value));
+        const row = (k, label, def) => `<label class="row" style="gap:8px"><span style="min-width:120px" class="small">${label}</span><input type="number" data-n="${k}" min="1" max="60" inputmode="numeric" value="${old[k] || def}" style="width:90px"><span class="small muted">آية</span></label>`;
+        host.innerHTML = Array.from({ length: reg }, (_, i) => row('r' + i, `الدور ${ar(i + 1)}`, Math.min(10, 5 + 2 * i))).join('')
+          + `<div class="small muted" style="margin-top:4px">المباريات المباشرة (مقطع مفاجئ يُكشف لحظة البدء):</div>` + row('semi', '⚡ نصف النهائي', 10) + row('third', '🥉 المركز الثالث', 10) + row('final', '🏆 النهائي', 12);
+        paintInfo();
       };
-      $$('#hrF input[type=checkbox]', m).forEach((i) => (i.onchange = paintR)); paintR();
+      const pool = () => $$('#hrPool input', m).filter((i) => i.checked).map((i) => +i.value);
+      const paintInfo = () => {
+        const n = rounds(sel()), P = pool(), A = P.reduce((k, x) => k + ayahCount(x), 0);
+        const N = sel().reduce((k, c) => k + D.students.filter((x) => x.classId === c).length, 0);
+        $('#hrInfo', m).textContent = `${ar(N)} متسابقاً في ${ar(sel().length)} ${sel().length === 1 ? 'صف' : 'صفوف'}، ونحو ${ar(n)} ${n <= 2 ? 'دور' : 'أدوار'}. السور المختارة: ${ar(P.length)} (${ar(A)} آية).`;
+      };
+      $$('#hrF .field > .row input[type=checkbox]', m).forEach((i) => (i.onchange = paintR));
+      $$('#hrPool input', m).forEach((i) => (i.onchange = paintInfo));
+      const toFirst = () => { const box = $('#hrPool', m), c = $('#hrPool input:checked', m)?.closest('label'); if (box && c) box.scrollTop = c.offsetTop - box.offsetTop - 6; };
+      $$('[data-pr]', m).forEach((b) => (b.onclick = () => { const [a, z] = b.dataset.pr.split('-').map(Number); $$('#hrPool input', m).forEach((i) => (i.checked = b.dataset.pr !== 'none' && +i.value >= a && +i.value <= z)); paintInfo(); toFirst(); }));
+      paintR(); requestAnimationFrame(toFirst);
       $('#hrF', m).onsubmit = async (e) => {
         e.preventDefault(); const btn = e.submitter, ids = sel();
         const studs = D.students.filter((x) => ids.includes(x.classId));
         if (studs.length < 2) return toast('يلزم طالبان على الأقل.');
+        const P = pool(); if (!P.length) return toast('اختر سورة واحدة على الأقل للبطولة.');
+        const num = (k) => Math.max(1, Math.min(60, Math.round(+$(`input[data-n="${k}"]`, m)?.value || 0) || 1));
         btn.disabled = true;
-        const x = { name: $('#hrName', m).value.trim() || 'الأبطال', status: 'running', stage: 'class', classIds: ids, hours: +$('#hrH', m).value, rounds: $$('#hrRounds select', m).map((s1) => ({ surah: +s1.value, from: 1, to: ayahCount(+s1.value) })), classChamps: {}, createdAt: new Date().toISOString() };
+        const x = { name: $('#hrName', m).value.trim() || 'الأبطال', status: 'running', stage: 'class', classIds: ids, hours: +$('#hrH', m).value, pool: P, counts: $$('#hrRounds input[data-n^="r"]', m).map((i) => num(i.dataset.n)), semiN: num('semi'), thirdN: num('third'), finalN: num('final'), classChamps: {}, createdAt: new Date().toISOString() };
         try {
           x.id = await store.saveTourney(x);
           const ms = firstRound(x, studs, new Date());
@@ -3836,7 +3856,7 @@ function viewTeacher(app) {
       view = view || (ms.some((y) => y.stage === 'inter') ? 'inter' : x.classIds[0]);
       const need = ms.filter((y) => y.live && !y.done);
       $('#hmgBody', m).innerHTML = `<p class="small muted" style="margin:0">${esc(stageLabel(x, ms))}${x.champion ? ` · 🏆 ${esc(x.champion.name)}` : ''}</p>
-        ${need.length ? `<div class="card stack" style="gap:8px"><b>📺 المباريات المباشرة</b>${need.map((y) => `<div class="row" style="justify-content:space-between;gap:6px"><span>${esc(y.a.name)} ⚔️ ${esc(y.b.name)} <small class="muted">${esc(hRange(y))}</small></span>
+        ${need.length ? `<div class="card stack" style="gap:8px"><b>📺 المباريات المباشرة</b>${need.map((y) => `<div class="row" style="justify-content:space-between;gap:6px"><span>${esc(y.a.name)} ⚔️ ${esc(y.b.name)} <small class="muted">${y.third ? '🥉 ' : y.kind === 'final' ? '🏆 ' : ''}${esc(kindLabel(y))} · ${esc(hRange(y, { reveal: true }))}${y.surprise ? ' 🔒' : ''}</small></span>
           <span class="row" style="gap:4px"><input type="datetime-local" data-dt="${esc(y.id)}" value="${y.startAt ? toLocalInput(y.startAt) : ''}"><button class="btn sm primary" type="button" data-sch="${esc(y.id)}">${y.startAt ? 'غيّر الموعد' : 'حدد الموعد'}</button>${y.startAt ? `<button class="btn sm gold" type="button" data-proj="${esc(y.id)}">📺 اعرض</button>` : ''}</span></div>`).join('')}</div>` : ''}
         <div class="hero-tabs">${x.classIds.map((c) => `<button type="button" class="chip${view === c ? ' on' : ''}" data-v="${esc(c)}">${esc(className(c))}</button>`).join('')}<button type="button" class="chip${view === 'inter' ? ' on' : ''}" data-v="inter">🌍 النخبة</button></div>
         ${bracketHtml(ms, { stage: view === 'inter' ? 'inter' : 'class', classId: view, me: null })}`;

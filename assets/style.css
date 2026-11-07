@@ -922,3 +922,5 @@ html.hero-arrive .aod-home { animation: spUp .35s ease-out .45s both; }
 .upd-x { background: none; border: 0; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; }
 @keyframes updIn { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
 body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
+/* بطولة الأبطال: اختيار سور البطولة */
+.hr-pool { display: flex; flex-wrap: wrap; gap: 6px; max-height: 210px; overflow-y: auto; padding: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: 12px; }
