@@ -7,6 +7,7 @@ import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
+import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
 import { LIVE_MIN, AI_PENALTY, AI_MAX, PTS as HPTS, matchWinner, sideOf, tiebreak, rangeText as hRange, firstRound, advance as heroAdvance, heroBonus, stageLabel, bracketHtml, usedBy as heroUsed, kindLabel } from './heroes.js';
@@ -1015,7 +1016,8 @@ function viewStudent(app) {
     if (w) setTimeout(() => confetti(), 150);
   }
   /* --- بطولة الأبطال --- */
-  let heroT = null, hM = [], offHero = null, offLive = null, hView = null, heroPend = null;
+  let heroT = null, hM = [], offHero = null, offLive = null, hView = null, heroPend = null, offCheer = null;
+  const stopCheer = () => { offCheer?.(); offCheer = null; };
   if (deep && deep[1] === 'hero') heroPend = deep[2];
   async function loadHeroes() {
     try {
@@ -1072,20 +1074,23 @@ function viewStudent(app) {
     const side = sideOf(m, me.id); if (!side || m.done) return watchMatch(mid);
     const mine = side === 'a' ? m.ra : m.rb;
     if (mine) return watchMatch(mid);
-    comp?.destroy(); comp = null; offLive?.();
+    comp?.destroy(); comp = null; offLive?.(); stopCheer();
     const other = side === 'a' ? m.b : m.a;
     app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="hmBack" type="button">→ رجوع</button><h1>⚔️ ${esc(me.name)} ضد ${esc(other.name)}</h1><p class="muted" style="margin:4px 0 0">${esc(heroT.name || 'الأبطال')} · ${esc(hRange(m))}</p></div></div><div id="hmBody"></div>`;
-    const back = () => { comp?.destroy(); comp = null; hView = null; offLive?.(); tab = 'heroes'; draw(); };
+    const back = () => { comp?.destroy(); comp = null; hView = null; offLive?.(); stopCheer(); tab = 'heroes'; draw(); };
     $('#hmBack', app).onclick = back;
     const body = $('#hmBody', app);
     hView = { refresh: () => { const x = hM.find((y) => y.id === mid); if (x && (x.surah !== m.surah || x.from !== m.from || x.tb !== m.tb)) openMatch(mid); } };
     const startMs = m.startAt ? new Date(m.startAt).getTime() : 0, endMs = startMs + LIVE_MIN * 60e3;
     if (!hasRecognition) { body.innerHTML = '<div class="notice">التصحيح الآلي غير متاح في هذا المتصفح. افتح المقرأة في Chrome أو Safari الحديث لتخوض المباراة.</div>'; return; }
     if (m.live && (!m.startAt || Date.now() < startMs)) {
-      body.innerHTML = `<div class="card stack hero-wait"><b>📺 مباراة مباشرة</b><p style="margin:0">${m.startAt ? `تبدأ ${fmtTimeOf(m.startAt)}. ابقَ في هذه الصفحة، وسيُفتح التسميع تلقائياً.` : 'لم يحدد المعلم الموعد بعد.'}</p><div class="hero-count" id="hmCount"></div></div>`;
+      body.innerHTML = `<div class="card stack hero-wait"><b>📺 مباراة مباشرة</b><p style="margin:0">${m.startAt ? `تبدأ ${fmtTimeOf(m.startAt)}. ابقَ في هذه الصفحة، وسيُفتح التسميع تلقائياً.` : 'لم يحدد المعلم الموعد بعد.'}</p><div class="hero-count" id="hmCount"></div></div><div id="hmCheer" class="card" style="margin-top:12px"></div>`;
+      // يرى المتنافس تشجيع زملائه قبل البدء فقط، ويُخفى أثناء تلاوته
+      offCheer = mountCheer($('#hmCheer', body), { tid: heroT.id, m, me, canSend: false, title: false });
       const tick = () => { const s = Math.max(0, Math.round((startMs - Date.now()) / 1000)); const el = $('#hmCount', body); if (!el) return clearInterval(iv); el.textContent = m.startAt ? `${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}` : ''; if (m.startAt && s <= 0) { clearInterval(iv); openMatch(mid); } };
       const iv = setInterval(tick, 500); tick(); return;
     }
+    stopCheer();
     if (m.live && Date.now() > endMs) { body.innerHTML = '<div class="notice">انتهت نافذة المباراة.</div>'; return; }
     body.innerHTML = `<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً بلا تلميح، <b>محاولة واحدة</b> تُحتسب عند الإيقاف. ${m.live ? `أمامك حتى ${fmtTimeOf(new Date(endMs).toISOString())} (${ar(LIVE_MIN)} دقائق)، ويُحلَّل تجويدك آلياً ويُخصم ${ar(AI_PENALTY)} لكل ملاحظة.` : 'النتيجة بدقة الكلمات الآلية فقط.'}</div>${m.live ? '<div class="hero-count live" id="hmLeft"></div>' : ''}<div id="hmRc"></div>`;
     if (m.live) { const iv = setInterval(() => { const el = $('#hmLeft', body); if (!el) return clearInterval(iv); const s = Math.max(0, Math.round((endMs - Date.now()) / 1000)); el.textContent = `⏱ ${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}`; }, 500); }
@@ -1127,10 +1132,13 @@ function viewStudent(app) {
   }
   /** متابعة مباراة: السباق المباشر، ثم النتيجة وإعادة الاستماع */
   function watchMatch(mid, fresh = null) {
-    comp?.destroy(); comp = null; offLive?.();
+    comp?.destroy(); comp = null; offLive?.(); stopCheer();
     const box = document.createElement('div');
-    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="hwBack" type="button">→ رجوع</button><h1 id="hwT"></h1><p class="muted" id="hwS" style="margin:4px 0 0"></p></div></div><div id="hwBody"></div>`;
-    $('#hwBack', app).onclick = () => { hView = null; offLive?.(); tab = 'heroes'; draw(); };
+    app.innerHTML = `<div class="page-head"><div><button class="btn sm ghost" id="hwBack" type="button">→ رجوع</button><h1 id="hwT"></h1><p class="muted" id="hwS" style="margin:4px 0 0"></p></div></div><div id="hwBody"></div><div id="hwCheer" class="card" style="margin-top:12px" hidden></div>`;
+    $('#hwBack', app).onclick = () => { hView = null; offLive?.(); stopCheer(); tab = 'heroes'; draw(); };
+    // التشجيع في المباريات المباشرة: يرسله كل طلاب المدرسة ويراه الجمهور؛ المتنافس يراه قبل البدء فقط
+    const cheerOn = () => { const x = hM.find((y) => y.id === mid); if (!x?.live || x.done || !x.b) return false; return !sideOf(x, me.id) || !x.startAt || Date.now() < new Date(x.startAt).getTime(); };
+    const syncCheer = () => { const host = $('#hwCheer', app); if (!host) return; const on = cheerOn(); if (on && !offCheer) { host.hidden = false; const x = hM.find((y) => y.id === mid); offCheer = mountCheer(host, { tid: heroT.id, m: x, me, canSend: !sideOf(x, me.id) }); } else if (!on && offCheer) { stopCheer(); host.hidden = true; } };
     let live = {};
     const paint = () => {
       const m = hM.find((x) => x.id === mid); if (!m) return;
@@ -1150,10 +1158,10 @@ function viewStudent(app) {
       $$('[data-aud]', app).forEach((b) => (b.onclick = async () => { b.disabled = true; try { const d = await store.getMatchAudio(heroT.id, b.dataset.aud); if (!d) { toast('التسجيل غير متاح.'); b.disabled = false; return; } const a = new Audio(`data:${d.mime};base64,${d.b64}`); a.play(); b.textContent = '▶ يُشغَّل…'; a.onended = () => { b.disabled = false; b.textContent = '🔊 استمع لتلاوته'; }; } catch { b.disabled = false; } }));
       if (w && !paint.party && (w === me.id)) { paint.party = true; confetti(); }
     };
-    hView = { refresh: paint };
+    hView = { refresh: () => { paint(); syncCheer(); } };
     const m = hM.find((x) => x.id === mid);
     if (m?.live) offLive = store.watchLive(heroT.id, mid, (d) => { live = d || {}; paint(); });
-    paint();
+    paint(); syncCheer();
   }
 
   /* --- الموسم --- */
@@ -1531,7 +1539,7 @@ function viewStudent(app) {
   }
 
   function draw() {
-    comp?.destroy(); comp = null;
+    comp?.destroy(); comp = null; stopCheer();
     const cls = data.classes.find((c) => c.id === me.classId);
     const graded = data.subs.filter((x) => x.percent != null);
     const avg = graded.length ? Math.round(graded.reduce((n, x) => n + x.percent, 0) / graded.length) : null;
@@ -1896,7 +1904,7 @@ function viewStudent(app) {
   }
 
   load();
-  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); offHero?.(); offLive?.(); } };
+  return { destroy: () => { comp?.destroy(); offNotifs?.(); offInstall?.(); offHero?.(); offLive?.(); stopCheer(); } };
 }
 
 async function studentLogin(app, msg = '') {
@@ -3951,12 +3959,13 @@ function viewTeacher(app) {
   function drawHeroAdmin(host) {
     const L = D.tourneys || [];
     const run = L.find((x) => x.status === 'running');
-    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🏆 الأبطال (خروج المغلوب)</h3>${run ? '' : '<button class="btn sm primary" type="button" id="hrNew">+ بطولة جديدة</button>'}</div>
+    host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🏆 الأبطال (خروج المغلوب)</h3><span class="row" style="gap:4px"><button class="btn sm" type="button" id="hrCheer">🎉 عبارات التشجيع</button>${run ? '' : '<button class="btn sm primary" type="button" id="hrNew">+ بطولة جديدة</button>'}</span></div>
       <p class="small muted" style="margin:0">يتنافس كل طالبين من الصف نفسه، والفائز يستمر حتى يبقى بطل لكل صف، ثم قرعة بين أبطال الصفوف حتى بطل الأبطال. التقييم آلي بدقة الكلمات فقط ولا يتدخل المعلم. يختار البرنامج لكل متنافسَين مقطعاً من السور التي تحددها بعدد الآيات الذي تحدده لكل دور. النصف والنهائي ومباراة المركز الثالث مباشرة (${ar(LIVE_MIN)} دقائق) بمقطع مفاجئ وتحليل تجويد آلي إلزامي.</p>
       ${L.length ? `<ul class="kh-list">${L.slice(0, 6).map((x) => { const ms = D.hMatches?.[x.id] || [], need = ms.filter((m) => m.live && !m.done && !m.startAt).length;
         return `<li><div><b>${esc(x.name)}</b><span class="small muted">${esc(stageLabel(x, ms))}${x.champion ? ` · البطل: ${esc(x.champion.name)}` : ''}</span>${need ? `<span class="pill warn">📅 ${need === 1 ? 'مباراة مباشرة تنتظر موعداً' : `${ar(need)} مباريات مباشرة تنتظر مواعيدها`}</span>` : ''}</div>
         <div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm${need ? ' gold' : ''}" type="button" data-hrv="${esc(x.id)}">إدارة</button>${x.status === 'done' ? `<button class="btn sm gold" type="button" data-hrc="${esc(x.id)}">🏅 الشهادات</button>` : ''}<button class="btn sm danger" type="button" data-hrd="${esc(x.id)}">حذف</button></div></li>`; }).join('')}</ul>` : ''}`;
     $('#hrNew', host) && ($('#hrNew', host).onclick = newTourney);
+    $('#hrCheer', host).onclick = editCheers;
     $$('[data-hrv]', host).forEach((b) => (b.onclick = () => manageTourney(b.dataset.hrv)));
     $$('[data-hrc]', host).forEach((b) => (b.onclick = async () => { const x = L.find((y) => y.id === b.dataset.hrc); b.disabled = true; try { await downloadCertificatesPDF(heroCerts(x), 'heroes-certificates.pdf', (i, n) => (b.textContent = `${ar(i)}/${ar(n)}…`)); } catch (e) { toast(e.message); } b.disabled = false; b.textContent = '🏅 الشهادات'; }));
     $$('[data-hrd]', host).forEach((b) => (b.onclick = async () => {
@@ -4058,11 +4067,36 @@ function viewTeacher(app) {
     });
   }
   /** شاشة البروجكتر: الشجرة، أو السباق المباشر لمباراة */
+  /** الإيموجي والعبارات الجاهزة التي يرسلها الطلاب تشجيعاً في المباريات المباشرة */
+  async function editCheers() {
+    const c = await cheerCfg(true);
+    openModal(`<form id="cfF" class="stack" style="gap:12px">
+      <h2>🎉 عبارات تشجيع المباريات المباشرة</h2>
+      <p class="small muted" style="margin:0">يختار منها كل طلاب المدرسة ما يرسلونه للمتنافسَين في نصف النهائي والمركز الثالث والنهائي. يراها الجمهور وشاشة العرض، ويراها المتنافس قبل بدء مباراته فقط. لا يكتب الطلاب نصاً حراً.</p>
+      <label class="field">الإيموجي (حتى ${ar(CHEER_MAX)})<input id="cfE" value="${esc(c.emojis.join(' '))}" placeholder="👏 🔥 💪 🤲 ⭐" style="font-size:1.4rem;letter-spacing:4px"></label>
+      <label class="field">العبارات: عبارة في كل سطر (حتى ${ar(CHEER_MAX)}، وكل عبارة حتى ${ar(PHRASE_MAX)} حرفاً)<textarea id="cfP" rows="6">${esc(c.phrases.join('\n'))}</textarea></label>
+      <div id="cfPrev" class="cheer-send"></div>
+      <div class="row"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="cfDef">الافتراضي</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      const read = () => cleanCfg({ emojis: splitEmojis($('#cfE', m).value), phrases: $('#cfP', m).value.split('\n') });
+      const prev = () => { const x = read(); $('#cfPrev', m).innerHTML = `<div class="small muted">هكذا تظهر للطلاب:</div><div class="cheer-em">${x.emojis.map((e) => `<span class="cheer-e">${esc(e)}</span>`).join('')}</div><div class="cheer-ph">${x.phrases.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</div>`; };
+      $('#cfE', m).oninput = prev; $('#cfP', m).oninput = prev; prev();
+      $('#cfDef', m).onclick = () => { const d = cleanCfg(null); $('#cfE', m).value = d.emojis.join(' '); $('#cfP', m).value = d.phrases.join('\n'); prev(); };
+      $('#cfF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const x = read();
+        if (splitEmojis($('#cfE', m).value).length > CHEER_MAX || $('#cfP', m).value.split('\n').filter((l) => l.trim()).length > CHEER_MAX) toast(`حُفظ أول ${ar(CHEER_MAX)} فقط.`);
+        try { await store.setCheerCfg({ emojis: x.emojis, phrases: x.phrases }); setCfgCache(x); closeModal(); toast('حُفظت عبارات التشجيع، وتظهر للطلاب في المباريات المباشرة.'); }
+        catch (err) { toast('تعذر الحفظ: ' + (err.code || err.message)); }
+      };
+    });
+  }
+
   function heroProjector(tid, mid) {
     closeModal(); projOff?.();
     const x = D.tourneys.find((y) => y.id === tid);
     const el = document.createElement('div'); el.className = 'hero-proj'; document.body.appendChild(el);
-    let live = {}, offL = null, view = null;
+    const pb = document.createElement('div'), ch = document.createElement('div'); ch.className = 'hp-cheer'; el.append(pb, ch);
+    let live = {}, offL = null, view = null, chOff = null, chMid = null;
     const pickLive = () => mid || (D.hMatches[tid] || []).find((y) => y.live && !y.done && y.startAt && new Date(y.startAt) - Date.now() < 15 * 60e3)?.id || null;
     const paint = () => {
       const ms = D.hMatches[tid] || [], cur = pickLive(), m = cur && ms.find((y) => y.id === cur);
@@ -4071,18 +4105,22 @@ function viewTeacher(app) {
       const lane = (p, r, side) => { const L = live[side] || {}, pct = r ? 100 : L.total ? Math.round((L.done / L.total) * 100) : 0;
         return `<div class="race-lane big${m.done && m.winner === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)} <small>${esc(className(p.classId))}</small> ${L.on && !r ? '<span class="rl-on">🎙️</span>' : ''}</div><div class="rl-track"><i style="width:${pct}%"></i><span>${r ? `${ar(r.s)}٪` : L.total ? `${ar(pct)}٪ · دقة ${ar(Math.round((L.ok / Math.max(1, L.done)) * 100))}٪` : 'ينتظر…'}</span></div></div>`; };
       const left = m?.startAt ? Math.max(0, Math.round((new Date(m.startAt).getTime() + LIVE_MIN * 60e3 - Date.now()) / 1000)) : 0;
-      el.innerHTML = `<button class="hp-x" type="button" aria-label="إغلاق">✕</button><h1>🏆 ${esc(x.name)}</h1><div class="hp-st">${esc(stageLabel(x, ms))}</div>
+      pb.innerHTML = `<button class="hp-x" type="button" aria-label="إغلاق">✕</button><h1>🏆 ${esc(x.name)}</h1><div class="hp-st">${esc(stageLabel(x, ms))}</div>
         ${x.champion ? `<div class="hero-champ big"><div class="hc-cup">🏆</div><div><span>بطل الأبطال</span><b>${esc(x.champion.name)}</b><span>${esc(className(x.champion.classId))}</span></div></div>` : ''}
         ${m ? `<div class="hp-race"><div class="hp-rh">${esc(hRange(m))} ${new Date(m.startAt) > Date.now() ? `· تبدأ ${ar(new Date(m.startAt).toLocaleTimeString('ar', { hour: 'numeric', minute: '2-digit' }))}` : m.done ? '' : `· ⏱ ${ar(Math.floor(left / 60))}:${ar(String(left % 60).padStart(2, '0'))}`}</div>${lane(m.a, m.ra, 'a')}${lane(m.b, m.rb, 'b')}${m.done ? `<div class="hero-res big">🏆 ${esc(m.winner === m.a.pn ? m.a.name : m.b.name)}</div>` : ''}</div>` : bracketHtml(ms, { stage: view === 'inter' ? 'inter' : 'class', classId: view, me: null })}
         ${!m ? `<div class="hero-tabs">${x.classIds.map((c) => `<button type="button" class="chip${view === c ? ' on' : ''}" data-v="${esc(c)}">${esc(className(c))}</button>`).join('')}<button type="button" class="chip${view === 'inter' ? ' on' : ''}" data-v="inter">🌍 النخبة</button></div>` : ''}`;
       $('.hp-x', el).onclick = () => projOff();
       $$('[data-v]', el).forEach((b) => (b.onclick = () => { view = b.dataset.v; paint(); }));
       if (m?.done && !paint.party) { paint.party = true; confetti(); }
+      // تشجيع الجمهور على شاشة العرض طوال المباراة المباشرة
+      const cheerM = m && m.live && !m.done && m.b ? m : null;
+      if (cheerM && chMid !== cheerM.id) { chOff?.(); chOff = mountCheer(ch, { tid, m: cheerM, big: true, title: false }); chMid = cheerM.id; }
+      else if (!cheerM && chOff) { chOff(); chOff = null; chMid = null; }
     };
     const iv = setInterval(paint, 1000);
     const key = (e) => { if (e.key === 'Escape') projOff(); };
     document.addEventListener('keydown', key);
-    projOff = () => { clearInterval(iv); offL?.(); el.remove(); document.removeEventListener('keydown', key); projOff = null; };
+    projOff = () => { clearInterval(iv); offL?.(); chOff?.(); el.remove(); document.removeEventListener('keydown', key); projOff = null; };
     try { el.requestFullscreen?.().catch(() => {}); } catch {}
     paint();
   }

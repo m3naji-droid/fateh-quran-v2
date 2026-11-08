@@ -926,3 +926,28 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .hr-pool { display: flex; flex-wrap: wrap; gap: 6px; max-height: 210px; overflow-y: auto; padding: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: 12px; }
 /* شريط تحليل التجويد المعلّق في صفحة التسليمات */
 .ai-bar { margin-bottom: 12px; border-color: var(--gold); background: var(--gold-soft, #f6ecd2); display: grid; gap: 6px; }
+/* تشجيع المباريات المباشرة */
+.cheer-box { position: relative; display: grid; gap: 10px; overflow: hidden; min-height: 120px; }
+.cheer-box .ch-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cheer-fly { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.cheer-float { position: absolute; bottom: 0; font-size: 2rem; animation: cheer-up 3s ease-out forwards; }
+.cheer-box.big .cheer-float { font-size: 3.4rem; }
+@keyframes cheer-up { 0% { transform: translateY(10px) scale(.6); opacity: 0; } 15% { opacity: 1; transform: translateY(-20px) scale(1.1); } 100% { transform: translateY(-260px) scale(1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cheer-float { animation-duration: 1.2s !important; } }
+.cheer-feed { display: grid; gap: 6px; min-height: 1.6em; }
+.cheer-line { padding: 6px 10px; border-radius: 10px; background: var(--gold-soft, #f6ecd2); font-size: .95rem; transition: opacity .6s; animation: cheer-in .35s ease-out; }
+.cheer-line.mine { outline: 2px solid var(--gold); }
+.cheer-line.old { opacity: .55; }
+@keyframes cheer-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+.cheer-send { display: grid; gap: 8px; position: relative; z-index: 3; }
+.cheer-to, .cheer-em, .cheer-ph { display: flex; flex-wrap: wrap; gap: 6px; }
+.cheer-e { font-size: 1.7rem; line-height: 1; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--sheet); cursor: pointer; }
+.cheer-e:active { transform: scale(.9); }
+.cheer-send [data-k].wait { opacity: .4; }
+.hero-proj .hp-cheer { position: fixed; inset-inline: 0; bottom: 0; height: 46vh; pointer-events: none; padding: 0 4vw 3vh; }
+.hero-proj .hp-cheer .cheer-feed { position: absolute; bottom: 3vh; inset-inline: 4vw; }
+.hero-proj .hp-cheer .cheer-line { font-size: 1.6rem; background: rgba(255,255,255,.92); color: #123; }
+.hero-proj .hp-cheer .ch-head { position: absolute; top: 0; inset-inline-end: 4vw; font-size: 1.3rem; }
+.hero-proj .hp-cheer .cheer-box, .hero-proj .hp-cheer.cheer-box { overflow: visible; }
+.cheer-to .chip.on { background: var(--gold-soft, #f6ecd2); border-color: var(--gold); color: inherit; }
+.hero-proj .hp-cheer .ch-head span { font-size: 1.4rem; color: #fff; opacity: .9; }

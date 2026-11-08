@@ -175,6 +175,11 @@ const local = {
   async listAllChallenges() { return LS.get('challenges', []); },
   async getChallenge(id) { return LS.get('challenges', []).find((c) => c.id === id) || null; },
   async updateChallenge(id, patch) { const all = LS.get('challenges', []); const i = all.findIndex((c) => c.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('challenges', all); } },
+  // تشجيع المباريات المباشرة: مستند لكل مشجّع في كل مباراة (آخر تشجيع وعدّاده)
+  async getCheerCfg() { return LS.get('cheerCfg', null); },
+  async setCheerCfg(c) { LS.set('cheerCfg', c); },
+  async sendCheer(tid, mid, pn, name, to, k) { const all = LS.get('cheers_' + tid, {}); const id = mid + '_' + pn; const c = all[id] || { cm: mid, pn, name, na: 0, nb: 0 }; c[to === 'a' ? 'na' : 'nb']++; Object.assign(c, { to, k, at: now(), seq: (c.seq || 0) + 1 }); all[id] = c; LS.set('cheers_' + tid, all); },
+  watchCheers(tid, mid, cb) { let last = ''; const tick = () => { const L = Object.values(LS.get('cheers_' + tid, {})).filter((c) => c.cm === mid); const v = JSON.stringify(L); if (v !== last) { last = v; cb(L); } }; tick(); const iv = setInterval(tick, 700); return () => clearInterval(iv); },
   async getChallengeCfg() { return LS.get('chCfg', { off: false }); },
   async setChallengeCfg(c) { LS.set('chCfg', c); },
   // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
@@ -258,7 +263,7 @@ async function makeCloud() {
   const app = initializeApp(FIREBASE.config);
   const db = FIREBASE.databaseId ? fs.getFirestore(app, FIREBASE.databaseId) : fs.getFirestore(app);
   const auth = au.getAuth(app);
-  const { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, collectionGroup, onSnapshot, query, limit, where } = fs;
+  const { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, collectionGroup, onSnapshot, query, limit, where, increment } = fs;
   const list = async (path) => (await getDocs(collection(db, path))).docs.map((d) => ({ id: d.id, ...d.data() }));
   const ready = new Promise((res) => { const u = au.onAuthStateChanged(auth, () => { u(); res(); }); });
   let creator = null;
@@ -506,6 +511,11 @@ async function makeCloud() {
     async listAllChallenges() { return (await getDocs(query(collection(db, 'challenges'), limit(5000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async getChallenge(id) { await ensureAnon(); const d = await getDoc(doc(db, 'challenges', id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
     async updateChallenge(id, patch) { await updateDoc(doc(db, 'challenges', id), patch); },
+    async getCheerCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'cheerCfg')).catch(() => null); return d?.exists() ? d.data() : null; },
+    async setCheerCfg(c) { await setDoc(doc(db, 'leaderboard', 'cheerCfg'), c); },
+    /** مستند لكل مشجّع في المباراة داخل tourneys/{tid}/live (يكتبه كل مسجّل دخول): آخر تشجيع وعدّاده لكل لاعب */
+    async sendCheer(tid, mid, pn, name, to, k) { await setDoc(doc(db, 'tourneys', tid, 'live', `c_${mid}_${pn}`), { cm: mid, pn, name, to, k, at: now(), seq: increment(1), [to === 'a' ? 'na' : 'nb']: increment(1) }, { merge: true }); },
+    watchCheers(tid, mid, cb) { let off = () => {}; ensureAnon().then(() => { off = onSnapshot(query(collection(db, 'tourneys', tid, 'live'), where('cm', '==', mid)), (s) => cb(s.docs.map((d) => d.data())), (e) => console.warn('cheers', e)); }); return () => off(); },
     async getChallengeCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'challengeCfg')).catch(() => null); return d?.exists() ? d.data() : { off: false }; },
     async setChallengeCfg(c) { await setDoc(doc(db, 'leaderboard', 'challengeCfg'), c); },
     async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
