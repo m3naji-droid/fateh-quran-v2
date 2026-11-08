@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import os
 import subprocess
 import tempfile
@@ -164,7 +165,13 @@ def decode_audio(data: bytes) -> np.ndarray:
     return np.frombuffer(proc.stdout, dtype=np.float32).copy()
 
 
-def check_auth(authorization: str | None):
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
+
+
+def check_auth(authorization: str | None, internal: str | None = None):
+    # خادم الإشعارات يحلّل الواجبات التي فاتها التحليل، ويتعرّف بسرّ مشترك
+    if INTERNAL_SECRET and internal and hmac.compare_digest(internal, INTERNAL_SECRET):
+        return
     if not FIREBASE_PROJECT:
         return
     if not authorization or not authorization.startswith("Bearer "):
@@ -236,9 +243,10 @@ async def analyze(
     madd_aared: int = Form(4),
     wait: bool = Form(False),
     authorization: str | None = Header(None),
+    x_internal_secret: str | None = Header(None),
 ):
     t_req = time.time()
-    check_auth(authorization)
+    check_auth(authorization, x_internal_secret)
     if STATE["error"]:
         raise HTTPException(503, "تعذر تحميل النموذج: " + STATE["error"])
     if end < start or end - start > 60:

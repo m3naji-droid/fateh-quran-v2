@@ -5,14 +5,18 @@
 - /khatma    : اكتملت ختمة صف: تنبيه واحتفال لكل الصف.
 - /challenge : تحدٍّ ودّي بين زميلين: إشعار بالتحدي الجديد، وبالنتيجة عند انتهائه.
 - /feedback  : الطالب يرسل ملاحظة (رأيك يهمنا) فيصل تنبيهها إلى أجهزة المعلم.
-- /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات.
+- /ai        : الطالب أرسل واجباً لم يكتمل تحليل تجويده: يحلّله الخادم فوراً ويحفظ النتيجة ويُشعر الطالب.
+- /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات، وما فات من تحليل التجويد.
 نص الإشعار يُقرأ دائماً من قاعدة البيانات لا من الطلب، فلا يستطيع أحد إرسال نص من عنده.
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import hmac
+import json
 import os
+import time
 from zoneinfo import ZoneInfo
 
 import firebase_admin
@@ -26,6 +30,12 @@ ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS", "https://m3naji-droid.github.io,http://localhost:8000,http://127.0.0.1:8000"
 ).split(",") if o.strip()]
 CRON_SECRET = os.environ.get("CRON_SECRET", "")
+# خادم تحليل التجويد، وسرّ مشترك يتعرّف به على هذا الخادم (القيمة نفسها في متغير INTERNAL_SECRET هناك)
+TAJWEED_URL = os.environ.get("TAJWEED_URL", "https://fateh-quran-v2-960354071194.europe-west1.run.app").rstrip("/")
+AI_SECRET = os.environ.get("AI_SECRET", "")
+MADD = {"madd_monfasel": 4, "madd_mottasel": 4, "madd_aared": 4}
+AI_GRACE = 5 * 60  # إن أُرسل التسليم وتحليله جارٍ على جهاز الطالب نمهله ٥ دقائق ليكمله
+AI_TRIES = 3
 TZ = ZoneInfo(os.environ.get("SCHOOL_TZ", "Asia/Riyadh"))
 
 firebase_admin.initialize_app(options={"projectId": PROJECT})
@@ -566,6 +576,140 @@ def _student_notif(pn: str, nid: str, n: dict) -> dict:
     return push(tokens_for(students=[pn]), n, kind="challenge")
 
 
+# ------------------------------------------------------------ تحليل التجويد على الخادم
+_WORDS = None
+
+
+def ayah_words(surah: int, ayah: int) -> int:
+    global _WORDS
+    if _WORDS is None:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ayah_words.json"), encoding="utf-8") as f:
+            _WORDS = json.load(f)
+    return _WORDS[surah - 1][ayah - 1]
+
+
+def compact_ai(res: dict, surah: int, frm: int, to: int) -> dict:
+    """الصيغة المختصرة نفسها التي يحفظها الموقع (compact في tajweed-ai.js)."""
+    offset, gi = {}, 0
+    for a in range(frm, to + 1):
+        offset[a] = gi
+        gi += ayah_words(surah, a)
+    errors = []
+    for ay in res.get("ayat") or []:
+        base = offset.get(ay.get("ayah"))
+        if base is None:
+            continue
+        for e in ay.get("errors") or []:
+            if e.get("rule") == "madd_arid" and str(e.get("got_len")) in ("2", "4", "6"):
+                continue
+            errors.append({"i": base + int(e.get("w") or 0), "r": e.get("rule"), "t": e.get("type"), "op": e.get("op"),
+                           "el": e.get("exp_len"), "gl": e.get("got_len")})
+    summ = res.get("summary") or {}
+    return {"at": now_iso(), "acc": summ.get("phoneme_accuracy"), "skipped": summ.get("skipped_ayat") or [],
+            "errors": errors[:300], "took": res.get("took"), "by": "server"}
+
+
+def sub_audio(sref) -> tuple[bytes, str] | None:
+    m = sref.collection("audio").document("main").get()
+    if not m.exists:
+        return None
+    d = m.to_dict()
+    b64 = d.get("b64") or ""
+    for k in range(1, int(d.get("parts") or 1)):
+        p = sref.collection("audio").document(f"p{k}").get()
+        b64 += (p.to_dict() or {}).get("b64", "") if p.exists else ""
+    if not b64:
+        return None
+    return base64.b64decode(b64), d.get("mime") or "audio/webm"
+
+
+def call_tajweed(audio: bytes, mime: str, surah: int, frm: int, to: int) -> dict:
+    import requests
+    ext = "mp4" if "mp4" in mime else "webm"
+    data = {"surah": surah, "start": frm, "end": to, "wait": "true", **MADD}
+    for attempt in range(6):  # عند الازدحام (429/503) ننتظر ونعيد
+        r = requests.post(TAJWEED_URL + "/analyze", files={"file": ("recitation." + ext, audio, mime)}, data=data,
+                          headers={"X-Internal-Secret": AI_SECRET}, timeout=600)
+        if r.status_code in (429, 503) and attempt < 5:
+            time.sleep(10 + attempt * 10)
+            continue
+        break
+    j = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+    if r.status_code != 200 or j.get("status") != "done":
+        raise RuntimeError(f"tajweed {r.status_code}: {str(j.get('detail') or j)[:200]}")
+    return j["result"]
+
+
+def ai_one(pn: str, sid: str, force: bool = False) -> dict:
+    """يحلّل تسليماً واحداً إن لم يُحلَّل بعد، ويحفظ النتيجة، ويُشعر الطالب."""
+    qref = db.collection("aiq").document(f"{pn}__{sid}")
+    sref = db.collection("roster").document(pn).collection("subs").document(sid)
+    snap = sref.get()
+    if not snap.exists:
+        qref.set({"status": "gone", "doneAt": now_iso()}, merge=True)
+        return {"skip": "gone"}
+    x = snap.to_dict()
+    if x.get("ai") or x.get("teacher"):
+        qref.set({"status": "done", "doneAt": now_iso()}, merge=True)
+        return {"skip": "done"}
+    q = (qref.get().to_dict() or {})
+    if not force and q.get("running") and time.time() - _ts(q.get("at") or x.get("createdAt")) < AI_GRACE:
+        return {"skip": "student-device"}
+    if q.get("status") == "busy" and time.time() - _ts(q.get("busyAt")) < 900:
+        return {"skip": "busy"}  # خادم آخر يحلّله الآن
+    qref.set({"pn": pn, "sid": sid, "status": "busy", "busyAt": now_iso()}, merge=True)
+    try:
+        au = sub_audio(sref)
+        if not au:
+            sref.update({"aiFail": True})
+            qref.set({"status": "failed", "error": "no-audio"}, merge=True)
+            return {"skip": "no-audio"}
+        res = call_tajweed(au[0], au[1], int(x["surah"]), int(x["from"]), int(x["to"]))
+        if sref.get().to_dict().get("ai"):  # أكمله جهاز الطالب في أثناء ذلك
+            qref.set({"status": "done", "doneAt": now_iso()}, merge=True)
+            return {"skip": "done"}
+        sref.update({"ai": compact_ai(res, int(x["surah"]), int(x["from"]), int(x["to"])), "aiFail": False})
+        qref.set({"status": "done", "doneAt": now_iso()}, merge=True)
+        title = x.get("taskTitle") or "واجبك"
+        n = {"type": "grade", "subId": sid, "title": "⭐ اكتمل تحليل تسميعك ورُصدت درجتك",
+             "body": f"اكتمل تحليل تجويد «{title}» ورُصدت درجتك مبدئياً. سيطّلع عليها معلمك قريباً ويتأكد منها، وتصلك رسالة أخرى بتأكيد الدرجة.",
+             "link": f"./#/student/grade/{sid}", "tag": "grade-" + sid}
+        _student_notif(pn, "ai-" + sid, n)
+        return {"ok": sid}
+    except Exception as e:
+        tries = int(q.get("tries") or 0) + 1
+        qref.set({"status": "failed" if tries >= AI_TRIES else "queued", "tries": tries, "error": str(e)[:300]}, merge=True)
+        if tries >= AI_TRIES:
+            sref.update({"aiFail": True})
+        return {"error": str(e)[:200]}
+
+
+def _ts(iso: str | None) -> float:
+    try:
+        return dt.datetime.fromisoformat((iso or "").replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def run_ai_queue(budget: float = 150) -> list:
+    """ما فات من تحليل التجويد: يحلّل الطابور واحداً بعد الآخر ضمن مهلة الطلب."""
+    if not AI_SECRET:
+        return []
+    t0, out = time.time(), []
+    for d in where(db.collection("aiq"), "status", "==", "queued").limit(40).stream():
+        if time.time() - t0 > budget:
+            break
+        q = d.to_dict()
+        if q.get("pn") and q.get("sid"):
+            out.append(ai_one(q["pn"], q["sid"]))
+    return out
+
+
+class AiReq(BaseModel):
+    student: str
+    sub: str
+
+
 class AnnReq(BaseModel):
     ann: str
     resend: list[str] | None = None  # إعادة الإشعار لهؤلاء الطلاب فقط (من لم يقرأ)
@@ -730,6 +874,23 @@ def late(req: LateReq, authorization: str | None = Header(None)):
     return out
 
 
+@app.post("/ai")
+def ai(req: AiReq, authorization: str | None = Header(None)):
+    """الطالب أرسل واجباً بلا تحليل تجويد: يحلّله الخادم الآن (حتى لو أُغلقت الصفحة) ويُشعره بالدرجة."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    r = db.collection("roster").document(req.student).get()
+    if not r.exists or r.to_dict().get("uid") != uid:
+        raise HTTPException(403, "غير مسموح.")
+    if not AI_SECRET:
+        return {"skip": "not-configured"}
+    return ai_one(req.student, req.sub, force=True)
+
+
 @app.post("/announce")
 def announce(req: AnnReq, authorization: str | None = Header(None)):
     teacher_uid(authorization)
@@ -774,5 +935,9 @@ def cron(x_cron_secret: str | None = Header(None)):
         teacher = run_teacher(local)
     except Exception as e:
         teacher = {"error": str(e)[:200]}
-    db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders)})
-    return {"announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "deferredSent": flushed}
+    try:
+        aiq = run_ai_queue()
+    except Exception as e:
+        aiq = [{"error": str(e)[:200]}]
+    db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders), "aiQueue": len(aiq)})
+    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "deferredSent": flushed}

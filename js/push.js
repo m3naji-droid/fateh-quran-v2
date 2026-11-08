@@ -128,6 +128,19 @@ export async function notifyFeedback(pn, id) {
 }
 
 /** طلب تسليم متأخر: الخادم يتحقق من الطالب ثم ينبّه المعلم */
+/** يطلب من الخادم تحليل تجويد تسليم الآن (يكمل حتى لو أُغلقت الصفحة، والمؤقت يلتقط ما فاته) */
+export async function requestServerAi(pn, sid) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/ai', {
+    method: 'POST', keepalive: true,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ student: pn, sub: sid }),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export async function notifyLate(pn, taskId) {
   if (!PUSH.url || store.mode !== 'cloud') return null;
   const token = await store.idToken();

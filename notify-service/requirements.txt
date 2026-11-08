@@ -3,3 +3,4 @@ google-cloud-firestore>=2.16,<3
 fastapi==0.116.1
 uvicorn==0.35.0
 tzdata
+requests>=2.31

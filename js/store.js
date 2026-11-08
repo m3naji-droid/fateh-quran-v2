@@ -181,6 +181,7 @@ const local = {
   async getProgress(pn) { return LS.get('progress_' + pn, null); },
   async saveProgress(pn, patch) { LS.set('progress_' + pn, { ...(LS.get('progress_' + pn, {}) || {}), ...patch }); },
   // رأيك يهمنا: ملاحظات الطلاب وردود المعلم
+  async enqueueAi() {},
   async requestLate(pn, taskId, d) { const all = LS.get('late', []).filter((x) => !(x.pn === pn && x.id === taskId)); all.push({ ...d, id: taskId, pn, status: 'pending', at: now() }); LS.set('late', all); },
   async listMyLate(pn) { return LS.get('late', []).filter((x) => x.pn === pn); },
   async listAllLate() { return LS.get('late', []); },
@@ -510,6 +511,8 @@ async function makeCloud() {
     async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
     async saveProgress(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'map'), { ...patch, at: now() }, { merge: true }); },
     async requestLate(pn, taskId, d) { await setDoc(doc(db, 'roster', pn, 'late', taskId), { ...d, pn, status: 'pending', at: now() }); },
+    /** طابور تحليل التجويد على الخادم: تسليم لم يكتمل تحليله على جهاز الطالب */
+    async enqueueAi(pn, sid, running = false) { await setDoc(doc(db, 'aiq', pn + '__' + sid), { pn, sid, status: 'queued', running: !!running, at: now() }); },
     async listMyLate(pn) { await ensureAnon(); return list(`roster/${pn}/late`); },
     async listAllLate() { return (await getDocs(query(collectionGroup(db, 'late'), limit(3000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async decideLate(pn, taskId, status, extra = {}) { await setDoc(doc(db, 'roster', pn, 'late', taskId), { ...extra, pn, status, decidedAt: now() }, { merge: true }); },

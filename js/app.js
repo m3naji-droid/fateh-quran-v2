@@ -15,7 +15,7 @@ import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, season
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi } from './push.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
@@ -535,6 +535,7 @@ function mountRecite(root, opts) {
       } catch (e) {
         if (aiCtl.signal.aborted) return;
         aiFailed = true; paintGrade();
+        if (sentId && opts.onAiFail) opts.onAiFail(sentId);
         card.innerHTML = `<h3>تحليل التجويد بالذكاء الاصطناعي</h3><div class="notice">${esc(e.message)}${opts.graded ? ' لا تقلق: أُرسل تسميعك، وسيُكمل النظام التحليل لاحقاً.' : ''}</div><button class="btn" type="button" id="aiGo">أعد المحاولة</button>`;
         $('#aiGo', card).onclick = start;
       }
@@ -1845,9 +1846,14 @@ function viewStudent(app) {
         data.subs.unshift({ ...sub, id, pn: me.id, taskId: t?.id || rt?.taskId, ...extra, createdAt: new Date().toISOString() });
         logAct('task', sub.duration || 0);
         recordProgress({ ...sub, ...range });
+        // لم يكتمل تحليل التجويد على الجهاز: يتولاه الخادم (فوراً إن لم يكن جارياً هنا، وإلا بعد مهلة إن أُغلقت الصفحة)
+        if (!sub.ai && blob && aiEnabled()) {
+          store.enqueueAi(me.id, id, !!sub.aiRunning).then(() => { if (!sub.aiRunning) requestServerAi(me.id, id).catch(() => {}); }).catch((e) => console.warn('aiq', e));
+        }
         return id;
       },
       onAi: (id, ai) => store.updateOwnAi(me.id, id, ai),
+      onAiFail: (id) => requestServerAi(me.id, id).catch(() => {}),
     });
   }
 
@@ -1978,12 +1984,13 @@ function viewTeacher(app) {
   /* تحليل التجويد الإلزامي: ما لم يكتمل على جهاز الطالب (فشل أو أغلق الصفحة) يحلّله جهاز المعلم فوراً، واحداً بعد الآخر */
   let aiQT = null, aiQBusy = false, aiQForce = false;
   const aiQ = { done: 0, total: 0, cur: null };
-  const RUNNING_GRACE = 5 * 60e3; // إن أُرسل التسليم وتحليله جارٍ على جهاز الطالب نمهله ٥ دقائق ليكمله
+  // الخادم يحلّل ما فات فوراً؛ جهاز المعلم احتياط لما بقي بعد ١٥ دقيقة (إن تعطّل الخادم)
+  const SERVER_GRACE = 15 * 60e3;
   const aiNeeds = (y, force = false) => {
     const g = autoGrade(y);
     if (!g) return false;
     if (force) return !y.ai && !!y.hasAudio && !!(y.taskId || y.retakeId) && !y.teacher;
-    return g.pending && (y.aiTries || 0) < 3 && !(y.aiRunning && Date.now() - new Date(y.createdAt || 0) < RUNNING_GRACE);
+    return g.pending && (y.aiTries || 0) < 3 && Date.now() - new Date(y.createdAt || 0) > SERVER_GRACE;
   };
   const aiPendingList = (force = false) => D.subs.filter((y) => aiNeeds(y, force));
   function pendingAiQueue() {
@@ -2040,7 +2047,7 @@ function viewTeacher(app) {
   async function notifyAutoGrade(x) {
     try {
       const g = autoGrade(x); if (!g || x.teacher) return;
-      const nid = await store.addStudentNotif(x.pn, { type: 'grade', score: g.total, subId: x.id, title: g.total >= 8 ? `🎉 درجتك ${fmtQ(g.total)} من ١٠` : `⭐ رُصدت درجتك: ${fmtQ(g.total)} من ١٠`, body: `اكتمل تحليل تجويد «${x.taskTitle || rangeLabel(x.surah, x.from, x.to)}» ورُصدت درجتك.`, link: `./#/student/grade/${x.id}`, tag: 'grade-' + x.id });
+      const nid = await store.addStudentNotif(x.pn, { type: 'grade', score: g.total, subId: x.id, title: '⭐ اكتمل تحليل تسميعك ورُصدت درجتك', body: `اكتمل تحليل تجويد «${x.taskTitle || rangeLabel(x.surah, x.from, x.to)}» ورُصدت درجتك مبدئياً ${fmtQ(g.total)} من ١٠. سيطّلع عليها معلمك قريباً ويتأكد منها، وتصلك رسالة أخرى بتأكيد الدرجة.`, link: `./#/student/grade/${x.id}`, tag: 'grade-' + x.id });
       sendPush(nid, x.pn).catch(() => {});
     } catch (e) { console.warn('notify grade', e); }
   }
@@ -2363,7 +2370,7 @@ function viewTeacher(app) {
       const L = list();
       const all = new Set(D.subs.map(subKey));
       [...selSubs].forEach((k) => { if (!all.has(k)) selSubs.delete(k); });
-      $('#subList', body).innerHTML = (selSubs.size ? `<div class="bulk"><b>المحدد: ${ar(selSubs.size)}</b><button class="btn sm danger" type="button" id="bsDel">حذف المحدد</button><button class="btn sm" type="button" id="bsClr">إلغاء التحديد</button></div>` : '')
+      $('#subList', body).innerHTML = (selSubs.size ? `<div class="bulk"><b>المحدد: ${ar(selSubs.size)}</b><button class="btn sm primary" type="button" id="bsOk">✓ أكّد الدرجات الآلية</button><button class="btn sm danger" type="button" id="bsDel">حذف المحدد</button><button class="btn sm" type="button" id="bsClr">إلغاء التحديد</button></div>` : '')
         + (L.length ? `<div class="table-wrap"><table><thead><tr><th class="sel"><input type="checkbox" id="bsAll" aria-label="تحديد كل التسليمات الظاهرة"></th><th>الطالب</th><th>الصف</th><th>الواجب / المقطع</th><th>التاريخ</th><th>الدقة الآلية</th><th>المدة</th><th>تقييمك</th></tr></thead><tbody>
         ${L.map((x) => `<tr class="click ${selSubs.has(subKey(x)) ? 'picked' : ''}" data-id="${esc(x.id)}" data-pn="${esc(x.pn)}"><td class="sel"><input type="checkbox" data-sk="${esc(subKey(x))}" ${selSubs.has(subKey(x)) ? 'checked' : ''} aria-label="تحديد"></td><td><b>${esc(x.studentName)}</b>${x.retakeId ? ' <span class="pill gold-pill">إعادة</span>' : ''}${x.retakeRequested && !D.subs.some((y) => y.retakeId === x.retakeRequested.id) ? ' <span class="pill mute">طُلبت إعادته</span>' : ''}<div class="small muted num">${esc(x.pn)}</div></td><td>${esc(x.className || className(x.classId))}</td>
         <td>${esc(x.taskTitle || 'تدريب')}<div class="small muted">${esc(rangeLabel(x.surah, x.from, x.to))}</div></td><td class="num">${fmtDate(x.createdAt)}</td>
@@ -2379,6 +2386,21 @@ function viewTeacher(app) {
       }
       const clr = $('#bsClr', body);
       if (clr) clr.onclick = () => { selSubs.clear(); paint(); };
+      const okb = $('#bsOk', body);
+      if (okb) okb.onclick = async () => {
+        const items = D.subs.filter((x) => selSubs.has(subKey(x)) && !x.teacher && (x.taskId || x.retakeId)).map((x) => ({ x, g: autoGrade(x) })).filter((o) => o.g && !o.g.pending);
+        if (!items.length) return toast('لا توجد في المحدد درجات آلية مكتملة بانتظار التأكيد.');
+        if (!(await confirmBox(`تأكيد ${items.length === 1 ? 'درجة واحدة' : `${ar(items.length)} درجات`} كما رصدها التحليل الآلي، وإرسال رسالة التأكيد ${items.length === 1 ? 'للطالب' : 'للطلاب'}؟`, 'أكّد وأرسل'))) return;
+        const { ok, fail } = await runBulk('تأكيد الدرجات', items, async ({ x, g }) => {
+          const teacher = { total: g.total, notes: '', suggested: g.total, deduction: 0, gv: 3, confirmed: true, at: new Date().toISOString() };
+          await store.updateSubmission(x.pn, x.id, { teacher });
+          await notifyGrade(x, teacher, null).catch((e) => console.warn(e));
+          Object.assign(x, { teacher });
+        });
+        selSubs.clear(); schedulePublish();
+        toast(fail ? `أُكّد ${ar(ok)}، وتعذر ${ar(fail)}.` : `أُكّدت ${ar(ok)} ${ok === 1 ? 'درجة' : 'درجات'} ووصلت رسائل التأكيد.`);
+        drawBody();
+      };
       const del = $('#bsDel', body);
       if (del) del.onclick = async () => {
         const items = D.subs.filter((x) => selSubs.has(subKey(x)));
@@ -2892,10 +2914,13 @@ function viewTeacher(app) {
   /** إشعار الطالب بدرجته (خاص به وحده) */
   async function notifyGrade(x, teacher, prevTotal) {
     const g = teacher.total, title = x.taskTitle || rangeLabel(x.surah, x.from, x.to);
+    // كانت للطالب درجة آلية رُصدت مبدئياً: هذه رسالة تأكيدها أو تعديلها بعد مراجعة المعلم
+    const auto = prevTotal == null && x.ai && (x.taskId || x.retakeId) ? autoGrade(x) : null;
+    const same = auto && !auto.pending && auto.total === g;
     const n = {
       type: 'grade', score: g, subId: x.id,
-      title: prevTotal != null ? 'عدّل معلمك درجتك' : g >= 8 ? '🎉 وصل تقييم معلمك' : 'وصل تقييم معلمك',
-      body: `${prevTotal != null ? 'صارت درجتك' : 'درجتك'} ${fmt10(g)} من ١٠ في «${title}». ${gradeCheer(g)}${teacher.notes ? ' ومعلمك كتب لك ملاحظة.' : ''}`,
+      title: prevTotal != null ? 'عدّل معلمك درجتك' : same ? '✓ أكّد معلمك درجتك' : auto ? 'راجع معلمك درجتك' : g >= 8 ? '🎉 وصل تقييم معلمك' : 'وصل تقييم معلمك',
+      body: `${prevTotal != null ? 'صارت درجتك' : same ? 'راجع معلمك تسميعك وأكّد درجتك' : auto ? `راجع معلمك تسميعك، وصارت درجتك النهائية` : 'درجتك'} ${fmt10(g)} من ١٠ في «${title}». ${gradeCheer(g)}${teacher.notes ? ' ومعلمك كتب لك ملاحظة.' : ''}`,
       link: `./#/student/grade/${x.id}`, tag: 'grade-' + x.id,
     };
     const id = await store.addStudentNotif(x.pn, n);
