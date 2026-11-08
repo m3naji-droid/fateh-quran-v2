@@ -1841,7 +1841,7 @@ function viewStudent(app) {
       ...range, mode: rt?.mode || t?.mode, learn, oneShot: true, graded: true,
       onPractice: () => { comp?.destroy(); comp = null; pendingPractice = { ...range, mode: rt?.mode || t?.mode }; tab = 'practice'; draw(); },
       onSubmit: async (sub, blob) => {
-        const extra = rt ? { retakeId: rt.id, retakeOf: rt.subId || null } : {};
+        const extra = rt ? { retakeId: rt.id, retakeOf: rt.subId || null, ...(rt.byStudent ? { retakeByStudent: true } : {}) } : {};
         const id = await store.addSubmission(me.id, { ...sub, ...range, taskId: t?.id || rt?.taskId || null, taskTitle: t?.title || rt?.taskTitle || '', studentName: me.name, classId: me.classId, className: cls?.name || '', teacher: null, ...extra, ...(t && !rt && taskClosed(t) ? { late: true } : {}) }, blob, sid);
         data.subs.unshift({ ...sub, id, pn: me.id, taskId: t?.id || rt?.taskId, ...extra, createdAt: new Date().toISOString() });
         logAct('task', sub.duration || 0);
@@ -2109,7 +2109,7 @@ function viewTeacher(app) {
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
     unsub?.();
-    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); setTimeout(migrateGrades, 1500); } if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
+    unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); setTimeout(migrateGrades, 1500); } setTimeout(replaceRetaken, 800); if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
   }
   const reload = async (redraw = true) => {
@@ -2445,7 +2445,7 @@ function viewTeacher(app) {
       <div class="stack">
         <div><h2>${esc(x.studentName)} <span class="muted small num">${esc(x.pn)}</span></h2>
         <p class="muted" style="margin:4px 0 0">${esc(x.taskTitle || 'تدريب')} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${fmtDate(x.createdAt)} · ${x.mode === 'hifz' ? 'غيباً' : 'نظراً'}</p></div>
-        ${(() => { const prev = x.retakeOf && D.subs.find((y) => y.id === x.retakeOf && y.pn === x.pn); return x.retakeId ? `<div class="retake-info">🔁 هذا التسليم <b>إعادة</b> طلبتها${prev ? ` لتسليم ${fmtDate(prev.createdAt)}${prev.teacher ? ` (درجته ${fmtQ(prev.teacher.total)} من ١٠)` : ''} <button class="btn sm" type="button" id="sbPrev">افتح التسليم السابق للمقارنة</button>` : '.'}</div>` : ''; })()}
+        ${(() => { const prev = x.retakeOf && D.subs.find((y) => y.id === x.retakeOf && y.pn === x.pn); return x.retakeId ? `<div class="retake-info">🔁 هذا التسليم <b>إعادة</b> ${x.retakeByStudent ? 'طلبها الطالب ووافقت عليها' : 'طلبتها'}${prev ? ` لتسليم ${fmtDate(prev.createdAt)}${prev.teacher ? ` (درجته ${fmtQ(prev.teacher.total)} من ١٠)` : ''} <button class="btn sm" type="button" id="sbPrev">افتح التسليم السابق للمقارنة</button>` : x.retakeOf && !x.retakeByStudent ? '، وحلّت محل التسليم القديم فحُذف.' : '.'}</div>` : ''; })()}
         ${x.retakeRequested ? `<div class="retake-info">🔁 طلبت من الطالب إعادة ${esc(rangeLabel(x.retakeRequested.surah, x.retakeRequested.from, x.retakeRequested.to))} بتاريخ ${fmtDate(x.retakeRequested.at)}.</div>` : ''}
         <div class="row">${x.percent != null ? `<span class="pill ${pctClass(x.percent)}">الدقة الآلية ${ar(x.percent)}٪</span><span class="pill mute">صحيحة ${ar(x.counts?.correct || 0)} · خطأ ${ar(x.counts?.wrong || 0)} · محذوفة ${ar(x.counts?.missing || 0)}</span>` : '<span class="pill mute">بدون تصحيح آلي</span>'}<span class="pill mute">المدة ${fmtTime(x.duration || 0)}</span></div>
         <div id="sbAudio">${x.hasAudio ? '<button class="btn" id="sbLoad" type="button">تشغيل تسجيل الطالب</button>' : '<span class="muted small">لا يوجد تسجيل صوتي.</span>'}</div>
@@ -2602,7 +2602,7 @@ function viewTeacher(app) {
       $('#sbDel', m).onclick = async () => {
         if (!(await confirmBox(`حذف تسليم ${x.studentName}؟ لا يمكن التراجع.`))) return;
         await store.deleteSubmission(x.pn, x.id);
-        if (store.mode === 'local') D.subs = D.subs.filter((y) => y !== x);
+        D.subs = D.subs.filter((y) => !(y.pn === x.pn && y.id === x.id));
         toast('حُذف التسليم.'); drawBody();
       };
     });
@@ -2878,7 +2878,7 @@ function viewTeacher(app) {
         <label class="field" style="flex:1 1 120px">إلى الآية<select id="rtT1">${opt(x.to)}</select></label>
         <label class="field" style="flex:1 1 160px">أعده قبل (اختياري)<input type="date" id="rtDue"></label>
       </div>
-      <p class="small muted" style="margin:0">اترك الآيات كما هي لإعادة المقطع كله، أو ضيّقها إلى المواضع التي أخطأ فيها.</p>
+      <p class="small muted" style="margin:0">اترك الآيات كما هي لإعادة المقطع كله، أو ضيّقها إلى المواضع التي أخطأ فيها. إعادة المقطع كله تحلّ محل التسليم القديم: يُحذف القديم تلقائياً حين تصل الإعادة.</p>
       <label class="field">ملاحظة للطالب<textarea id="rtN" placeholder="مثال: أعد الآيات ٥–٨ وانتبه للإخفاء.">${esc(notes0)}</textarea></label>
       <label class="row small notify-opt" style="gap:8px"><input type="checkbox" id="rtNotify" checked> <span>أشعر الطالب بالطلب</span></label>
       <div class="row"><button class="btn primary" type="submit">أرسل الطلب</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
@@ -3050,6 +3050,30 @@ function viewTeacher(app) {
   }
 
   /* --- التقييم الميسّر: إعادة حساب الدرجات السابقة مرة واحدة (لا تنزل أي درجة) --- */
+  /**
+   * الإعادة التي يطلبها المعلم للمقطع كله تحلّ محل التسليم القديم: حين تصل يُحذف القديم (مع تسجيله)
+   * ويبقى الجديد. يسري على الطلبات السابقة أيضاً. إعادة جزء من المقطع لا تحذف الأصل، وإعادة يطلبها
+   * الطالب تُبقي المحاولتين لتُعتمد الأعلى.
+   */
+  let cleaningRetakes = false;
+  async function replaceRetaken() {
+    if (cleaningRetakes) return;
+    const olds = [];
+    D.subs.forEach((y) => {
+      if (!y.retakeId || !y.retakeOf || y.retakeByStudent) return;
+      const old = D.subs.find((o) => o.pn === y.pn && o.id === y.retakeOf && !o.retakeId);
+      if (old && old.surah === y.surah && old.from === y.from && old.to === y.to) olds.push(old);
+    });
+    if (!olds.length) return;
+    cleaningRetakes = true;
+    let n = 0;
+    for (const o of olds) {
+      try { await store.deleteSubmission(o.pn, o.id); n++; D.subs = D.subs.filter((y) => !(y.pn === o.pn && y.id === o.id)); } catch (e) { console.warn('replace retake', e); }
+    }
+    cleaningRetakes = false;
+    if (n) { schedulePublish(); if (tab === 'subs') drawBody(); toast(n === 1 ? '🔁 حلّت الإعادة محل التسليم القديم، فحُذف القديم.' : `🔁 حلّت ${ar(n)} إعادات محل التسليمات القديمة، فحُذفت القديمة.`); }
+  }
+
   async function migrateGrades() {
     try {
       const cfg = await store.getNotifySettings();
