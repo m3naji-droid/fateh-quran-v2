@@ -21,6 +21,8 @@ export class RecitationSession {
   async start() {
     this.finalText = '';
     this.interim = '';
+    this.lastFinal = '';
+    this.diag = { sr: !!SR, restarts: 0, errs: [], finals: 0, dups: 0 };
     this.chunks = [];
     this.active = true;
     this.startedAt = Date.now();
@@ -78,23 +80,40 @@ export class RecitationSession {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
-        if (res.isFinal) this.finalText += ' ' + res[0].transcript;
+        if (res.isFinal) this._addFinal(res[0].transcript);
         else interim += ' ' + res[0].transcript;
       }
       this.interim = interim.trim();
       this.onTranscript(this.transcript);
     };
     r.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.onError('التعرف على الكلام غير متاح في هذا المتصفح أو مرفوض. سيُحفظ التسجيل ليقيّمه المعلم.');
+      if (this.diag && this.diag.errs.length < 12) this.diag.errs.push(e.error);
+      if (e.error === 'audio-capture') this.onError('تعذّر على المتصفح الاستماع للتعرف على الكلام (الميكروفون مشغول). سيُحفظ تسجيلك ويُقيَّم من الصوت.');
+      else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.onError('التعرف على الكلام غير متاح في هذا المتصفح أو مرفوض. سيُحفظ التسجيل ليقيّمه المعلم.');
       else if (e.error === 'network') this.onError('التعرف على الكلام يحتاج اتصالاً بالإنترنت.');
     };
     // المتصفح يوقف التعرف بعد فترة صمت؛ نعيد تشغيله ما دامت التلاوة مستمرة
     r.onend = () => {
       if (this.interim) { this.finalText += ' ' + this.interim; this.interim = ''; }
-      if (this.active) { try { r.start(); } catch {} }
+      if (this.active) { this.diag.restarts++; try { r.start(); } catch { setTimeout(() => { if (this.active) try { r.start(); } catch {} }, 300); } }
     };
     this.recog = r;
     try { r.start(); } catch {}
+  }
+
+  /** يضيف نتيجة نهائية مع حذف التكرار: بعض متصفحات أندرويد تعيد الجملة السابقة كاملة في النتيجة التالية */
+  _addFinal(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    this.diag.finals++;
+    const prev = this.lastFinal;
+    if (prev && t.startsWith(prev)) { // النتيجة الجديدة امتداد للسابقة: نضيف الزيادة فقط
+      this.diag.dups++;
+      const extra = t.slice(prev.length).trim();
+      if (extra) this.finalText += ' ' + extra;
+    } else if (prev && prev.endsWith(t)) { this.diag.dups++; return; } // تكرار لما سبق
+    else this.finalText += ' ' + t;
+    this.lastFinal = t;
   }
 
   stop() {
@@ -111,7 +130,7 @@ export class RecitationSession {
         // ننتظر قليلاً لوصول آخر نتيجة من التعرف
         setTimeout(() => {
           if (this.interim) { this.finalText += ' ' + this.interim; this.interim = ''; }
-          resolve({ blob, duration, transcript: this.finalText.trim() });
+          resolve({ blob, duration, transcript: this.finalText.trim(), diag: this.diag });
         }, 600);
       };
       try { this.recog?.stop(); } catch {}

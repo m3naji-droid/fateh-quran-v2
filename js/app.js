@@ -259,7 +259,7 @@ function mountRecite(root, opts) {
   if (riskSet) riskSet.forEach((i) => wEls[i]?.classList.add('risk'));
   let last = null; // آخر نتيجة
   let sess = null;
-  let lastBlob = null, lastDuration = 0, lastTranscript = '';
+  let lastBlob = null, lastDuration = 0, lastTranscript = '', lastDiag = null;
   let aiRes = null, aiCtl = null;
 
   // أدوات العرض
@@ -392,7 +392,8 @@ function mountRecite(root, opts) {
     const mic = $('#rcMic', root);
     mic.disabled = true;
     $('#rcStatus', root).textContent = 'جارٍ التحليل…';
-    const { blob, duration, transcript } = await sess.stop();
+    const { blob, duration, transcript, diag } = await sess.stop();
+    lastDiag = diag || null;
     mic.disabled = false; mic.classList.remove('rec'); mic.innerHTML = MIC_SVG; mic.style.removeProperty('--lvl');
     finishing = false;
     lastBlob = blob; lastDuration = duration; lastTranscript = transcript;
@@ -553,7 +554,7 @@ function mountRecite(root, opts) {
   }
 
   function buildSubmission() {
-    const base = { surah, from, to, mode, duration: lastDuration, transcript: lastTranscript.slice(0, 5000), ...(aiRes ? { ai: aiRes } : {}) };
+    const base = { surah, from, to, mode, duration: lastDuration, transcript: lastTranscript.slice(0, 5000), dev: devInfo(lastDiag), ...(aiRes ? { ai: aiRes } : aiCtl && !aiFailed && !aiCtl.signal.aborted ? { aiRunning: true } : {}) };
     if (!last) return { ...base, auto: false, percent: null, statuses: '', mistakes: [], counts: null, wpm: 0 };
     const sc = score(last, lastDuration);
     const code = { correct: 'c', wrong: 'w', missing: 'm', pending: 'm' };
@@ -570,6 +571,15 @@ function mountRecite(root, opts) {
   }
 
   return { destroy() { player.stop(); sess?.cancel(); pop?.remove(); aiCtl?.abort(); } };
+}
+
+/** وصف مختصر للجهاز والمتصفح وحال التعرف على الكلام، يُحفظ مع التسليم لتشخيص شكاوى التعرف */
+function devInfo(diag) {
+  const ua = navigator.userAgent || '';
+  const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /CrOS/.test(ua) ? 'ChromeOS' : 'other';
+  const br = /SamsungBrowser/.test(ua) ? 'Samsung' : /EdgA?\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /CriOS|Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'other';
+  const d = diag || {};
+  return { os, br, sr: !!d.sr, rs: d.restarts || 0, fin: d.finals || 0, dup: d.dups || 0, err: (d.errs || []).slice(0, 6) };
 }
 
 /* الاحتفال (٨ من ١٠ فأعلى) والتحفيز لما دونها */
@@ -1715,7 +1725,7 @@ function viewStudent(app) {
     const L = openRetakes();
     if (!L.length) return '';
     return `<div class="stack" style="gap:10px;margin-bottom:12px">${L.map((r) => `<div class="card retake-card">
-      <div class="t-main"><b>🔁 معلمك يطلب إعادة التسميع</b><h3 style="margin:4px 0 0">${esc(r.taskTitle || 'تسميع')}</h3><div class="t-range">${esc(rangeLabel(r.surah, r.from, r.to))}</div>
+      <div class="t-main"><b>${r.byStudent ? '🔁 وافق معلمك على طلب الإعادة' : '🔁 معلمك يطلب إعادة التسميع'}</b><h3 style="margin:4px 0 0">${esc(r.taskTitle || 'تسميع')}</h3><div class="t-range">${esc(rangeLabel(r.surah, r.from, r.to))}</div>
       ${r.notes ? `<p class="small" style="margin:6px 0 0">«${esc(r.notes)}»</p>` : ''}
       <div class="small muted">${r.due ? `أعده قبل ${fmtDate(r.due)}` : 'بلا موعد محدد'}</div></div>
       <div class="row"><button class="btn primary" type="button" data-retake="${esc(r.id)}">أعد التسميع</button></div></div>`).join('')}</div>`;
@@ -1742,13 +1752,44 @@ function viewStudent(app) {
         <div class="t-main"><h3>${esc(t.title)}${fresh.has(t.id) && !done.has(t.id) ? ' <span class="pill new-pill">جديد</span>' : ''}</h3><div class="t-range">${esc(rangeLabel(t.surah, t.from, t.to))}</div>
           <div class="small muted">${t.mode === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'}${taskEnd(t) ? ` · ${overdue ? 'انتهى' : 'التسليم حتى'} ${esc(fmtDT(taskEnd(t)))}` : ''}${t.notes ? ` · ${esc(t.notes)}` : ''}</div></div>
         <div class="row">${done.has(t.id) ? `<span class="pill ok">أُرسل${best >= 0 ? ` · ${fmtQ(best)} من ١٠` : ''}</span>` : overdue ? (allowed ? '<span class="pill ok">✓ سمح لك المعلم</span>' : lr?.status === 'pending' ? '<span class="pill warn">⏳ بانتظار موافقة المعلم</span>' : lr?.status === 'no' ? '<span class="pill mute">اعتذر المعلم</span>' : '<span class="pill bad">انتهى الموعد</span>') : '<span class="pill warn">لم يُنجز</span>'}
-        ${done.has(t.id) ? `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>` : overdue && !allowed ? (!lr ? `<button class="btn gold" type="button" data-lreq="${esc(t.id)}">اطلب السماح بالتسليم</button>` : `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>`) : `<button class="btn primary" type="button" data-task="${esc(t.id)}">ابدأ التسميع</button>`}</div></div>`;
+        ${done.has(t.id) ? `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>${redoCell(t)}` : overdue && !allowed ? (!lr ? `<button class="btn gold" type="button" data-lreq="${esc(t.id)}">اطلب السماح بالتسليم</button>` : `<button class="btn" type="button" data-prac="${esc(t.id)}">تدرّب عليه</button>`) : `<button class="btn primary" type="button" data-task="${esc(t.id)}">ابدأ التسميع</button>`}</div></div>`;
     }).join('')}</div>`;
     $$('[data-task]', body).forEach((b) => (b.onclick = () => openTask(data.tasks.find((t) => t.id === b.dataset.task))));
     $$('[data-lreq]', body).forEach((b) => (b.onclick = () => requestLate(data.tasks.find((x) => x.id === b.dataset.lreq))));
+    $$('[data-redo]', body).forEach((b) => (b.onclick = () => requestRedo(data.tasks.find((x) => x.id === b.dataset.redo))));
     $$('[data-prac]', body).forEach((b) => (b.onclick = () => { const t = data.tasks.find((x) => x.id === b.dataset.prac); pendingPractice = { surah: t.surah, from: t.from, to: t.to, mode: t.mode }; tab = 'practice'; draw(); }));
     $$('[data-retake]', body).forEach((b) => (b.onclick = () => startRetake(b.dataset.retake)));
     bindPushInvite(body);
+  }
+  /** طلب إعادة التسميع: مرة لكل واجب، بموافقة المعلم، وتُعتمد الدرجة الأعلى */
+  function redoCell(t) {
+    const rq = (data.late || []).find((x) => x.id === 'redo-' + t.id);
+    const hasRetake = (data.retakes || []).some((r) => r.taskId === t.id) || data.subs.some((x) => x.taskId === t.id && x.retakeId);
+    if (rq?.status === 'pending') return ' <span class="pill warn">⏳ طلبت إعادة التسميع</span>';
+    if (rq?.status === 'no') return ' <span class="pill mute">اعتذر المعلم عن الإعادة</span>';
+    if (rq || hasRetake) return '';
+    return ` <button class="btn" type="button" data-redo="${esc(t.id)}">🔁 اطلب إعادة التسميع</button>`;
+  }
+  function requestRedo(t) {
+    if (!t) return;
+    const sub = data.subs.find((x) => x.taskId === t.id && !x.retakeId);
+    openModal(`<form id="rdF" class="stack" style="gap:12px">
+      <h2>🔁 طلب إعادة التسميع</h2>
+      <p class="muted" style="margin:0">«${esc(t.title)}» · ${esc(rangeLabel(t.surah, t.from, t.to))}${sub && subScore(sub) != null ? ` · درجتك الآن ${fmtQ(subScore(sub))} من ١٠` : ''}</p>
+      <label class="field">سبب الطلب (اختياري)<textarea id="rdWhy" maxlength="300" placeholder="مثال: لم يتعرف الموقع على بعض الكلمات، أو أخطأت وأريد أن أُحسن."></textarea></label>
+      <p class="small muted" style="margin:0">لك طلب واحد لكل واجب. إن وافق معلمك تُفتح لك محاولة جديدة خلال ٢٤ ساعة، وتُعتمد درجتك الأعلى من المحاولتين.</p>
+      <div class="row"><button class="btn primary" type="submit">أرسل الطلب</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      $('#rdF', m).onsubmit = async (e) => {
+        e.preventDefault(); const btn = e.submitter; btn.disabled = true;
+        const id = 'redo-' + t.id, reason = $('#rdWhy', m).value.trim().slice(0, 300);
+        try {
+          await store.requestLate(me.id, id, { kind: 'redo', taskId: t.id, subId: sub?.id || null, reason, taskTitle: t.title, name: me.name, classId: me.classId });
+          data.late = [...(data.late || []).filter((x) => x.id !== id), { id, kind: 'redo', pn: me.id, status: 'pending', at: new Date().toISOString() }];
+          notifyLate(me.id, id).catch(() => {});
+          closeModal(); toast('أُرسل طلبك لمعلمك، ويصلك إشعار بقراره.'); draw();
+        } catch (err) { btn.disabled = false; toast('تعذر الإرسال: ' + (err.code || err.message)); }
+      };
+    });
   }
 
   async function requestLate(t) {
@@ -1932,22 +1973,35 @@ function viewTeacher(app) {
   let tab = pref.get('tTab', 'subs');
   if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
+  if (/^#\/teacher\/redo/.test(location.hash)) { tab = 'subs'; history.replaceState(null, '', '#/teacher'); }
   let lateReqs = [];
-  /* تحليل التجويد الإلزامي: ما لم يكتمل على جهاز الطالب (أغلق الصفحة أو انقطع) يُكمله جهاز المعلم في الخلفية */
-  let aiQIv = null, aiQBusy = false;
+  /* تحليل التجويد الإلزامي: ما لم يكتمل على جهاز الطالب (فشل أو أغلق الصفحة) يحلّله جهاز المعلم فوراً، واحداً بعد الآخر */
+  let aiQT = null, aiQBusy = false, aiQForce = false;
+  const aiQ = { done: 0, total: 0, cur: null };
+  const RUNNING_GRACE = 5 * 60e3; // إن أُرسل التسليم وتحليله جارٍ على جهاز الطالب نمهله ٥ دقائق ليكمله
+  const aiNeeds = (y, force = false) => {
+    const g = autoGrade(y);
+    if (!g) return false;
+    if (force) return !y.ai && !!y.hasAudio && !!(y.taskId || y.retakeId) && !y.teacher;
+    return g.pending && (y.aiTries || 0) < 3 && !(y.aiRunning && Date.now() - new Date(y.createdAt || 0) < RUNNING_GRACE);
+  };
+  const aiPendingList = (force = false) => D.subs.filter((y) => aiNeeds(y, force));
   function pendingAiQueue() {
-    clearInterval(aiQIv);
+    clearTimeout(aiQT);
     const tick = async () => {
-      if (aiQBusy || !aiEnabled() || document.hidden) return;
-      const x = D.subs.find((y) => { const g = autoGrade(y); return g?.pending && (y.aiTries || 0) < 3 && Date.now() - new Date(y.createdAt || 0) > 8 * 60e3; });
-      if (!x) return;
-      aiQBusy = true;
+      if (aiQBusy || !aiEnabled()) return;
+      if (document.hidden && !aiQForce) { aiQT = setTimeout(tick, 20e3); return; }
+      const x = aiPendingList(aiQForce)[0];
+      if (!x) { if (aiQForce) { aiQForce = false; aiQ.cur = null; paintAiBar(); if (aiQ.done) toast(`✓ اكتمل تحليل ${ar(aiQ.done)} ${aiQ.done <= 10 ? 'تسليمات' : 'تسليماً'} ورُصدت درجاتها.`); } aiQT = setTimeout(tick, 20e3); return; }
+      aiQBusy = true; aiQ.cur = x; paintAiBar();
       try {
         const blob = await store.getAudio(x.pn, x.id);
         if (!blob) { await store.updateSubmission(x.pn, x.id, { aiFail: true }); x.aiFail = true; }
         else {
           const ai = await aiAnalyze(blob, x, () => {});
-          await store.updateSubmission(x.pn, x.id, { ai }); x.ai = ai;
+          await store.updateSubmission(x.pn, x.id, { ai, aiFail: false }); x.ai = ai; x.aiFail = false;
+          aiQ.done++;
+          notifyAutoGrade(x);
         }
         schedulePublish();
       } catch (e) {
@@ -1955,12 +2009,42 @@ function viewTeacher(app) {
         const n = (x.aiTries || 0) + 1;
         await store.updateSubmission(x.pn, x.id, { aiTries: n, ...(n >= 3 ? { aiFail: true } : {}) }).catch(() => {});
         x.aiTries = n; if (n >= 3) x.aiFail = true;
+        if (aiQForce) x._skip = true;
       }
-      aiQBusy = false;
+      aiQBusy = false; aiQ.cur = null; paintAiBar();
+      if (tab === 'subs') { const sl = document.getElementById('subList'); if (sl) drawBody(); }
+      aiQT = setTimeout(tick, 1500); // التالي مباشرة
     };
-    aiQIv = setInterval(tick, 90e3); setTimeout(tick, 20e3);
+    pendingAiQueue.tick = tick;
+    aiQT = setTimeout(tick, 3e3);
   }
-  const loadLate = () => store.listAllLate().then((L) => { lateReqs = L; if (tab === 'tasks') drawBody(); else drawHead?.(); }).catch((e) => console.warn('late', e));
+  /** زر أعلى التسليمات: يحلّل كل ما لم يُحلَّل الآن، ومنه ما فشل سابقاً */
+  function runAiNow() {
+    D.subs.forEach((y) => { if (aiNeeds(y, true)) { y.aiTries = 0; y.aiFail = false; y.aiRunning = false; delete y._skip; } });
+    aiQForce = true; aiQ.done = 0; aiQ.total = aiPendingList(true).length;
+    paintAiBar();
+    clearTimeout(aiQT); if (!aiQBusy) pendingAiQueue.tick?.();
+  }
+  function paintAiBar() {
+    const el = document.getElementById('aiBar');
+    if (!el) return;
+    const n = aiEnabled() ? aiPendingList(true).filter((y) => !y._skip).length : 0;
+    if (!n && !aiQ.cur) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = aiQ.cur
+      ? `<div class="row" style="gap:10px;align-items:center"><span>⏳ 🤖 جارٍ تحليل تجويد <b>${esc(aiQ.cur.studentName || '')}</b>… ${aiQForce && aiQ.total ? `(${ar(Math.min(aiQ.done + 1, aiQ.total))} من ${ar(aiQ.total)})` : `· بقي ${ar(n)}`}</span></div><div class="small muted">تُرصد الدرجة تلقائياً بعد كل تحليل، ولك تعديلها من التسليم. أبقِ هذه الصفحة مفتوحة حتى ينتهي.</div>`
+      : `<div class="row" style="gap:10px;align-items:center;justify-content:space-between"><span>🤖 <b>${ar(n)}</b> ${n === 1 ? 'تسليم لم يُحلَّل تجويده' : n === 2 ? 'تسليمان لم يُحلَّل تجويدهما' : 'تسليمات لم يُحلَّل تجويدها'} بعد</span><button class="btn gold sm" type="button" id="aiRun">حلّل التسليمات غير المحلّلة ورصد درجاتها</button></div>`;
+    const b = document.getElementById('aiRun'); if (b) b.onclick = runAiNow;
+  }
+  /** إشعار الطالب بدرجته الآلية بعد اكتمال تحليل التجويد من جهاز المعلم */
+  async function notifyAutoGrade(x) {
+    try {
+      const g = autoGrade(x); if (!g || x.teacher) return;
+      const nid = await store.addStudentNotif(x.pn, { type: 'grade', score: g.total, subId: x.id, title: g.total >= 8 ? `🎉 درجتك ${fmtQ(g.total)} من ١٠` : `⭐ رُصدت درجتك: ${fmtQ(g.total)} من ١٠`, body: `اكتمل تحليل تجويد «${x.taskTitle || rangeLabel(x.surah, x.from, x.to)}» ورُصدت درجتك.`, link: `./#/student/grade/${x.id}`, tag: 'grade-' + x.id });
+      sendPush(nid, x.pn).catch(() => {});
+    } catch (e) { console.warn('notify grade', e); }
+  }
+  const loadLate = () => store.listAllLate().then((L) => { lateReqs = L; if (tab === 'tasks') drawBody(); else if (tab === 'subs') paintRedo(); else drawHead?.(); }).catch((e) => console.warn('late', e));
   let D = { classes: [], students: [], tasks: [], subs: [] };
   let errCat = defaultCatalog();
   store.getErrorCatalog().then((c) => { errCat = mergeCatalog(c); }).catch(() => {});
@@ -2262,13 +2346,14 @@ function viewTeacher(app) {
   /* --- التسليمات --- */
   function drawSubs(body) {
     const opt = (v, l, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`;
-    body.innerHTML = `<div class="row" style="margin-bottom:12px">
+    body.innerHTML = `<div id="aiBar" class="card ai-bar" hidden></div><div class="row" style="margin-bottom:12px">
       <input type="search" id="fQ" placeholder="بحث باسم الطالب أو رقمه" value="${esc(filters.q)}" style="flex:2 1 200px">
       <select id="fC" style="flex:1 1 140px">${opt('all', 'كل الصفوف', filters.cls)}${D.classes.map((c) => opt(c.id, c.name, filters.cls)).join('')}</select>
       <select id="fT" style="flex:1 1 160px">${opt('all', 'كل الواجبات', filters.task)}${opt('free', 'بدون واجب', filters.task)}${D.tasks.map((t) => opt(t.id, t.title, filters.task)).join('')}</select>
       <select id="fS" style="flex:1 1 140px">${opt('all', 'كل الحالات', filters.status)}${opt('pending', 'لم تراجعها بعد', filters.status)}${opt('graded', 'راجعتها', filters.status)}</select>
       <button class="btn" id="fX" type="button">تصدير Excel</button>
-    </div><div id="subList"></div>`;
+    </div><div id="redoBox"></div><div id="subList"></div>`;
+    paintAiBar(); paintRedo();
     const list = () => D.subs.filter((x) =>
       (filters.cls === 'all' || x.classId === filters.cls) &&
       (filters.task === 'all' || (filters.task === 'free' ? !x.taskId : x.taskId === filters.task)) &&
@@ -2348,6 +2433,8 @@ function viewTeacher(app) {
         <div id="sbAuto"></div>
         <div id="sbMarks"></div>
         <div id="sbAi"></div>
+        ${(() => { const g = (x.taskId || x.retakeId) && autoGrade(x); if (!g?.asr) return ''; const n = (g.asr.tail || 0) + g.asr.gaps.reduce((k, [a1, b1]) => k + b1 - a1, 0); return `<div class="notice small">⚠️ لم يلتقط التعرف على الكلام في جهاز الطالب ${ar(n)} ${n <= 10 ? 'كلمات' : 'كلمة'}${g.asr.tail ? ' في آخر المقطع' : ''}، لكن تحليل الصوت سمع آياتها، فلم تُحسب كلها أخطاءً${g.asr.gaps.length ? ` (حُسبت كل فجوة خطأً واحداً: ${ar(g.asr.gaps.length)})` : ''}. استمع للتسجيل إن أردت التحقق.</div>`; })()}
+        ${x.dev ? `<div class="small muted">الجهاز: ${esc(x.dev.os)} · ${esc(x.dev.br)} · التعرف على الكلام: ${x.dev.sr ? 'متاح' : 'غير متاح في هذا المتصفح'}${x.dev.rs ? ` · أُعيد تشغيله ${ar(x.dev.rs)} مرة` : ''}${(x.dev.err || []).length ? ` · أخطاء: ${esc(x.dev.err.join('، '))}` : ''}</div>` : ''}
         ${x.transcript ? `<details><summary class="small">النص الذي التقطه التعرف على الكلام</summary><p class="small muted">${esc(x.transcript)}</p></details>` : ''}
         <form id="sbForm" class="card stack" style="gap:12px">
           <h3>درجة المقطع</h3>
@@ -2988,6 +3075,44 @@ function viewTeacher(app) {
       toast(status === 'ok' ? `سُمح لـ${stuName(pn)} بالتسليم، ووصله إشعار.` : 'أُبلغ الطالب بالاعتذار.');
       if (after) after(); else if (tab === 'tasks') drawBody();
     } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+  }
+
+  /* --- طلبات إعادة التسميع من الطلاب: موافقة تفتح محاولة جديدة خلال ٢٤ ساعة، وتُعتمد الأعلى --- */
+  function paintRedo() {
+    const host = document.getElementById('redoBox'); if (!host) return;
+    const P = lateReqs.filter((x) => x.kind === 'redo' && x.status === 'pending');
+    if (!P.length) { host.innerHTML = ''; return; }
+    const subOf = (x) => D.subs.find((y) => y.pn === x.pn && (y.id === x.subId || (y.taskId === x.taskId && !y.retakeId)));
+    host.innerHTML = `<div class="card stack late-card" style="gap:8px;margin-bottom:12px"><h3 style="margin:0">🔁 طلبات إعادة التسميع (${ar(P.length)})</h3>
+      ${P.map((x) => { const sb = subOf(x), sc = sb ? subScore(sb) : null; return `<div class="stack" style="gap:4px;border-top:1px solid var(--line);padding-top:8px"><div class="row" style="justify-content:space-between;gap:6px"><span><b>${esc(stuName(x.pn))}</b> <span class="small muted">${esc(className(D.students.find((s) => s.id === x.pn)?.classId))} · ${esc(D.tasks.find((t) => t.id === x.taskId)?.title || x.taskTitle || '')}${sc != null ? ` · درجته ${fmtQ(sc)} من ١٠` : ''} · ${fmtDate(x.at)}</span></span>
+        <span class="row" style="gap:4px">${sb ? `<button class="btn sm" type="button" data-rdv="${esc(x.pn)}|${esc(x.id)}">استمع</button>` : ''}<button class="btn sm primary" type="button" data-rdok="${esc(x.pn)}|${esc(x.id)}">وافق</button><button class="btn sm" type="button" data-rdno="${esc(x.pn)}|${esc(x.id)}">اعتذر</button></span></div>
+        ${x.reason ? `<div class="small">«${esc(x.reason)}»</div>` : ''}</div>`; }).join('')}</div>`;
+    const find = (v) => { const [pn, id] = v.split('|'); return lateReqs.find((x) => x.pn === pn && x.id === id); };
+    $$('[data-rdv]', host).forEach((b) => (b.onclick = () => { const x = find(b.dataset.rdv), sb = x && subOf(x); if (sb) openSubmission(sb); }));
+    $$('[data-rdok]', host).forEach((b) => (b.onclick = () => { b.disabled = true; decideRedo(find(b.dataset.rdok), 'ok', subOf); }));
+    $$('[data-rdno]', host).forEach((b) => (b.onclick = () => { b.disabled = true; decideRedo(find(b.dataset.rdno), 'no', subOf); }));
+  }
+  async function decideRedo(x, status, subOf) {
+    if (!x) return;
+    const t = D.tasks.find((y) => y.id === x.taskId), sb = subOf(x), title = t?.title || x.taskTitle || 'الواجب';
+    try {
+      let extra = {};
+      if (status === 'ok') {
+        const src = sb || t; if (!src) throw new Error('لم يُعثر على الواجب.');
+        const due = addDays(riyadhDay(), 1);
+        const r = { subId: sb?.id || null, taskId: x.taskId, taskTitle: title, surah: src.surah, from: src.from, to: src.to, mode: src.mode || t?.mode || 'recite', notes: 'وافق معلمك على طلبك. أعد التسميع، وتُعتمد درجتك الأعلى.', due, byStudent: true };
+        const rid = await store.addRetake(x.pn, r);
+        extra = { retakeId: rid };
+        if (sb) { const req = { id: rid, surah: r.surah, from: r.from, to: r.to, at: new Date().toISOString() }; await store.updateSubmission(sb.pn, sb.id, { retakeRequested: req }).catch(() => {}); sb.retakeRequested = req; }
+        try { const nid = await store.addStudentNotif(x.pn, { type: 'retake', retakeId: rid, title: '🔁 وافق معلمك على إعادة التسميع', body: `أعد تسميع «${title}» قبل ${dueText(due)}، وتُعتمد درجتك الأعلى.`, link: `./#/student/retake/${rid}`, tag: 'retake-' + rid }); await sendPush(nid, x.pn); } catch (e) { console.warn(e); }
+      } else {
+        try { const nid = await store.addStudentNotif(x.pn, { type: 'late', title: `اعتذر معلمك عن إعادة «${title}»`, body: 'تبقى درجتك كما هي. استعدّ جيداً للواجب القادم، بارك الله فيك.', link: './#/student', tag: 'redo-' + x.taskId }); await sendPush(nid, x.pn); } catch (e) { console.warn(e); }
+      }
+      await store.decideLate(x.pn, x.id, status, { ...extra, name: stuName(x.pn) });
+      Object.assign(x, { status, decidedAt: new Date().toISOString(), ...extra });
+      toast(status === 'ok' ? `فُتحت لـ${stuName(x.pn)} محاولة جديدة ووصله إشعار.` : 'أُبلغ الطالب بالاعتذار.');
+      paintRedo(); if (tab === 'subs') { const sl = document.getElementById('subList'); if (sl && store.mode === 'local') { D.subs = await store.allSubmissions(); D.subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } }
+    } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); paintRedo(); }
   }
 
   /* --- لمن الواجب: الاختيار، والتوزيع، والحذف عن صف أو طالب --- */
@@ -4157,7 +4282,7 @@ function viewTeacher(app) {
   }
 
   load();
-  return { destroy: () => { unsub?.(); heroOffs.forEach((f) => f()); clearInterval(heroIv); clearInterval(aiQIv); projOff?.(); } };
+  return { destroy: () => { unsub?.(); heroOffs.forEach((f) => f()); clearInterval(heroIv); clearTimeout(aiQT); projOff?.(); } };
 }
 
 async function teacherLogin(app) {

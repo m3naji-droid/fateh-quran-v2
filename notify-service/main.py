@@ -721,7 +721,11 @@ def late(req: LateReq, authorization: str | None = Header(None)):
     if x.get("notified") or x.get("status") != "pending":
         return {"sent": 0, "already": True}
     who = x.get("name") or r.to_dict().get("name") or "طالب"
-    out = to_teachers(f"⏰ طلب تسليم متأخر من {who}", f"يطلب السماح بتسليم «{x.get('taskTitle') or 'واجب'}» بعد انتهاء موعده.", "late-" + req.student + "-" + req.task, "./#/teacher/late")
+    if x.get("kind") == "redo":
+        why = (x.get("reason") or "").strip()
+        out = to_teachers(f"🔁 طلب إعادة تسميع من {who}", f"يطلب إعادة تسميع «{x.get('taskTitle') or 'واجب'}»" + (f": {why[:80]}" if why else "."), "redo-" + req.student + "-" + req.task, "./#/teacher/redo")
+    else:
+        out = to_teachers(f"⏰ طلب تسليم متأخر من {who}", f"يطلب السماح بتسليم «{x.get('taskTitle') or 'واجب'}» بعد انتهاء موعده.", "late-" + req.student + "-" + req.task, "./#/teacher/late")
     ref.update({"notified": True})
     return out
 

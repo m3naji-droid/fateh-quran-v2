@@ -29,22 +29,47 @@ export function similarity(a, b) {
   if (sa && sa === sb) return 0.95;
   const ea = a.replace(/[اي]$/, 'ا'), eb = b.replace(/[اي]$/, 'ا');
   if (ea === eb) return 0.95;
+  // رسم المصحف يخالف الإملاء في آخر الكلمة المهموزة والمقصورة: رءا/رأى، نبؤا/نبأ، هوى، أوى
+  const ta = a.replace(/[اويى]+$/, ''), tb = b.replace(/[اويى]+$/, '');
+  if (ta.length >= 2 && ta === tb) return 0.9;
+  // اللام المدغمة واللام المكررة (الّٰئي/اللائي)
+  const la = a.replace(/لل/g, 'ل').replace(/ي+/g, 'ي'), lb = b.replace(/لل/g, 'ل').replace(/ي+/g, 'ي');
+  if (la.length >= 3 && la === lb) return 0.9;
   return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
 }
 
 const OK = 0.72; // عتبة الكلمة الصحيحة
 const NEAR = 0.4; // عتبة الكلمة القريبة (خطأ نطق)
 
-const PREFIX = ['اعوذ', 'بالله', 'من', 'الشيطان', 'الرجيم', 'بسم', 'الله', 'الرحمن', 'الرحيم', 'صدق', 'العظيم'].map(normalize);
+const ISTI = ['اعوذ', 'بالله', 'من', 'الشيطان', 'الرجيم'].map(normalize);
+const BASM = ['بسم', 'الله', 'الرحمن', 'الرحيم'].map(normalize);
 
-/** حذف الاستعاذة والبسملة من بداية التلاوة إن لم تكن جزءاً من المقطع */
-export function stripPrefix(spoken, expected) {
-  const startsWithBasmala = expected.length && similarity(expected[0].norm, normalize('بسم')) > 0.7;
-  let i = 0;
-  while (i < spoken.length && i < 9) {
-    if (startsWithBasmala && similarity(spoken[i], normalize('بسم')) > 0.7) break;
-    if (PREFIX.some((p) => similarity(p, spoken[i]) >= 0.8)) i++;
+/** كم كلمة من بداية التلاوة تطابق عبارة (الاستعاذة أو البسملة) بالترتيب؛ يُحتمل سقوط كلمة واحدة من التعرف */
+function phraseLen(spoken, at, phrase) {
+  let j = 0, k = at, hit = 0, skips = 0;
+  while (j < phrase.length && k < spoken.length) {
+    if (similarity(phrase[j], spoken[k]) >= 0.8) { hit++; j++; k++; }
+    else if (skips < 1 && j + 1 < phrase.length && similarity(phrase[j + 1], spoken[k]) >= 0.8) { skips++; j++; }
     else break;
+  }
+  const first = at < spoken.length && (similarity(phrase[0], spoken[at]) >= 0.8 || similarity(phrase[1], spoken[at]) >= 0.8);
+  return first && hit >= Math.max(2, phrase.length - 1) ? k - at : 0;
+}
+
+/**
+ * حذف الاستعاذة والبسملة من بداية التلاوة إن لم تكن جزءاً من المقطع.
+ * تُحذف العبارة كاملة فقط، فلا تُحذف كلمة مفردة مثل «من» أو «الله» تبدأ بها الآية.
+ */
+export function stripPrefix(spoken, expected) {
+  const E = expected.map((w) => w.norm);
+  const startsWith = (ph) => E.length >= 2 && similarity(E[0], ph[0]) >= 0.8 && similarity(E[1], ph[1]) >= 0.8;
+  let i = 0;
+  for (let round = 0; round < 3; round++) {
+    let n = 0;
+    if (!startsWith(ISTI)) n = phraseLen(spoken, i, ISTI);
+    if (!n && !startsWith(BASM)) n = phraseLen(spoken, i, BASM);
+    if (!n) break;
+    i += n;
   }
   return spoken.slice(i);
 }

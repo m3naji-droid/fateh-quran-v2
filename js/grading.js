@@ -1,3 +1,4 @@
+import { ayahWords } from './quran.js';
 // التقييم الميسّر (النظام الثاني): خصم مخفف بسقف لكل نوع، وحد أدنى لمن أكمل المقطع
 //  - كل خطأ لفظي (كلمة خاطئة أو متروكة داخل ما قرأه) ربع درجة، وأقصى خصم اللفظي ٣
 //  - خطأ الحركة أو الحرف ومخرجه ثُمن درجة، وأقصى خصمها درجتان
@@ -41,20 +42,59 @@ export function gradeV2(ded, cov = 1) {
   return q4(cov >= G.full ? Math.max(G.floor, base) : base * cov);
 }
 
+/** رقم الآية لكل كلمة في المقطع */
+function ayahOf(x) {
+  const out = [];
+  try { for (let a = x.from; a <= x.to; a++) ayahWords(x.surah, a).forEach(() => out.push(a)); } catch {}
+  return out;
+}
+/**
+ * حماية من انقطاع التعرف على الكلام في المتصفح: إن سمع تحليلُ الصوت الآياتِ التي لم يلتقطها التعرف،
+ * فالنقص من المتصفح لا من الطالب. آخر المقطع غير الملتقط لا يُنقص الإكمال، وكل فجوة من ٣ كلمات فأكثر
+ * داخل آية سمعها التحليل تُحسب خطأً واحداً.
+ */
+export function asrGuard(x) {
+  const st = x?.statuses || '';
+  if (!x?.ai || !st || x.aiFail) return null;
+  const A = ayahOf(x);
+  if (A.length !== st.length) return null;
+  const skipped = new Set((x.ai.skipped || []).map(Number));
+  const end = readEnd(st);
+  const tailAyat = new Set(A.slice(end));
+  // مدة التسجيل تكفي لتلاوة المقطع كله (أسرع ترتيل معقول نحو ١٥٠ كلمة في الدقيقة)، فالتوقف ليس من الطالب
+  const longEnough = !x.duration || x.duration >= st.length * 0.38;
+  const tail = end < st.length && longEnough && [...tailAyat].every((a) => !skipped.has(a)) ? st.length - end : 0;
+  const gaps = [];
+  for (let i = 0; i < end;) {
+    if (st[i] !== 'm') { i++; continue; }
+    let j = i; while (j < end && st[j] === 'm') j++;
+    if (j - i >= 3 && !A.slice(i, j).some((a) => skipped.has(a))) gaps.push([i, j]);
+    i = j;
+  }
+  return tail || gaps.length ? { tail, gaps } : null;
+}
+
 /** الدرجة الآلية لتسليم: من التصحيح الآلي للكلمات، ومن تحليل التجويد إن وُجد */
 export function autoGrade(x) {
   if (!x || !x.statuses) return null;
-  const end = readEnd(x.statuses);
+  const guard = asrGuard(x);
+  const end = guard?.tail ? x.statuses.length : readEnd(x.statuses);
+  const inGap = (i) => guard?.gaps.some(([a, b]) => i >= a && i < b);
   let v = 0;
-  for (let i = 0; i < end; i++) if (x.statuses[i] === 'w' || x.statuses[i] === 'm') v++;
+  for (let i = 0; i < end; i++) {
+    if (guard?.tail && i >= x.statuses.length - guard.tail) break; // ذيل لم يلتقطه التعرف: ليس خطأً
+    if (inGap(i)) continue;
+    if (x.statuses[i] === 'w' || x.statuses[i] === 'm') v++;
+  }
+  v += guard?.gaps.length || 0; // كل فجوة خطأ واحد
   const errs = aiErrors(x.ai).filter((e) => e.i < end);
   const l = errs.filter((e) => LETTER_KEYS.has(e.r)).length, t = errs.length - l;
-  const cov = coverage(x.statuses);
+  const cov = guard?.tail ? 1 : coverage(x.statuses);
   let total = gradeV2({ verbal: v * G.vd, letters: l * G.ld, tajweed: t * G.td }, cov);
   const legacy = isLegacy(x);
   if (legacy && x.percent != null) total = Math.max(total, q4(x.percent / 10));
   return {
-    total, v, l, t, cov,
+    total, v, l, t, cov, asr: guard,
     verbal: Math.min(v * G.vd, G.vmax), letters: Math.min(l * G.ld, G.lmax), tajweed: Math.min(t * G.td, G.tmax),
     // بانتظار تحليل التجويد: واجب جديد له تسجيل ولم يُحلَّل بعد
     pending: !legacy && !x.ai && !x.aiFail && !!x.hasAudio && !!(x.taskId || x.retakeId),
