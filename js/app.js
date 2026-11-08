@@ -5,7 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } 
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
-import { CH_HOURS, CH_DAILY, CH_PTS, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
+import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
@@ -1210,7 +1210,7 @@ function viewStudent(app) {
 
   /* --- التحدي الودّي --- */
   async function loadChallenges() {
-    try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); } catch (e) { console.warn('challenges', e); }
+    try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); setChPts(chCfg?.pts); } catch (e) { console.warn('challenges', e); }
     myCh.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     paintChBar();
     const host = $('#chCard', app); if (host) drawChCard(host);
@@ -2104,7 +2104,7 @@ function viewTeacher(app) {
     }
     refreshPush(tOwner);
     loadFb(); loadLate(); pendingAiQueue();
-    store.listAllChallenges().then((L) => { D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
+    Promise.all([store.listAllChallenges(), store.getChallengeCfg().catch(() => null)]).then(([L, cfg]) => { setChPts(cfg?.pts); D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
     store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
@@ -4110,20 +4110,79 @@ function viewTeacher(app) {
   }
 
   /* --- إدارة التحديات الودّية --- */
+  const chResult = (c) => { const w = chWinner(c), st = chStatus(c); return st === 'open' ? 'جارٍ' : st === 'declined' ? 'اعتذار' : w === 'tie' ? 'تعادل' : w ? '🏆 ' + (w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'; };
   async function drawChAdmin(host) {
     const L = D.challenges || [];
     const ym = new Date().toISOString().slice(0, 7);
     const month = L.filter((c) => (c.createdAt || '').slice(0, 7) === ym);
     const open = L.filter((c) => chStatus(c) === 'open');
     let cfg = { off: false };
-    try { cfg = await store.getChallengeCfg(); } catch {}
+    try { cfg = (await store.getChallengeCfg()) || cfg; } catch {}
+    setChPts(cfg.pts);
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3>
         <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
-      <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}. الفائز +${ar(CH_PTS.win)} في لوحة الشرف، والمشارك +${ar(CH_PTS.lose)}، والتعادل +${ar(CH_PTS.tie)} لكلٍّ منهما. حد كل طالب ${ar(CH_DAILY)} تحديات يومياً.</p>
-      ${month.length ? `<details><summary class="small">آخر التحديات</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => { const w = chWinner(c); return `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span></div><span class="small">${chStatus(c) === 'open' ? 'جارٍ' : chStatus(c) === 'declined' ? 'اعتذار' : w === 'tie' ? 'تعادل' : w ? '🏆 ' + esc(w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`; }).join('')}</ul></details>` : ''}`;
+      <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}، ومنذ البداية ${ar(L.length)}. حد كل طالب ${ar(CH_DAILY)} تحديات يومياً.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="chLog">📋 سجل التحديات كاملاً</button><button class="btn sm" type="button" id="chPtsBtn">⚙️ نقاط التحدي: فوز ${ar(CH_PTS.win)} · مشاركة ${ar(CH_PTS.lose)} · تعادل ${ar(CH_PTS.tie)}</button></div>
+      ${month.length ? `<details><summary class="small">آخر تحديات هذا الشهر</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span></div><span class="small">${esc(chResult(c))}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`).join('')}</ul></details>` : ''}`;
     $('#chOn', host).onchange = async (e) => {
-      try { await store.setChallengeCfg({ off: !e.target.checked }); toast(e.target.checked ? 'فُعّلت التحديات.' : 'أُوقفت التحديات مؤقتاً، ولا يستطيع الطلاب إنشاء تحدٍّ جديد.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); e.target.checked = !e.target.checked; }
+      try { cfg = { ...cfg, off: !e.target.checked }; await store.setChallengeCfg(cfg); toast(e.target.checked ? 'فُعّلت التحديات.' : 'أُوقفت التحديات مؤقتاً، ولا يستطيع الطلاب إنشاء تحدٍّ جديد.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); e.target.checked = !e.target.checked; }
     };
+    $('#chLog', host).onclick = () => openChLog();
+    $('#chPtsBtn', host).onclick = () => openModal(`<form id="cpF" class="stack" style="gap:12px">
+        <h2>⚙️ نقاط تحدّي الزملاء</h2>
+        <p class="small muted" style="margin:0">تُضاف إلى لوحة الشرف عند حسم كل تحدٍّ. التغيير يسري على حساب النقاط كله، ومنه التحديات السابقة، أما نتائج الأشهر المعلنة فتبقى كما هي.</p>
+        ${[['win', '🏆 الفائز'], ['lose', '🤝 المشارك الخاسر (إن سمّع)'], ['tie', '⚖️ التعادل (لكلٍّ منهما)']].map(([k, l]) => `<label class="row" style="gap:10px;justify-content:space-between"><span>${l}</span><input type="number" id="cp_${k}" min="0" max="20" step="0.5" value="${CH_PTS[k]}" style="width:90px" inputmode="decimal"></label>`).join('')}
+        <div class="row"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="cpDef">القيم الافتراضية (٣ · ١ · ٢)</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      $('#cpDef', m).onclick = () => Object.entries(CH_DEFAULT_PTS).forEach(([k, v]) => ($('#cp_' + k, m).value = v));
+      $('#cpF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const pts = { win: +$('#cp_win', m).value, lose: +$('#cp_lose', m).value, tie: +$('#cp_tie', m).value };
+        if (Object.values(pts).some((v) => !Number.isFinite(v) || v < 0 || v > 20)) return toast('اكتب أرقاماً من ٠ إلى ٢٠.');
+        try { cfg = { ...cfg, pts }; await store.setChallengeCfg(cfg); setChPts(pts); closeModal(); schedulePublish(); toast('حُفظت نقاط التحدي، وستُحدَّث لوحة الشرف.'); drawBody(); }
+        catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); }
+      };
+    });
+  }
+
+  /** سجل التحديات كاملاً: كل الأشهر، مع تصفية بالشهر والصف والطالب، وتصدير Excel */
+  function openChLog() {
+    const L = (D.challenges || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const months = [...new Set(L.map((c) => (c.createdAt || '').slice(0, 7)).filter(Boolean))];
+    const f = { ym: 'all', cls: 'all', q: '' };
+    const rows = () => L.filter((c) => (f.ym === 'all' || (c.createdAt || '').startsWith(f.ym)) && (f.cls === 'all' || c.classId === f.cls)
+      && (!f.q || [c.a.name, c.b.name, c.a.pn, c.b.pn].some((v) => (v || '').includes(f.q))));
+    const pc = (r) => (r ? ar(r.p) + '٪' + (r.wpm ? ` · ${ar(r.wpm)} ك/د` : '') : '—');
+    openModal(`<div class="stack" style="gap:10px"><h2 style="margin:0">📋 سجل تحدّي الزملاء</h2>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <select id="clM" style="flex:1 1 130px"><option value="all">كل الأشهر</option>${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}</option>`).join('')}</select>
+        <select id="clC" style="flex:1 1 130px"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>
+        <input type="search" id="clQ" placeholder="اسم الطالب أو رقمه" style="flex:2 1 160px">
+        <button class="btn sm" type="button" id="clX">تصدير Excel</button></div>
+      <div id="clSum" class="small muted"></div><div id="clT" style="max-height:60vh;overflow:auto"></div>
+      <div class="row"><button class="btn" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+      const paint = () => {
+        const R = rows();
+        const wins = {}; R.forEach((c) => { const w = chWinner(c); if (w && w !== 'tie') wins[w] = (wins[w] || 0) + 1; });
+        const top = Object.entries(wins).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([pn, n]) => `${esc(stuName(pn))} (${ar(n)})`).join('، ');
+        $('#clSum', m).innerHTML = `${ar(R.length)} ${R.length === 1 ? 'تحدٍّ' : 'تحديات'}${top ? ` · الأكثر فوزاً: ${top}` : ''}`;
+        $('#clT', m).innerHTML = R.length ? `<ul class="ch-list">${R.map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${fmtDate(c.createdAt)} · ${esc(c.className || className(c.classId) || '')} · ${esc(c.label || '')}</span><span class="small muted">${esc(c.a.name)}: ${pc(c.ra)} — ${esc(c.b.name)}: ${pc(c.rb)}</span></div><span class="small"><b>${esc(chResult(c))}</b></span></li>`).join('')}</ul>` : '<div class="empty">لا تحديات بهذه التصفية.</div>';
+      };
+      $('#clM', m).onchange = (e) => { f.ym = e.target.value; paint(); };
+      $('#clC', m).onchange = (e) => { f.cls = e.target.value; paint(); };
+      $('#clQ', m).oninput = (e) => { f.q = e.target.value.trim(); paint(); };
+      $('#clX', m).onclick = () => {
+        if (!window.XLSX) { toast('مكتبة Excel لم تُحمّل بعد. أعد المحاولة بعد لحظات.'); return; }
+        const data = rows().map((c) => { const w = chWinner(c); return {
+          'التاريخ': fmtDate(c.createdAt), 'الصف': c.className || className(c.classId) || '', 'المقطع': c.label || '',
+          'الطالب الأول': c.a.name, 'رقمه': c.a.pn, 'دقته %': c.ra?.p ?? '', 'سرعته (كلمة/دقيقة)': c.ra?.wpm ?? '',
+          'الطالب الثاني': c.b.name, 'رقمه ': c.b.pn, 'دقته % ': c.rb?.p ?? '', 'سرعته (كلمة/دقيقة) ': c.rb?.wpm ?? '',
+          'النتيجة': chResult(c).replace('🏆 ', 'فاز: '), 'نقاط الأول': w === 'tie' ? CH_PTS.tie : w === c.a.pn ? CH_PTS.win : w && c.ra ? CH_PTS.lose : 0, 'نقاط الثاني': w === 'tie' ? CH_PTS.tie : w === c.b.pn ? CH_PTS.win : w && c.rb ? CH_PTS.lose : 0 }; });
+        const ws = XLSX.utils.json_to_sheet(data); ws['!cols'] = Object.keys(data[0] || {}).map(() => ({ wch: 16 }));
+        const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] }; XLSX.utils.book_append_sheet(wb, ws, 'التحديات');
+        XLSX.writeFile(wb, `تحديات-الزملاء-${f.ym === 'all' ? 'الكل' : f.ym}.xlsx`);
+      };
+      paint();
+    });
   }
 
   /* --- نتائج الشهر --- */

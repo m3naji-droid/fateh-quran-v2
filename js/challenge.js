@@ -2,7 +2,13 @@
 // الفائز: الأدق، ثم الأسرع (كلمات في الدقيقة) عند التعادل. النقاط: الفائز ٣، والمشارك ١، والتعادل ٢ لكلٍّ منهما.
 export const CH_HOURS = 48;
 export const CH_DAILY = 3;
-export const CH_PTS = { win: 3, lose: 1, tie: 2 };
+export const CH_DEFAULT_PTS = { win: 3, lose: 1, tie: 2 };
+/** نقاط التحدي في لوحة الشرف: يضبطها المعلم (leaderboard/challengeCfg.pts)، وهذه قيمها الافتراضية */
+export const CH_PTS = { ...CH_DEFAULT_PTS };
+export function setChPts(p) {
+  const n = (v, d) => (Number.isFinite(+v) && +v >= 0 && +v <= 20 ? Math.round(+v * 2) / 2 : d);
+  Object.assign(CH_PTS, { win: n(p?.win, CH_DEFAULT_PTS.win), lose: n(p?.lose, CH_DEFAULT_PTS.lose), tie: n(p?.tie, CH_DEFAULT_PTS.tie) });
+}
 
 export const chStatus = (c, now = Date.now()) =>
   c.declined ? 'declined' : c.ra && c.rb ? 'done' : now > new Date(c.expiresAt).getTime() ? 'expired' : 'open';
