@@ -193,7 +193,7 @@ export function mountTalqeen(root, opts) {
       maxSeconds: 120,
     });
     try { await sess.start(); btn.classList.add('rec'); st.textContent = '🎙️ أسمعك… سمّع الآن، واضغط مرة أخرى عند الانتهاء.'; }
-    catch (e) { sess = null; st.textContent = e.message; }
+    catch (e) { sess = null; if (e.code !== 'cancelled') st.textContent = '🎙️ ' + e.message; }
   }
   function judge(s, transcript, dur, manual = false) {
     const res = align(s.target, transcript || '');

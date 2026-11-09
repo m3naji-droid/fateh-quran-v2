@@ -3,6 +3,42 @@ const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.we
 export const hasRecognition = !!SR;
 export const hasRecorder = typeof window !== 'undefined' && !!(navigator.mediaDevices && window.MediaRecorder);
 
+const UA = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+export const isIOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1);
+/** متصفح داخل تطبيق (واتساب، إنستغرام، تيليجرام، سناب…): غالباً بلا ميكروفون ولا تعرف على الكلام */
+export const inAppBrowser = /FBAN|FBAV|Instagram|Line\/|Snapchat|WhatsApp|Telegram|TikTok|musical_ly|\bwv\)|; wv\b|GSA\//.test(UA);
+const standalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true);
+const openHint = isIOS ? 'افتح رابط المقرأة في Safari' : 'افتح رابط المقرأة في Chrome';
+
+/** رسالة واضحة لسبب تعذّر فتح الميكروفون، بحسب نوع الخطأ والجهاز */
+export function micErrorText(e) {
+  const n = e?.name || '';
+  if (!navigator.mediaDevices?.getUserMedia) return inAppBrowser ? `هذا المتصفح داخل تطبيق (مثل واتساب) ولا يسمح بالميكروفون. ${openHint} مباشرةً ثم أعد المحاولة.` : `متصفحك لا يسمح بالميكروفون. ${openHint} حديثاً.`;
+  if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError')
+    return isIOS ? 'لم يُسمح باستخدام الميكروفون. من «الإعدادات» ← Safari ← الميكروفون اختر «اسمح»، أو اضغط «aA» في شريط العنوان ← إعدادات موقع الويب ← الميكروفون ← اسمح، ثم أعد تحميل الصفحة.'
+      : 'لم يُسمح باستخدام الميكروفون. اضغط رمز القفل 🔒 بجانب عنوان الموقع ← الأذونات ← الميكروفون ← اسمح، ثم أعد تحميل الصفحة.';
+  if (n === 'NotFoundError' || n === 'DevicesNotFoundError') return 'لم يُعثر على ميكروفون في هذا الجهاز. صِل سماعة بميكروفون أو استخدم جوالاً.';
+  if (n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError') return 'الميكروفون مشغول بتطبيق آخر (مكالمة، أو تسجيل، أو تبويب آخر مفتوح فيه المقرأة). أغلقه ثم أعد المحاولة.';
+  return 'تعذّر تشغيل الميكروفون. أعد تحميل الصفحة ثم حاول مرة أخرى.';
+}
+
+/** يفتح الميكروفون بإعدادات الجودة، ويتراجع إلى الإعداد البسيط إن رفضها الجهاز، ويعيد المحاولة مرة إن كان مشغولاً للحظة */
+async function openMic() {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error(micErrorText(null));
+  const best = { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true, sampleRate: { ideal: 48000 } } };
+  const tries = [best, { audio: true }, { audio: true }];
+  let last;
+  for (let i = 0; i < tries.length; i++) {
+    try { return await navigator.mediaDevices.getUserMedia(tries[i]); }
+    catch (e) {
+      last = e;
+      if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError' || e?.name === 'NotFoundError') break;
+      if (i === 1) await new Promise((r) => setTimeout(r, 600)); // مشغول لحظة بعد تسجيل سابق
+    }
+  }
+  const err = new Error(micErrorText(last)); err.code = last?.name || 'mic'; throw err;
+}
+
 export class RecitationSession {
   constructor({ onTranscript, onLevel, onError, onTick, maxSeconds = 300 } = {}) {
     this.onTranscript = onTranscript || (() => {});
@@ -25,14 +61,20 @@ export class RecitationSession {
     this.diag = { sr: !!SR, restarts: 0, errs: [], finals: 0, dups: 0 };
     this.chunks = [];
     this.active = true;
+    this.cancelled = false;
     this.startedAt = Date.now();
     try {
       // صوت خام قدر الإمكان: كبت الضوضاء وإلغاء الصدى يشوّهان الغنة والمدود فيضعف حكم التحليل الآلي
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true, sampleRate: { ideal: 48000 } } });
+      this.stream = await openMic();
     } catch (e) {
       this.active = false;
-      throw new Error('لم يُسمح باستخدام الميكروفون. اسمح للموقع بالوصول إلى الميكروفون من إعدادات المتصفح ثم أعد المحاولة.');
+      throw e;
     }
+    // أُلغي التسجيل أثناء انتظار إذن الميكروفون (ضغطة ثانية أو مغادرة الصفحة): نغلق الميكروفون فوراً
+    if (this.cancelled) { this.stream.getTracks().forEach((t) => t.stop()); this.active = false; const err = new Error('أُلغي التسجيل.'); err.code = 'cancelled'; throw err; }
+    this.startedAt = Date.now();
+    // انقطع الميكروفون أثناء التسجيل (مكالمة واردة، أو الخروج من التطبيق في آيفون)
+    this.stream.getAudioTracks().forEach((t) => (t.onended = () => { if (this.active) { this.onError('انقطع الميكروفون (ربما مكالمة أو خروج من الصفحة). أُوقف التسجيل، فأعد المحاولة.'); this.stop(); this.onAutoStop && this.onAutoStop(); } }));
     // جودة أعلى للكلام (٣٢ كيلوبت/ث، ضعف وضوح الإعداد السابق تقريباً) ليكون التحليل الآلي أدق
     const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg'];
     const mimeType = types.find((t) => MediaRecorder.isTypeSupported(t)) || '';
@@ -45,6 +87,8 @@ export class RecitationSession {
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       this.ac = new AC();
+      // يبدأ موقوفاً في بعض المتصفحات فيبقى مقياس الصوت ساكناً كأن الميكروفون لا يعمل
+      if (this.ac.state === 'suspended') this.ac.resume().catch(() => {});
       const src = this.ac.createMediaStreamSource(this.stream);
       const an = this.ac.createAnalyser();
       an.fftSize = 512;
@@ -64,7 +108,7 @@ export class RecitationSession {
     this.timer = setInterval(() => {
       const s = Math.floor((Date.now() - this.startedAt) / 1000);
       this.onTick(s);
-      if (s >= this.maxSeconds) { this.stop(); this.onAutoStop && this.onAutoStop(); }
+      if (s >= this.maxSeconds) { this.reason = 'max'; this.stop(); this.onAutoStop && this.onAutoStop(); }
     }, 250);
 
     if (SR) this._startRecognition();
@@ -88,14 +132,22 @@ export class RecitationSession {
     };
     r.onerror = (e) => {
       if (this.diag && this.diag.errs.length < 12) this.diag.errs.push(e.error);
-      if (e.error === 'audio-capture') this.onError('تعذّر على المتصفح الاستماع للتعرف على الكلام (الميكروفون مشغول). سيُحفظ تسجيلك ويُقيَّم من الصوت.');
-      else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.onError('التعرف على الكلام غير متاح في هذا المتصفح أو مرفوض. سيُحفظ التسجيل ليقيّمه المعلم.');
-      else if (e.error === 'network') this.onError('التعرف على الكلام يحتاج اتصالاً بالإنترنت.');
+      // أخطاء لا ينفع معها إعادة التشغيل: نتوقف عن المحاولة ويكمل التسجيل الصوتي وحده
+      if (['not-allowed', 'service-not-allowed', 'language-not-supported'].includes(e.error)) this.srDead = true;
+      if (e.error === 'audio-capture') { this.srFails = (this.srFails || 0) + 1; if (this.srFails >= 3) this.srDead = true; this.onError('تعذّر على المتصفح الاستماع للتعرف على الكلام (الميكروفون مشغول). يستمر تسجيلك ويُقيَّم من الصوت.'); }
+      else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.onError(isIOS && standalone ? 'التعرف على الكلام لا يعمل في المقرأة المثبّتة على آيفون. يستمر تسجيلك ويُقيَّم من الصوت، وللمتابعة الحية افتح المقرأة في Safari.' : isIOS ? 'التعرف على الكلام مرفوض. فعّل «Siri والإملاء» من إعدادات آيفون (الإعدادات ← عام ← لوحة المفاتيح ← تفعيل الإملاء). يستمر تسجيلك ويُقيَّم من الصوت.' : 'التعرف على الكلام غير متاح في هذا المتصفح أو مرفوض. يستمر تسجيلك ويُقيَّم من الصوت.');
+      else if (e.error === 'language-not-supported') this.onError('التعرف على العربية غير متاح في هذا المتصفح. يستمر تسجيلك ويُقيَّم من الصوت.');
+      else if (e.error === 'network') this.onError('التعرف على الكلام يحتاج اتصالاً بالإنترنت. يستمر تسجيلك.');
     };
     // المتصفح يوقف التعرف بعد فترة صمت؛ نعيد تشغيله ما دامت التلاوة مستمرة
     r.onend = () => {
       if (this.interim) { this.finalText += ' ' + this.interim; this.interim = ''; }
-      if (this.active) { this.diag.restarts++; try { r.start(); } catch { setTimeout(() => { if (this.active) try { r.start(); } catch {} }, 300); } }
+      if (!this.active || this.srDead) return;
+      // إعادة تشغيل متتالية بلا نتائج تعني عطلاً: نبطئها حتى لا تتكرر أصوات التنبيه ويثقل الجهاز
+      const now = Date.now(); this._rsT = (this._rsT || []).filter((t) => now - t < 10e3); this._rsT.push(now);
+      this.diag.restarts++;
+      const again = () => { if (this.active && !this.srDead) try { r.start(); } catch { setTimeout(() => { if (this.active && !this.srDead) try { r.start(); } catch {} }, 500); } };
+      if (this._rsT.length > 6) setTimeout(again, 1500); else again();
     };
     this.recog = r;
     try { r.start(); } catch {}
@@ -117,6 +169,7 @@ export class RecitationSession {
   }
 
   stop() {
+    if (this.active && !this.stream) { this.cancelled = true; this.active = false; return Promise.resolve({ blob: null, duration: 0, transcript: '', diag: this.diag }); }
     if (!this.active) return this._done;
     this.active = false;
     clearInterval(this.timer);

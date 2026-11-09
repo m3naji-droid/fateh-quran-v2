@@ -1,7 +1,7 @@
 import { loadQuran, getSurahs, surahName, ayahCount, ayahWords, rangeWords, toArabicDigits as ar } from './quran.js';
 import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
-import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder } from './speech.js';
+import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder, inAppBrowser, isIOS, micErrorText } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
@@ -349,8 +349,12 @@ function mountRecite(root, opts) {
     $('#rcProg', root).style.width = (res.total ? (res.done / res.total) * 100 : 0) + '%';
   }
 
-  if (!hasRecorder) $('#rcNotice', root).innerHTML = '<div class="notice">متصفحك لا يدعم التسجيل الصوتي. استخدم Chrome أو Edge أو Safari حديثاً.</div>';
+  if (inAppBrowser) $('#rcNotice', root).innerHTML = `<div class="notice">⚠️ فتحت المقرأة من داخل تطبيق (مثل واتساب)، وفيه قد لا يعمل الميكروفون أو التصحيح الآلي. ${isIOS ? 'اضغط ⋯ أو زر المشاركة واختر «فتح في Safari».' : 'اضغط ⋮ واختر «فتح في Chrome».'}</div>`;
+  else if (!hasRecorder) $('#rcNotice', root).innerHTML = '<div class="notice">متصفحك لا يدعم التسجيل الصوتي. استخدم Chrome أو Edge أو Safari حديثاً.</div>';
   else if (!hasRecognition) $('#rcNotice', root).innerHTML = '<div class="notice">المتابعة الحية تعمل في Chrome وEdge وSafari. في هذا المتصفح سيُحفظ تسجيلك فقط ليقيّمه المعلم.</div>';
+
+  // إذن الميكروفون مرفوض سابقاً: ننبّه بالحل قبل أن يضغط الطالب
+  try { navigator.permissions?.query({ name: 'microphone' }).then((p) => { const warn = () => { if (p.state === 'denied' && !$('#rcNotice', root).textContent) $('#rcNotice', root).innerHTML = `<div class="notice">🎙️ ${esc(micErrorText({ name: 'NotAllowedError' }))}</div>`; }; warn(); p.onchange = () => { if (p.state !== 'denied') $('#rcNotice', root).innerHTML = ''; warn(); }; }).catch(() => {}); } catch {}
 
   let throttle = 0, pendingT = null;
   function onTranscript(t) {
@@ -374,14 +378,21 @@ function mountRecite(root, opts) {
       onError: (m) => { $('#rcNotice', root).innerHTML = `<div class="notice">${esc(m)}</div>`; },
       maxSeconds: opts.maxSeconds || 300,
     });
-    sess.onAutoStop = () => { toast('انتهى الحد الأقصى لمدة التسجيل.'); finishRec(); };
+    sess.onAutoStop = () => { if (sess?.reason === 'max') toast('انتهى الحد الأقصى لمدة التسجيل.'); finishRec(); };
+    const micB = $('#rcMic', root);
+    micB.disabled = true; // لا تُقبل ضغطة ثانية أثناء انتظار إذن الميكروفون فيبقى مفتوحاً بلا تسجيل
+    $('#rcStatus', root).textContent = 'جارٍ فتح الميكروفون…';
     try {
       await sess.start();
+      $('#rcNotice', root).innerHTML = hasRecognition ? '' : $('#rcNotice', root).innerHTML;
       showSheet(); text.scrollTo({ top: 0 });
     } catch (e) {
-      $('#rcNotice', root).innerHTML = `<div class="notice">${esc(e.message)}</div>`;
+      micB.disabled = false; sess = null;
+      $('#rcStatus', root).textContent = '';
+      if (e.code !== 'cancelled') $('#rcNotice', root).innerHTML = `<div class="notice">🎙️ ${esc(e.message)}</div>`;
       return;
     }
+    micB.disabled = false;
     const mic = $('#rcMic', root);
     mic.classList.add('rec'); mic.innerHTML = STOP_SVG; mic.setAttribute('aria-label', 'إنهاء التسميع');
     $('#rcStatus', root).textContent = hasRecognition ? 'أستمع إليك… اقرأ بصوت واضح.' : 'جارٍ التسجيل…';
@@ -579,7 +590,7 @@ function mountRecite(root, opts) {
 function devInfo(diag) {
   const ua = navigator.userAgent || '';
   const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /CrOS/.test(ua) ? 'ChromeOS' : 'other';
-  const br = /SamsungBrowser/.test(ua) ? 'Samsung' : /EdgA?\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /CriOS|Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'other';
+  const br = inAppBrowser ? 'InApp' : /SamsungBrowser/.test(ua) ? 'Samsung' : /EdgA?\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /CriOS|Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'other';
   const d = diag || {};
   return { os, br, sr: !!d.sr, rs: d.restarts || 0, fin: d.finals || 0, dup: d.dups || 0, err: (d.errs || []).slice(0, 6) };
 }
@@ -2464,7 +2475,7 @@ function viewTeacher(app) {
         <div id="sbMarks"></div>
         <div id="sbAi"></div>
         ${(() => { const g = (x.taskId || x.retakeId) && autoGrade(x); if (!g?.asr) return ''; const n = (g.asr.tail || 0) + g.asr.gaps.reduce((k, [a1, b1]) => k + b1 - a1, 0); return `<div class="notice small">⚠️ لم يلتقط التعرف على الكلام في جهاز الطالب ${ar(n)} ${n <= 10 ? 'كلمات' : 'كلمة'}${g.asr.tail ? ' في آخر المقطع' : ''}، لكن تحليل الصوت سمع آياتها، فلم تُحسب كلها أخطاءً${g.asr.gaps.length ? ` (حُسبت كل فجوة خطأً واحداً: ${ar(g.asr.gaps.length)})` : ''}. استمع للتسجيل إن أردت التحقق.</div>`; })()}
-        ${x.dev ? `<div class="small muted">الجهاز: ${esc(x.dev.os)} · ${esc(x.dev.br)} · التعرف على الكلام: ${x.dev.sr ? 'متاح' : 'غير متاح في هذا المتصفح'}${x.dev.rs ? ` · أُعيد تشغيله ${ar(x.dev.rs)} مرة` : ''}${(x.dev.err || []).length ? ` · أخطاء: ${esc(x.dev.err.join('، '))}` : ''}</div>` : ''}
+        ${x.dev ? `<div class="small muted">الجهاز: ${esc(x.dev.os)} · ${x.dev.br === 'InApp' ? 'متصفح داخل تطبيق' : esc(x.dev.br)} · التعرف على الكلام: ${x.dev.sr ? 'متاح' : 'غير متاح في هذا المتصفح'}${x.dev.rs ? ` · أُعيد تشغيله ${ar(x.dev.rs)} مرة` : ''}${(x.dev.err || []).length ? ` · أخطاء: ${esc(x.dev.err.join('، '))}` : ''}</div>` : ''}
         ${x.transcript ? `<details><summary class="small">النص الذي التقطه التعرف على الكلام</summary><p class="small muted">${esc(x.transcript)}</p></details>` : ''}
         <form id="sbForm" class="card stack" style="gap:12px">
           <h3>درجة المقطع</h3>
