@@ -193,6 +193,15 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['d', 'practice', 'tasks', 'sec', 'at'])
           && request.resource.data.d == day;
       }
+      // نقاط «الهمة العالية» اليومية: يكتبها الطالب لنفسه بسقف ٢٠٠ نقطة و٣٠ دقيقة في اليوم
+      match /himma/{day} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create, update: if isStudent(pn)
+          && request.resource.data.keys().hasOnly(['d', 'hp', 'ha', 'hm', 'at'])
+          && request.resource.data.d == day
+          && request.resource.data.hp is number && request.resource.data.hp >= 0 && request.resource.data.hp <= 200
+          && request.resource.data.hm is number && request.resource.data.hm >= 0 && request.resource.data.hm <= 30;
+      }
       // طلبات إعادة التسميع: يكتبها المعلم، ويقرؤها الطالب
       match /retakes/{rid} {
         allow read: if isTeacher() || isStudent(pn);
@@ -237,6 +246,10 @@ service cloud.firestore {
         && qid == request.resource.data.pn + '__' + request.resource.data.sid
         && request.resource.data.status == 'queued';
       allow read, update, delete: if isTeacher();
+    }
+    // المعلم يقرأ نقاط الهمة لكل الطلاب دفعة واحدة
+    match /{path=**}/himma/{day} {
+      allow read: if isTeacher();
     }
     match /{path=**}/late/{tid} {
       allow read: if isTeacher();

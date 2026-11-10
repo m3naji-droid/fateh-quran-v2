@@ -180,6 +180,9 @@ const local = {
   async setCheerCfg(c) { LS.set('cheerCfg', c); },
   async sendCheer(tid, mid, pn, name, to, k) { const all = LS.get('cheers_' + tid, {}); const id = mid + '_' + pn; const c = all[id] || { cm: mid, pn, name, na: 0, nb: 0 }; c[to === 'a' ? 'na' : 'nb']++; Object.assign(c, { to, k, at: now(), seq: (c.seq || 0) + 1 }); all[id] = c; LS.set('cheers_' + tid, all); },
   watchCheers(tid, mid, cb) { let last = ''; const tick = () => { const L = Object.values(LS.get('cheers_' + tid, {})).filter((c) => c.cm === mid); const v = JSON.stringify(L); if (v !== last) { last = v; cb(L); } }; tick(); const iv = setInterval(tick, 700); return () => clearInterval(iv); },
+  // نقاط «الهمة العالية» اليومية لكل طالب
+  async logHimma(pn, day, x) { const a = LS.get('himma', {}); const k = pn + '|' + day; const c = a[k] || { pn, d: day, hp: 0, ha: 0, hm: 0 }; c.hp = Math.min(200, c.hp + (x.pts || 0)); c.ha += x.ayat || 0; c.hm = Math.min(30, c.hm + (x.mins || 0)); a[k] = c; LS.set('himma', a); },
+  async listAllHimma() { return Object.values(LS.get('himma', {})); },
   async getChallengeCfg() { return LS.get('chCfg', { off: false }); },
   async setChallengeCfg(c) { LS.set('chCfg', c); },
   // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
@@ -511,6 +514,9 @@ async function makeCloud() {
     async listAllChallenges() { return (await getDocs(query(collection(db, 'challenges'), limit(5000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async getChallenge(id) { await ensureAnon(); const d = await getDoc(doc(db, 'challenges', id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
     async updateChallenge(id, patch) { await updateDoc(doc(db, 'challenges', id), patch); },
+    /** نقاط «الهمة العالية»: مستند يومي لكل طالب roster/{pn}/himma/{day} */
+    async logHimma(pn, day, x) { await setDoc(doc(db, 'roster', pn, 'himma', day), { d: day, hp: increment(x.pts || 0), ha: increment(x.ayat || 0), hm: increment(x.mins || 0), at: now() }, { merge: true }); },
+    async listAllHimma() { await ensureAnon(); return (await getDocs(collectionGroup(db, 'himma'))).docs.map((d) => ({ pn: d.ref.parent.parent.id, ...d.data() })); },
     async getCheerCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'cheerCfg')).catch(() => null); return d?.exists() ? d.data() : null; },
     async setCheerCfg(c) { await setDoc(doc(db, 'leaderboard', 'cheerCfg'), c); },
     /** مستند لكل مشجّع في المباراة داخل tourneys/{tid}/live (يكتبه كل مسجّل دخول): آخر تشجيع وعدّاده لكل لاعب */

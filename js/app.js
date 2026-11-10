@@ -7,6 +7,7 @@ import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
+import { earnHimma, himmaBonus, computeLists, mountLists, HM } from './lists.js';
 import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { openClassroom } from './classroom.js';
@@ -905,6 +906,15 @@ function viewStudent(app) {
   let data = { tasks: [], subs: [], classes: [], retakes: [], activity: [] };
   const me = s.student;
   const activeDays = () => new Set([...(data.activity || []).map((a) => a.d), ...data.subs.map((x) => (x.createdAt ? riyadhDay(new Date(x.createdAt)) : ''))].filter(Boolean));
+  /** نقاط «الهمة العالية» من التدريب: نقطة لكل آية صحيحة بسقوفها، أو دقائق لمن لا يعمل عنده التعرّف */
+  function earnTraining(sub) {
+    try {
+      const day = riyadhDay(), r = earnHimma(me.id, day, sub, hasRecognition);
+      if (!r.pts) return;
+      store.logHimma(me.id, day, r).catch((e) => console.warn('himma', e));
+      toast(`🌟 +${ar(r.pts)} ${r.mins ? (r.mins === 1 ? 'نقطة همّة (دقيقة تدريب)' : 'نقاط همّة (دقائق تدريب)') : r.pts === 1 ? 'نقطة همّة' : 'نقاط همّة'}`);
+    } catch (e) { console.warn('himma', e); }
+  }
   function logAct(kind, sec) {
     const day = riyadhDay();
     const before = streakOf(activeDays()).days;
@@ -1747,9 +1757,10 @@ function viewStudent(app) {
     try { [board, myRank] = await Promise.all([store.getBoard(), store.getMyRank(me).catch(() => null)]); }
     catch (e) { body.innerHTML = `<div class="empty">تعذر تحميل لوحة الشرف: ${esc(e.code || e.message)}</div>`; return; }
     if (tab !== 'honor') return;
-    body.innerHTML = '<div id="chCard"></div><div id="hbB"></div>';
+    body.innerHTML = '<div id="chCard"></div><div id="hbB"></div><div id="lsB" class="lists-wrap"></div>';
     drawChCard($('#chCard', body));
     mountBoard($('#hbB', body), board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
+    mountLists($('#lsB', body), board?.lists, { me: me.id, myClass: me.classId, myRank: myRank?.lists, classes: data.classes });
     // احتفال أول مرة يدخل فيها الخمسة الأوائل في صفه أو المرحلة (لكل شهر)
     const r = myRank?.month;
     if (r && ((r.cls && r.cls <= 5) || (r.stage && r.stage <= 5))) {
@@ -1766,7 +1777,7 @@ function viewStudent(app) {
     } catch {}
     if (tab !== 'practice') return;
     comp?.destroy();
-    comp = mountPractice(body, learn, (sec) => logAct('practice', sec), (sub) => recordProgress(sub));
+    comp = mountPractice(body, learn, (sec) => logAct('practice', sec), (sub) => { recordProgress(sub); earnTraining(sub); });
   }
 
   function pushInvite() {
@@ -1886,7 +1897,7 @@ function viewStudent(app) {
       $('#tkTalq', app).onclick = () => {
         comp?.destroy();
         $('.tq-invite', app)?.remove();
-        comp = mountTalqeen($('#tkBody', app), { ...range, reciter: pref.get('reciter', RECITERS[0].id), onActivity: (sec) => logAct('practice', sec), onAyahDone: (x) => recordProgress(x),
+        comp = mountTalqeen($('#tkBody', app), { ...range, reciter: pref.get('reciter', RECITERS[0].id), onActivity: (sec) => logAct('practice', sec), onAyahDone: (x) => { recordProgress(x); earnTraining(x); },
           onExit: () => openTask(t, rt), onFinish: () => openTask(t, rt), finishLabel: '🎙️ إلى التسميع (محاولتك الواحدة)' });
       };
     }
@@ -2159,7 +2170,7 @@ function viewTeacher(app) {
     }
     refreshPush(tOwner);
     loadFb(); loadLate(); pendingAiQueue();
-    Promise.all([store.listAllChallenges(), store.getChallengeCfg().catch(() => null)]).then(([L, cfg]) => { setChPts(cfg?.pts); D.challenges = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
+    Promise.all([store.listAllChallenges(), store.getChallengeCfg().catch(() => null), store.listAllHimma().catch((e) => { console.warn('himma', e); return []; })]).then(([L, cfg, H]) => { setChPts(cfg?.pts); D.challenges = L; D.himma = H; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
     store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
@@ -3747,7 +3758,7 @@ function viewTeacher(app) {
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
   const boardSubs = () => {
-    const base = D.subs.concat(D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : []);
+    const base = D.subs.concat(D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
   function schedulePublish() {
@@ -3768,6 +3779,12 @@ function viewTeacher(app) {
       const lj = JSON.stringify(live);
       if (lj !== publishBoard.liveJson) { publishBoard.liveJson = lj; store.saveSeason({ id: ss.id, live: { ...live, at: new Date().toISOString() } }).catch(() => {}); }
     }
+    // قائمتا «المتحدي الأكبر» و«صاحب الهمة العالية»: أفضل ١٠ للمدرسة ولكل صف، وترتيب كل طالب
+    try {
+      const L = computeLists(D.challenges || [], D.himma || [], D.students);
+      board.lists = L.lists;
+      Object.entries(L.ranks).forEach(([pn, r]) => { if (ranks[pn]) ranks[pn].lists = r; });
+    } catch (e) { console.warn('lists', e); }
     lastBoard = board;
     const json = JSON.stringify(board);
     if (json === lastBoardJson) return;
@@ -3776,6 +3793,27 @@ function viewTeacher(app) {
       await store.saveRanks(ranks, D.students);
       lastBoardJson = json;
     } catch (e) { console.warn('board publish', e); }
+  }
+  /** تصدير قائمة «المتحدي الأكبر» أو «صاحب الهمة العالية» كاملة (لا أفضل ١٠ فقط) */
+  function exportList(lists, kind, st) {
+    if (!window.XLSX) return toast('مكتبة Excel لم تُحمّل بعد. أعد المحاولة بعد لحظات.');
+    const full = computeLists(D.challenges || [], D.himma || [], D.students);
+    const R = full.ranks, rows = [];
+    D.students.forEach((s) => { const r = R[s.id]?.[kind]?.[st.p + 's']; if (r) rows.push({ s, r }); });
+    rows.sort((a, b) => a.r - b.r);
+    const per = st.p === 'm' ? new Date().toISOString().slice(0, 7) : null;
+    const chStats = (pn) => full.lists.ch[st.p].all.find((x) => x.pn === pn);
+    const data = rows.map(({ s, r }) => {
+      const base = { 'الترتيب': r, 'الطالب': s.name, 'الرقم': s.id, 'الصف': className(s.classId) };
+      if (kind === 'hm') { const H = (D.himma || []).filter((h) => h.pn === s.id && (!per || (h.d || '').startsWith(per))); return { ...base, 'نقاط الهمة': H.reduce((k, h) => k + (h.hp || 0), 0), 'آيات صحيحة': H.reduce((k, h) => k + (h.ha || 0), 0), 'دقائق': H.reduce((k, h) => k + (h.hm || 0), 0), 'أيام النشاط': H.filter((h) => h.hp > 0).length }; }
+      const L = (D.challenges || []).filter((c) => c.pns?.includes(s.id) && (!per || (c.createdAt || '').startsWith(per)));
+      const wins = L.filter((c) => chWinner(c) === s.id).length; const x = chStats(s.id);
+      return { ...base, 'الانتصارات': wins, 'التحديات': x?.played ?? '', 'نسبة الفوز %': x?.rate ?? '' };
+    });
+    if (!data.length) return toast('لا أحد في القائمة بعد.');
+    const ws = XLSX.utils.json_to_sheet(data); ws['!cols'] = Object.keys(data[0]).map(() => ({ wch: 16 }));
+    const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] }; XLSX.utils.book_append_sheet(wb, ws, kind === 'ch' ? 'المتحدي الأكبر' : 'الهمة العالية');
+    XLSX.writeFile(wb, `${kind === 'ch' ? 'المتحدي-الأكبر' : 'الهمة-العالية'}-${per || 'الكل'}.xlsx`);
   }
   function drawHonorT(body) {
     const { board } = computeBoard(boardSubs(), D.students, D.classes);
@@ -3791,12 +3829,14 @@ function viewTeacher(app) {
       <div class="card stack hero-adm" style="gap:10px;margin-bottom:16px" id="hrAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="ssAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
-      <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="hbBoard"></div>`;
+      <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="lsT" class="lists-wrap" style="margin-bottom:16px"></div><div id="hbBoard"></div>`;
     drawKhAdmin($('#khAdm', body));
     drawHeroAdmin($('#hrAdm', body));
     drawSeasonAdmin($('#ssAdm', body));
     $('#crGo', body).onclick = () => startClassroom($('#crScope', body).value);
     drawChAdmin($('#chAdm', body));
+    { const L = computeLists(D.challenges || [], D.himma || [], D.students);
+      mountLists($('#lsT', body), L.lists, { classes: D.classes, onExport: (k, st) => exportList(L.lists, k, st) }); }
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
     const pick = $('#mPick', body);
     if (pick) {

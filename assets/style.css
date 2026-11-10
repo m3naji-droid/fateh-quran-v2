@@ -951,3 +951,17 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .hero-proj .hp-cheer .cheer-box, .hero-proj .hp-cheer.cheer-box { overflow: visible; }
 .cheer-to .chip.on { background: var(--gold-soft, #f6ecd2); border-color: var(--gold); color: inherit; }
 .hero-proj .hp-cheer .ch-head span { font-size: 1.4rem; color: #fff; opacity: .9; }
+/* قائمتا «المتحدي الأكبر» و«صاحب الهمة العالية» */
+.lists-wrap { display: grid; gap: 14px; margin-top: 16px; }
+@media (min-width: 900px) { .lists-wrap { grid-template-columns: 1fr 1fr; } }
+.lists-card .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.lists-card .seg button { border: 0; background: transparent; padding: 6px 12px; font: inherit; font-size: .88rem; color: inherit; cursor: pointer; }
+.lists-card .seg button.on { background: var(--gold-soft, #f6ecd2); font-weight: 700; }
+.lists-ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lists-ol li { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 10px; }
+.lists-ol li:nth-child(-n+3) { background: color-mix(in srgb, var(--gold) 10%, transparent); }
+.lists-ol li.me { outline: 2px solid var(--gold); }
+.lists-ol .lr-n { text-align: center; font-weight: 700; }
+.lists-ol .lr-name { display: grid; }
+.lists-ol .lr-v { text-align: end; display: grid; }
+.lists-me { padding: 6px 8px; border-radius: 10px; background: var(--sheet, rgba(0,0,0,.03)); }
