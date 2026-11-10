@@ -57,8 +57,7 @@
     <b>٢. النموذج على الجوال</b>
     <div class="row">
       <label>الحجم<select id="mdl">
-        <option value="light">خفيف (نحو ٧٠ ميغابايت)</option>
-        <option value="q8">متوسط (نحو ١٢٠ ميغابايت)</option>
+        <option value="light">تلقائي (يجرّب الصيغ بالترتيب)</option>
       </select></label>
       <label>المعالج<select id="dev"><option value="auto">تلقائي</option><option value="webgpu">WebGPU</option><option value="wasm">المعالج العادي (WASM)</option></select></label>
       <button id="load" class="primary" type="button">نزّل النموذج</button>
@@ -94,7 +93,7 @@ import { align } from './js/align.js';
 
 const $ = (s) => document.querySelector(s);
 const MODEL = 'omartariq612/whisper-tiny-ar-quran-onnx';
-const DTYPES = { light: { encoder_model: 'q4', decoder_model_merged: 'fp16' }, q8: { encoder_model: 'quantized', decoder_model_merged: 'quantized' } };
+const DTYPES = { light: { encoder_model: 'q8', decoder_model_merged: 'q8' }, q8: { encoder_model: 'fp32', decoder_model_merged: 'q8' } };
 const stats = {};
 const ua = navigator.userAgent;
 stats['الجهاز'] = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'كمبيوتر';
@@ -136,7 +135,7 @@ $('#load').onclick = async () => {
       if (p.status === 'progress' && p.file) { files[p.file] = [p.loaded || 0, p.total || 0]; const L = Object.values(files), a = L.reduce((k, x) => k + x[0], 0), b = L.reduce((k, x) => k + x[1], 0); $('#pb').style.width = (b ? (a / b) * 100 : 0) + '%'; $('#lst').textContent = `جارٍ التنزيل… ${ar((a / 1048576).toFixed(0))} من ${ar((b / 1048576).toFixed(0))} ميغابايت`; }
     } };
     // نجرّب عدة تركيبات حتى تنجح إحداها، ونسجّل نتيجة كل محاولة (بعض متصفحات آيفون لا تشغّل بعض الصيغ)
-    const plan = [[device, DTYPES[$('#mdl').value]], ['wasm', DTYPES[$('#mdl').value]], ['wasm', DTYPES.q8], ['wasm', { encoder_model: 'fp32', decoder_model_merged: 'quantized' }]]
+    const plan = [['wasm', { encoder_model: 'q8', decoder_model_merged: 'q8' }], ['wasm', { encoder_model: 'uint8', decoder_model_merged: 'uint8' }], ['wasm', { encoder_model: 'fp32', decoder_model_merged: 'q8' }], [device, { encoder_model: 'fp32', decoder_model_merged: 'fp32' }], ['wasm', { encoder_model: 'q4', decoder_model_merged: 'q4' }]]
       .filter((x, i, A) => A.findIndex((y) => JSON.stringify(y) === JSON.stringify(x)) === i);
     let lastErr = null;
     for (const [dv, dt] of plan) {
