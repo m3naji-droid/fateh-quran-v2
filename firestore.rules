@@ -111,7 +111,13 @@ service cloud.firestore {
         && request.resource.data.ra == null && request.resource.data.rb == null;
       allow update: if isTeacher()
         || (isStudent(resource.data.a.pn) && resource.data.get('ra', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ra']))
-        || (isStudent(resource.data.b.pn) && resource.data.get('rb', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rb', 'declined']));
+        || (isStudent(resource.data.b.pn) && resource.data.get('rb', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rb', 'declined', 'acceptedAt']))
+        // الإلغاء: أحد الطرفين، مرة واحدة؛ مجاني للتحديات القديمة فقط (بلا v)، وبخصم للجديدة
+        || ((isStudent(resource.data.a.pn) || isStudent(resource.data.b.pn))
+          && resource.data.get('cancel', null) == null && resource.data.get('declined', false) != true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cancel'])
+          && isStudent(request.resource.data.cancel.by)
+          && request.resource.data.cancel.free == (resource.data.get('v', 0) < 2));
       allow delete: if isTeacher();
     }
     // صور الإعلانات (مصغّرة، صورة واحدة لكل إعلان، أقل من ٧٠٠ KB): يكتبها المعلم ويقرؤها الطلاب

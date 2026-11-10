@@ -5,7 +5,7 @@ import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder, i
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
-import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
+import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
 import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
 import { mountAyahOfDay } from './ayahday.js';
@@ -1242,7 +1242,7 @@ function viewStudent(app) {
     const L = myCh.filter((c) => chStatus(c) === 'open' && !chView(c, me.id).mine);
     host.innerHTML = L.slice(0, 2).map((c) => { const v = chView(c, me.id); return `<div class="ann-bar ch-bar" role="status"><span class="ann-ico">⚔️</span>
       <div class="ann-tx"><b>${v.incoming ? `${esc(v.other.name)} يتحداك!` : `تحديك مع ${esc(v.other.name)} بانتظار تسميعك`}</b><span>${esc(chLabel(c))} · ${esc(ar(timeLeft(c)))}</span></div>
-      <button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">ابدأ التحدي</button></div>`; }).join('');
+      <button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">${isStrict(c) && v.incoming && !c.acceptedAt ? 'اطّلع واقبل' : 'ابدأ التحدي'}</button></div>`; }).join('');
     $$('[data-chgo]', host).forEach((b) => (b.onclick = () => openChallenge(b.dataset.chgo)));
   }
   function drawChCard(host) {
@@ -1253,8 +1253,12 @@ function viewStudent(app) {
     const recent = myCh.filter((c) => chStatus(c) !== 'open').slice(0, 5);
     const row = (c) => {
       const v = chView(c, me.id), st = chStatus(c), w = chWinner(c);
-      const res = st === 'open' ? (v.mine ? `<span class="pill mute">سمّعت (${ar(v.mine.p)}٪) · بانتظار ${esc(v.other.name)}</span>` : `<button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">ابدأ</button>${v.incoming ? ` <button class="btn sm ghost" type="button" data-chno="${esc(c.id)}">اعتذار</button>` : ''}`)
+      const strict = isStrict(c), pending = strict && v.incoming && !c.acceptedAt;
+      const cancelBtn = st === 'open' && !pending && (!v.incoming || strict || v.mine) ? ` <button class="btn sm ghost" type="button" data-chx="${esc(c.id)}">${strict ? `إلغاء (−${ar(CH_PTS.cancel)})` : 'إلغاء مجاني'}</button>` : '';
+      const res = st === 'open' ? (pending ? `<button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">اطّلع واقبل</button> <button class="btn sm ghost" type="button" data-chno="${esc(c.id)}">اعتذار</button>`
+        : v.mine ? `<span class="pill mute">سمّعت (${ar(v.mine.p)}٪) · بانتظار ${esc(v.other.name)}</span>${cancelBtn}` : `<button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">ابدأ</button>${v.incoming && !strict ? ` <button class="btn sm ghost" type="button" data-chno="${esc(c.id)}">اعتذار</button>` : cancelBtn}`)
         : st === 'declined' ? '<span class="pill mute">اعتذر</span>'
+        : st === 'cancelled' ? (w === me.id ? '<span class="pill ok">🏆 فزت (ألغاه زميلك)</span>' : `<span class="pill mute">أُلغي${!c.cancel.free && c.cancel.by === me.id ? ` (−${ar(CH_PTS.cancel)})` : ''}</span>`)
         : w === me.id ? '<span class="pill ok">🏆 فزت</span>' : w === 'tie' ? '<span class="pill warn">🤝 تعادل</span>' : w ? '<span class="pill mute">خسرت</span>' : '<span class="pill mute">انتهى الوقت</span>';
       return `<li><div><b>${v.incoming ? '⬅' : '➡'} ${esc(v.other.name)}</b><span class="small muted">${esc(chLabel(c))}${st === 'open' ? ' · ' + esc(ar(timeLeft(c))) : v.mine && v.theirs ? ` · ${ar(v.mine.p)}٪ مقابل ${ar(v.theirs.p)}٪` : ''}</span></div><div class="row" style="gap:4px;flex-wrap:nowrap">${res}</div></li>`;
     };
@@ -1271,6 +1275,17 @@ function viewStudent(app) {
       if (!(await confirmBox('الاعتذار عن هذا التحدي؟ لن تُحسب نقاط لأحد.', 'اعتذار'))) return;
       try { await store.updateChallenge(b.dataset.chno, { declined: true }); await loadChallenges(); } catch (e) { toast('تعذر: ' + (e.code || e.message)); }
     }));
+    $$('[data-chx]', host).forEach((b) => (b.onclick = () => cancelChallenge(myCh.find((c) => c.id === b.dataset.chx))));
+  }
+  /** إلغاء تحدٍّ جارٍ: القديم مجاناً، والجديد يخسر من يلغيه نقطة (وإن كان زميله قد سمّع فالفوز له) */
+  async function cancelChallenge(c) {
+    if (!c || chStatus(c) !== 'open') return;
+    const v = chView(c, me.id), strict = isStrict(c);
+    const msg = strict ? `إلغاء التحدي مع ${v.other.name}؟ ستخسر ${CH_PTS.cancel === 1 ? 'نقطة واحدة' : ar(CH_PTS.cancel) + ' نقاط'} من لوحة الشرف${v.theirs ? `، وبما أن ${v.other.name} سمّع فالفوز له` : ''}. لا يمكن التراجع.` : `إلغاء التحدي مع ${v.other.name}؟ هذا التحدي من قبل نظام الإلغاء الجديد، فإلغاؤه مجاني بلا خصم.`;
+    if (!(await confirmBox(msg, strict ? `ألغِ وأخسر ${ar(CH_PTS.cancel)}` : 'ألغِ مجاناً'))) return;
+    const cancel = { by: me.id, at: new Date().toISOString(), free: !strict };
+    try { await store.updateChallenge(c.id, { cancel }); c.cancel = cancel; toast(strict ? 'أُلغي التحدي.' : 'أُلغي التحدي مجاناً.'); await loadChallenges(); draw(); }
+    catch (e) { toast('تعذر الإلغاء: ' + (e.code || e.message)); }
   }
   async function newChallenge() {
     openModal('<div class="loading">جارٍ تحميل زملائك…</div>');
@@ -1290,10 +1305,12 @@ function viewStudent(app) {
       e.preventDefault();
       const mate = mates.find((x) => x.id === $('#chMate', m).value); if (!mate) return toast('اختر زميلك.');
       if (rng.to - rng.from + 1 > 20) return toast('اختر مقطعاً لا يزيد على ٢٠ آية.');
-      const btn = e.submitter; btn.disabled = true;
+      const btn = e.submitter;
+      if (!(await confirmBox(`⚠️ قبل الإرسال: التحدي لا يُلغى. إن أردت إلغاءه بعد إرساله ستخسر ${CH_PTS.cancel === 1 ? 'نقطة واحدة' : ar(CH_PTS.cancel) + ' نقاط'} من لوحة الشرف مباشرة. هل أنت مستعد لتحدي ${mate.name}؟`, 'نعم، أرسل التحدي'))) return;
+      btn.disabled = true;
       const cls = data.classes.find((c) => c.id === me.classId);
       const now = new Date();
-      const c = { pns: [me.id, mate.id], a: { pn: me.id, name: me.name }, b: { pn: mate.id, name: mate.name }, classId: me.classId, className: cls?.name || '', surah: rng.surah, from: rng.from, to: rng.to, label: '', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CH_HOURS * 3600e3).toISOString(), ra: null, rb: null };
+      const c = { pns: [me.id, mate.id], a: { pn: me.id, name: me.name }, b: { pn: mate.id, name: mate.name }, classId: me.classId, className: cls?.name || '', surah: rng.surah, from: rng.from, to: rng.to, label: '', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CH_HOURS * 3600e3).toISOString(), ra: null, rb: null, v: CH_V };
       c.label = chLabel(c);
       try {
         const id = await store.createChallenge(c);
@@ -1317,6 +1334,23 @@ function viewStudent(app) {
     $('#chBack', app).onclick = () => { comp?.destroy(); comp = null; tab = 'honor'; draw(); };
     const body = $('#chBody', app);
     if (v.mine || st !== 'open') return showChResult(body, c);
+    // التحديات الجديدة: شاشة قبول قبل البدء، تنبّه أن التحدي لا يُلغى إلا بخسارة نقطة
+    if (isStrict(c) && v.incoming && !c.acceptedAt) {
+      body.innerHTML = `<div class="card stack ch-accept" style="gap:12px"><h2 style="margin:0">⚔️ ${esc(v.other.name)} يتحداك!</h2>
+        <p style="margin:0">المقطع: <b>${esc(chLabel(c))}</b> · تسميع غيباً، ومحاولة واحدة لكلٍّ منكما · ${esc(ar(timeLeft(c)))}.</p>
+        <div class="notice">⚠️ <b>التحدي لا يُلغى بعد قبوله.</b> إن قبلته ثم أردت إلغاءه ستخسر ${CH_PTS.cancel === 1 ? 'نقطة واحدة' : ar(CH_PTS.cancel) + ' نقاط'} من لوحة الشرف مباشرة. أما الاعتذار الآن قبل القبول فلا خصم فيه.</div>
+        <div class="row"><button class="btn gold" type="button" id="chAcc">أقبل التحدي</button><button class="btn ghost" type="button" id="chDec">أعتذر الآن (بلا خصم)</button></div></div>`;
+      $('#chAcc', body).onclick = async (e) => {
+        e.target.disabled = true;
+        try { const at = new Date().toISOString(); await store.updateChallenge(c.id, { acceptedAt: at }); c.acceptedAt = at; openChallenge(c.id); }
+        catch (x) { e.target.disabled = false; toast('تعذر: ' + (x.code || x.message)); }
+      };
+      $('#chDec', body).onclick = async () => {
+        if (!(await confirmBox('الاعتذار عن هذا التحدي؟ لا خصم لأنك لم تقبله بعد.', 'اعتذار'))) return;
+        try { await store.updateChallenge(c.id, { declined: true }); await loadChallenges(); tab = 'honor'; draw(); } catch (x) { toast('تعذر: ' + (x.code || x.message)); }
+      };
+      return;
+    }
     body.innerHTML = '<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً، بلا تلميح، ومحاولة واحدة فقط: النتيجة تُحتسب عند أول إيقاف. استعد جيداً ثم ابدأ.</div><div id="chRc"></div>';
     comp = mountRecite($('#chRc', body), {
       surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true,
@@ -1340,7 +1374,9 @@ function viewStudent(app) {
     const v = chView(c, me.id), st = chStatus(c), w = chWinner(c);
     const tile = (who, r) => `<div class="ch-tile${w === who.pn ? ' win' : ''}"><span>${esc(who.name)}</span><b>${r ? ar(r.p) + '٪' : '—'}</b><small>${r ? `${ar(r.wpm)} كلمة/دقيقة` : st === 'open' ? 'لم يسمّع بعد' : 'لم يشارك'}</small>${w === who.pn ? '<i>🏆</i>' : ''}</div>`;
     const head = st === 'open' ? `سمّعت بدقة ${ar(v.mine.p)}٪، والآن ننتظر ${esc(v.other.name)} (${esc(ar(timeLeft(c)))}).`
-      : st === 'declined' ? 'اعتذر عن التحدي.' : w === 'tie' ? `🤝 تعادل! +${ar(CH_PTS.tie)} نقطة لكلٍّ منكما.` : w === me.id ? `🏆 فزت بالتحدي! +${ar(CH_PTS.win)} نقاط في لوحة الشرف.` : w ? `انتهى التحدي لصالح ${esc(v.other.name)}. ${v.mine ? `+${ar(CH_PTS.lose)} نقطة على مشاركتك.` : ''}` : 'انتهى الوقت ولم يسمّع أحد.';
+      : st === 'declined' ? 'اعتذر عن التحدي.'
+      : st === 'cancelled' ? (w === me.id ? `🏆 ألغى ${esc(v.other.name)} التحدي بعد تسميعك، فالفوز لك! +${ar(CH_PTS.win)} نقاط.` : c.cancel.by === me.id ? `أُلغي التحدي${c.cancel.free ? ' مجاناً' : ` (−${ar(CH_PTS.cancel)})`}.` : `ألغى ${esc(v.other.name)} التحدي.`)
+      : w === 'tie' ? `🤝 تعادل! +${ar(CH_PTS.tie)} نقطة لكلٍّ منكما.` : w === me.id ? `🏆 فزت بالتحدي! +${ar(CH_PTS.win)} نقاط في لوحة الشرف.` : w ? `انتهى التحدي لصالح ${esc(v.other.name)}. ${v.mine ? `+${ar(CH_PTS.lose)} نقطة على مشاركتك.` : ''}` : 'انتهى الوقت ولم يسمّع أحد.';
     body.innerHTML = `<div class="card stack ch-result" style="gap:14px"><h2 style="margin:0">${head}</h2>
       <div class="ch-vs">${tile(v.me, v.mine)}<span class="ch-x">⚔️</span>${tile(v.other, v.theirs)}</div>
       <div class="row"><button class="btn primary" type="button" id="chHome">إلى لوحة الشرف</button>${st !== 'open' && chCfg.off !== true ? '<button class="btn gold" type="button" id="chAgain">تحدٍّ جديد</button>' : ''}</div></div>`;
@@ -4159,7 +4195,7 @@ function viewTeacher(app) {
   }
 
   /* --- إدارة التحديات الودّية --- */
-  const chResult = (c) => { const w = chWinner(c), st = chStatus(c); return st === 'open' ? 'جارٍ' : st === 'declined' ? 'اعتذار' : w === 'tie' ? 'تعادل' : w ? '🏆 ' + (w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'; };
+  const chResult = (c) => { const w = chWinner(c), st = chStatus(c); return st === 'open' ? (isStrict(c) && !c.acceptedAt ? 'بانتظار القبول' : 'جارٍ') : st === 'declined' ? 'اعتذار' : st === 'cancelled' ? `أُلغي من ${c.cancel.by === c.a.pn ? c.a.name : c.b.name}${c.cancel.free ? ' (مجاناً)' : ` (−${CH_PTS.cancel})`}${w ? ` · 🏆 ${w === c.a.pn ? c.a.name : c.b.name}` : ''}` : w === 'tie' ? 'تعادل' : w ? '🏆 ' + (w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'; };
   async function drawChAdmin(host) {
     const L = D.challenges || [];
     const ym = new Date().toISOString().slice(0, 7);
@@ -4171,7 +4207,7 @@ function viewTeacher(app) {
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3>
         <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
       <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}، ومنذ البداية ${ar(L.length)}. حد كل طالب ${ar(CH_DAILY)} تحديات يومياً.</p>
-      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="chLog">📋 سجل التحديات كاملاً</button><button class="btn sm" type="button" id="chPtsBtn">⚙️ نقاط التحدي: فوز ${ar(CH_PTS.win)} · مشاركة ${ar(CH_PTS.lose)} · تعادل ${ar(CH_PTS.tie)}</button></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="chLog">📋 سجل التحديات كاملاً</button><button class="btn sm" type="button" id="chPtsBtn">⚙️ نقاط التحدي: فوز ${ar(CH_PTS.win)} · مشاركة ${ar(CH_PTS.lose)} · تعادل ${ar(CH_PTS.tie)} · إلغاء −${ar(CH_PTS.cancel)}</button></div>
       ${month.length ? `<details><summary class="small">آخر تحديات هذا الشهر</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span></div><span class="small">${esc(chResult(c))}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`).join('')}</ul></details>` : ''}`;
     $('#chOn', host).onchange = async (e) => {
       try { cfg = { ...cfg, off: !e.target.checked }; await store.setChallengeCfg(cfg); toast(e.target.checked ? 'فُعّلت التحديات.' : 'أُوقفت التحديات مؤقتاً، ولا يستطيع الطلاب إنشاء تحدٍّ جديد.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); e.target.checked = !e.target.checked; }
@@ -4180,12 +4216,12 @@ function viewTeacher(app) {
     $('#chPtsBtn', host).onclick = () => openModal(`<form id="cpF" class="stack" style="gap:12px">
         <h2>⚙️ نقاط تحدّي الزملاء</h2>
         <p class="small muted" style="margin:0">تُضاف إلى لوحة الشرف عند حسم كل تحدٍّ. التغيير يسري على حساب النقاط كله، ومنه التحديات السابقة، أما نتائج الأشهر المعلنة فتبقى كما هي.</p>
-        ${[['win', '🏆 الفائز'], ['lose', '🤝 المشارك الخاسر (إن سمّع)'], ['tie', '⚖️ التعادل (لكلٍّ منهما)']].map(([k, l]) => `<label class="row" style="gap:10px;justify-content:space-between"><span>${l}</span><input type="number" id="cp_${k}" min="0" max="20" step="0.5" value="${CH_PTS[k]}" style="width:90px" inputmode="decimal"></label>`).join('')}
-        <div class="row"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="cpDef">القيم الافتراضية (٣ · ١ · ٢)</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+        ${[['win', '🏆 الفائز'], ['lose', '🤝 المشارك الخاسر (إن سمّع)'], ['tie', '⚖️ التعادل (لكلٍّ منهما)'], ['cancel', '✖️ خصم إلغاء التحدي بعد قبوله']].map(([k, l]) => `<label class="row" style="gap:10px;justify-content:space-between"><span>${l}</span><input type="number" id="cp_${k}" min="0" max="20" step="0.5" value="${CH_PTS[k]}" style="width:90px" inputmode="decimal"></label>`).join('')}
+        <div class="row"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="cpDef">القيم الافتراضية (٣ · ١ · ٢ · خصم ١)</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
       $('#cpDef', m).onclick = () => Object.entries(CH_DEFAULT_PTS).forEach(([k, v]) => ($('#cp_' + k, m).value = v));
       $('#cpF', m).onsubmit = async (e) => {
         e.preventDefault();
-        const pts = { win: +$('#cp_win', m).value, lose: +$('#cp_lose', m).value, tie: +$('#cp_tie', m).value };
+        const pts = { win: +$('#cp_win', m).value, lose: +$('#cp_lose', m).value, tie: +$('#cp_tie', m).value, cancel: +$('#cp_cancel', m).value };
         if (Object.values(pts).some((v) => !Number.isFinite(v) || v < 0 || v > 20)) return toast('اكتب أرقاماً من ٠ إلى ٢٠.');
         try { cfg = { ...cfg, pts }; await store.setChallengeCfg(cfg); setChPts(pts); closeModal(); schedulePublish(); toast('حُفظت نقاط التحدي، وستُحدَّث لوحة الشرف.'); drawBody(); }
         catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); }
@@ -4219,13 +4255,14 @@ function viewTeacher(app) {
       $('#clM', m).onchange = (e) => { f.ym = e.target.value; paint(); };
       $('#clC', m).onchange = (e) => { f.cls = e.target.value; paint(); };
       $('#clQ', m).oninput = (e) => { f.q = e.target.value.trim(); paint(); };
+      const ptsOf = (c, pn) => chBonus([c]).filter((x) => x.pn === pn).reduce((k, x) => k + x.bonus, 0);
       $('#clX', m).onclick = () => {
         if (!window.XLSX) { toast('مكتبة Excel لم تُحمّل بعد. أعد المحاولة بعد لحظات.'); return; }
         const data = rows().map((c) => { const w = chWinner(c); return {
           'التاريخ': fmtDate(c.createdAt), 'الصف': c.className || className(c.classId) || '', 'المقطع': c.label || '',
           'الطالب الأول': c.a.name, 'رقمه': c.a.pn, 'دقته %': c.ra?.p ?? '', 'سرعته (كلمة/دقيقة)': c.ra?.wpm ?? '',
           'الطالب الثاني': c.b.name, 'رقمه ': c.b.pn, 'دقته % ': c.rb?.p ?? '', 'سرعته (كلمة/دقيقة) ': c.rb?.wpm ?? '',
-          'النتيجة': chResult(c).replace('🏆 ', 'فاز: '), 'نقاط الأول': w === 'tie' ? CH_PTS.tie : w === c.a.pn ? CH_PTS.win : w && c.ra ? CH_PTS.lose : 0, 'نقاط الثاني': w === 'tie' ? CH_PTS.tie : w === c.b.pn ? CH_PTS.win : w && c.rb ? CH_PTS.lose : 0 }; });
+          'النتيجة': chResult(c).replace('🏆 ', 'فاز: '), 'نقاط الأول': ptsOf(c, c.a.pn), 'نقاط الثاني': ptsOf(c, c.b.pn) }; });
         const ws = XLSX.utils.json_to_sheet(data); ws['!cols'] = Object.keys(data[0] || {}).map(() => ({ wch: 16 }));
         const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] }; XLSX.utils.book_append_sheet(wb, ws, 'التحديات');
         XLSX.writeFile(wb, `تحديات-الزملاء-${f.ym === 'all' ? 'الكل' : f.ym}.xlsx`);

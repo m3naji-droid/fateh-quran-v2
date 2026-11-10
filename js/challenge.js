@@ -2,16 +2,19 @@
 // الفائز: الأدق، ثم الأسرع (كلمات في الدقيقة) عند التعادل. النقاط: الفائز ٣، والمشارك ١، والتعادل ٢ لكلٍّ منهما.
 export const CH_HOURS = 48;
 export const CH_DAILY = 3;
-export const CH_DEFAULT_PTS = { win: 3, lose: 1, tie: 2 };
+export const CH_DEFAULT_PTS = { win: 3, lose: 1, tie: 2, cancel: 1 };
+/** التحديات الجديدة (v: 2) لا تُلغى مجاناً: من يلغيها بعد قبولها يخسر نقطة. القديمة تُلغى مجاناً. */
+export const CH_V = 2;
+export const isStrict = (c) => (c?.v || 0) >= CH_V;
 /** نقاط التحدي في لوحة الشرف: يضبطها المعلم (leaderboard/challengeCfg.pts)، وهذه قيمها الافتراضية */
 export const CH_PTS = { ...CH_DEFAULT_PTS };
 export function setChPts(p) {
   const n = (v, d) => (Number.isFinite(+v) && +v >= 0 && +v <= 20 ? Math.round(+v * 2) / 2 : d);
-  Object.assign(CH_PTS, { win: n(p?.win, CH_DEFAULT_PTS.win), lose: n(p?.lose, CH_DEFAULT_PTS.lose), tie: n(p?.tie, CH_DEFAULT_PTS.tie) });
+  Object.assign(CH_PTS, { win: n(p?.win, CH_DEFAULT_PTS.win), lose: n(p?.lose, CH_DEFAULT_PTS.lose), tie: n(p?.tie, CH_DEFAULT_PTS.tie), cancel: n(p?.cancel, CH_DEFAULT_PTS.cancel) });
 }
 
 export const chStatus = (c, now = Date.now()) =>
-  c.declined ? 'declined' : c.ra && c.rb ? 'done' : now > new Date(c.expiresAt).getTime() ? 'expired' : 'open';
+  c.cancel ? 'cancelled' : c.declined ? 'declined' : c.ra && c.rb ? 'done' : now > new Date(c.expiresAt).getTime() ? 'expired' : 'open';
 
 /** الفائز: رقم الطالب، أو 'tie'، أو null (لم يُحسم/لا أحد) */
 export function chWinner(c, now = Date.now()) {
@@ -23,6 +26,8 @@ export function chWinner(c, now = Date.now()) {
     return 'tie';
   }
   if (st === 'expired') { if (c.ra && !c.rb) return c.a.pn; if (c.rb && !c.ra) return c.b.pn; }
+  // ألغاه أحدهما (بخصم) بعد أن سمّع الآخر: الفوز لمن سمّع
+  if (st === 'cancelled' && !c.cancel.free) { const other = c.cancel.by === c.a.pn ? c.b : c.a, r = other === c.a ? c.ra : c.rb; if (r) return other.pn; }
   return null;
 }
 
@@ -30,8 +35,10 @@ export function chWinner(c, now = Date.now()) {
 export function chBonus(list, now = Date.now()) {
   const out = [];
   list.forEach((c) => {
+    if (c.cancel && !c.cancel.free && CH_PTS.cancel) out.push({ pn: c.cancel.by, bonus: -CH_PTS.cancel, createdAt: c.cancel.at || c.createdAt });
     const w = chWinner(c, now);
     if (!w) return;
+    if (c.cancel) { out.push({ pn: w, bonus: CH_PTS.win, createdAt: c.cancel.at || c.createdAt }); return; }
     const at = [c.ra?.at, c.rb?.at].filter(Boolean).sort().pop() || c.expiresAt;
     if (w === 'tie') { out.push({ pn: c.a.pn, bonus: CH_PTS.tie, createdAt: at }, { pn: c.b.pn, bonus: CH_PTS.tie, createdAt: at }); return; }
     out.push({ pn: w, bonus: CH_PTS.win, createdAt: at });
