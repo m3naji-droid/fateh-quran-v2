@@ -70,7 +70,7 @@
   <section class="card">
     <b>٣. سمّع أو اختر ملف تسجيل</b>
     <div class="row">
-      <button id="rec" type="button" disabled>🎙️ ابدأ التسجيل</button>
+      <button id="rec" type="button">🎙️ ابدأ التسجيل</button>
       <label style="display:inline-grid">أو ملف صوتي<input id="file" type="file" accept="audio/*,video/webm"></label>
     </div>
     <div id="rst" class="muted">نزّل النموذج أولاً.</div>
@@ -135,19 +135,28 @@ $('#load').onclick = async () => {
     const opts = { dtype: DTYPES[$('#mdl').value], device, progress_callback: (p) => {
       if (p.status === 'progress' && p.file) { files[p.file] = [p.loaded || 0, p.total || 0]; const L = Object.values(files), a = L.reduce((k, x) => k + x[0], 0), b = L.reduce((k, x) => k + x[1], 0); $('#pb').style.width = (b ? (a / b) * 100 : 0) + '%'; $('#lst').textContent = `جارٍ التنزيل… ${ar((a / 1048576).toFixed(0))} من ${ar((b / 1048576).toFixed(0))} ميغابايت`; }
     } };
-    try { asr = await pipeline('automatic-speech-recognition', MODEL, opts); stats['المعالج المستخدم'] = device; }
-    catch (e) { if (device !== 'webgpu') throw e; asr = await pipeline('automatic-speech-recognition', MODEL, { ...opts, device: 'wasm' }); stats['المعالج المستخدم'] = 'wasm (فشل WebGPU)'; }
+    // نجرّب عدة تركيبات حتى تنجح إحداها، ونسجّل نتيجة كل محاولة (بعض متصفحات آيفون لا تشغّل بعض الصيغ)
+    const plan = [[device, DTYPES[$('#mdl').value]], ['wasm', DTYPES[$('#mdl').value]], ['wasm', DTYPES.q8], ['wasm', { encoder_model: 'fp32', decoder_model_merged: 'quantized' }]]
+      .filter((x, i, A) => A.findIndex((y) => JSON.stringify(y) === JSON.stringify(x)) === i);
+    let lastErr = null;
+    for (const [dv, dt] of plan) {
+      const tag = `${dv} · ${dt.encoder_model}/${dt.decoder_model_merged}`;
+      try { $('#lst').textContent = `جارٍ التجربة: ${tag}…`; asr = await pipeline('automatic-speech-recognition', MODEL, { ...opts, device: dv, dtype: dt }); stats['المعالج المستخدم'] = tag; break; }
+      catch (e) { lastErr = e; stats['فشل: ' + tag] = errText(e); paintStats(); }
+    }
+    if (!asr) throw lastErr;
     const mb = Object.values(files).reduce((k, x) => k + x[1], 0) / 1048576;
     stats['حجم التنزيل'] = mb ? `${ar(mb.toFixed(0))} ميغابايت` : 'من ذاكرة الجوال (نُزّل سابقاً)';
     stats['زمن التحميل'] = `${ar(((performance.now() - t0) / 1000).toFixed(1))} ثانية`;
     $('#pb').style.width = '100%'; $('#lst').textContent = '✓ النموذج جاهز على هذا الجوال.';
     $('#rec').disabled = false; $('#rst').textContent = 'اضغط «ابدأ التسجيل» وسمّع المقطع، ثم أوقفه.';
   } catch (e) {
-    $('#lst').textContent = '✗ تعذّر تنزيل النموذج أو تشغيله: ' + (e.message || e); stats['خطأ التحميل'] = String(e.message || e).slice(0, 160); $('#load').disabled = false;
+    $('#lst').textContent = '✗ تعذّر تشغيل النموذج بكل التركيبات: ' + errText(e); stats['خطأ التحميل'] = errText(e); $('#load').disabled = false;
   }
   paintStats();
 };
 
+function errText(e) { if (typeof e === 'number') return `خطأ داخلي في محرك التشغيل (${e})، غالباً نقص ذاكرة أو صيغة غير مدعومة`; return String(e?.message || e).slice(0, 160); }
 // تحويل الصوت إلى ١٦ كيلوهرتز أحادي كما يتوقع Whisper
 async function toPCM16k(blob) {
   const buf = await blob.arrayBuffer();
@@ -183,7 +192,8 @@ $('#rec').onclick = async () => {
     stream.getTracks().forEach((t) => t.stop()); rec = null;
     $('#rec').textContent = '🎙️ ابدأ التسجيل'; $('#rec').classList.remove('rec');
     setTimeout(() => paintScore('A', srText), 700);
-    try { await runWhisper(new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })); } catch (e) { $('#rst').textContent = '✗ فشل التحليل: ' + (e.message || e); stats['خطأ التحليل'] = String(e.message || e).slice(0, 160); paintStats(); }
+    if (!asr) { $('#rst').textContent = 'سُجّلت نتيجة تعرّف المتصفح فقط، لأن النموذج لم يُنزَّل.'; return; }
+    try { await runWhisper(new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })); } catch (e) { $('#rst').textContent = '✗ فشل التحليل: ' + errText(e); stats['خطأ التحليل'] = errText(e); paintStats(); }
   };
   rec.start(500);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
