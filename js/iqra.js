@@ -5,10 +5,10 @@
 import { store, blobToB64, b64ToBlob } from './store.js';
 import { toArabicDigits as ar } from './quran.js';
 import { RecitationSession, hasRecorder, micErrorText } from './speech.js';
-import { aiEnabled, phonemes } from './tajweed-ai.js';
+import { aiEnabled, phonemes, ttsGen } from './tajweed-ai.js';
 import { judgePhonemes, judgeTranscript } from './phon.js';
 import { LESSONS, CONCEPTS, itemOf, lessonByN } from './iqra-data.js';
-import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, prefetch, probeReciter, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob } from './iqra-audio.js';
+import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, prefetch, probeReciter, setGen, srcFor, GEN_VOICES, genOn, playGenSample, normText, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob } from './iqra-audio.js';
 import { tajSteps } from './iqra-taj.js';
 
 export const IQ_DEFAULT = { count: 15, pass: 85, pts: 3, taj: 13 };
@@ -104,6 +104,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   (async () => {
     probeReciter();
     [cfg, st] = await Promise.all([iqraCfg(), store.getIqra(me.id).catch(() => null), audioIndex()]);
+    setGen({ on: !!cfg.genOn, voice: cfg.genVoice || 'ar-XA-Wavenet-B', rate: cfg.genRate || 0.8 });
     st = st || { placed: false, cur: 1, mastered: {}, wrong: {}, sessions: [] };
     st.mastered = st.mastered || {}; st.wrong = st.wrong || {}; st.sessions = st.sessions || [];
     await settleAwaiting();
@@ -282,7 +283,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
       /* --- مرحلة التجريد: الكلمة حرفاً حرفاً --- */
       // كل خطوة كما في الكتاب: اسم الحرف، ثم اسم حركته، ثم صوته، ثم ما بُني مجموعاً بتشكيله
       // «فا فتحة فَ» ← «را ساكنة فَرْ» ← «قاف فتحتان فَرْقًا». والخطوة الأخيرة تُختم بالكلمة كاملة (صوت القارئ أو المعلم)
-      const src1 = (t) => (hasRec(t) ? { key: keyOf(t), fallback: t } : { tts: t });
+      const src1 = (t) => srcFor(t);
       const stepAudio = (sp) => {
         const spoken = steps.filter((x) => !x.silent), last = spoken[spoken.length - 1] === sp, firstOfWord = !steps.some((x) => !x.silent && x.wi === sp.wi && steps.indexOf(x) < steps.indexOf(sp));
         const list = sp.say.map(src1);
@@ -294,7 +295,8 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
       const paintTaj = () => {
         const it = items[k];
         steps = steps || tajSteps(it.s);
-        if (ts === 0) { steps.forEach((x) => prefetch((x.say || []).concat(x.syl ? [x.syl] : []).filter((n) => hasRec(n)).map((n) => ({ key: keyOf(n) })))); prefetch(sourcesFor(it).list); }
+        if (ts === 0) { steps.slice(0, 3).forEach((x) => prefetch((x.say || []).concat(x.syl ? [x.syl] : [], x.cum ? [x.cum.replace(/\u0671/g, 'ا')] : []).map(srcFor))); prefetch(sourcesFor(it).list); }
+        else if (steps[ts + 1]) { const x = steps[ts + 1]; prefetch((x.say || []).concat(x.syl ? [x.syl] : [], x.cum ? [x.cum.replace(/\u0671/g, 'ا')] : []).map(srcFor)); }
         const sp = steps[ts];
         const T = it.s, Z = '\u200d';
         const hl = sp ? esc(T.slice(0, sp.at)) + (sp.at ? Z : '') + '<mark class="' + (sp.silent ? 'sil' : '') + '">' + Z + esc(T.slice(sp.at, sp.end)) + Z + '</mark>' + (sp.end < T.length ? Z : '') + esc(T.slice(sp.end)) : esc(T);
@@ -403,6 +405,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const R = await Promise.all(pns.map((p) => store.listIqraRev(p).catch(() => [])));
     revs = R.flat().filter((r) => r.status === 'pending');
     await audioIndex(true); probeReciter();
+    setGen({ on: !!cfg.genOn, voice: cfg.genVoice || 'ar-XA-Wavenet-B', rate: cfg.genRate || 0.8 });
     flags = await store.listIqraFlags().catch(() => []);
     onChange({ cfg, states });
     if (alive) draw();
@@ -426,6 +429,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
         </div>
       </div>
 
+      ${genCard()}
       ${studioCard()}
       ${flagsCard()}
       ${previewCard()}
@@ -466,7 +470,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
       try { await store.setIqraCfg(cfg); toast('حُفظت إعدادات «اقرأ وارتقِ».'); onChange({ cfg, states }); } catch (e) { toast('تعذّر الحفظ: ' + e.message); }
       draw();
     };
-    wireAudio();
+    wireAudio(); wireGen();
     host.querySelector('#iqQ').oninput = (e) => { q = e.target.value.trim(); const pos = e.target.selectionStart; draw(); const i = host.querySelector('#iqQ'); i.focus(); i.setSelectionRange(pos, pos); };
     host.querySelector('#iqCls').onchange = (e) => { cls = e.target.value; draw(); };
     host.querySelectorAll('[data-pn]').forEach((b) => (b.onchange = async () => {
@@ -547,6 +551,54 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
       li.querySelector('[data-frec]').onclick = () => openStudio([it], 'بلاغ نطق · الدرس ' + ar(f.n || 0), '', 0, async () => { await store.deleteIqraFlags(f.key).catch(() => {}); flags = flags.filter((x) => x.key !== f.key); });
       li.querySelector('[data-fok]').onclick = async () => { await store.deleteIqraFlags(f.key).catch(() => {}); flags = flags.filter((x) => x.key !== f.key); draw(); };
     });
+  }
+  /* --- الصوت المولَّد --- */
+  const SAMPLES = ['بَ', 'بِ', 'بُ', 'أَمْ', 'أَبْ', 'أَبَّ', 'بًا', 'بٌ', 'بٍ', 'بَا', 'بُو', 'بِي', 'فَرْ', 'فَرْقًا', 'يَشْ', 'يَشَّ', 'قَافْ', 'فَتْحَة', 'سَاكِنَة', 'فَتْحَتَان', 'كَتَبَ', 'ٱلشَّمْسُ'];
+  let genV = null, genJob = null;
+  function genCard() {
+    genV = genV || cfg.genVoice || 'ar-XA-Wavenet-B';
+    return `<div class="card stack">
+      <div class="row" style="justify-content:space-between"><h3>🗣 الصوت المولَّد</h3><span class="pill ${cfg.genOn ? 'ok' : 'mute'}">${cfg.genOn ? 'مفعّل: ' + esc((GEN_VOICES.find((v) => v[0] === cfg.genVoice) || [])[1] || '') : 'غير مفعّل'}</span></div>
+      <p class="small muted" style="margin:0">صوت عربي عالي الجودة من Google يُولَّد مرة ويُحفظ، ويُسمع على كل الأجهزة (ومنها آيفون). يُستعمل لما ليس له تسجيل منك ولا صوت قارئ: المقاطع وأجزاء التجريد. اختر صوتاً واستمع للعيّنة، ثم اعتمده.</p>
+      <div class="row" role="radiogroup">${GEN_VOICES.map(([v, l]) => `<button type="button" class="chip iq-tg${v === genV ? ' sel' : ''}" data-gv="${v}">${l}</button>`).join('')}</div>
+      <div class="iq-grid">${SAMPLES.map((t) => `<button type="button" class="iq-cell" data-gs="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <div class="row"><button class="btn primary" type="button" id="gOn">${cfg.genOn && cfg.genVoice === genV ? '✓ معتمد' : 'اعتمد هذا الصوت'}</button>
+        ${cfg.genOn ? '<button class="btn" type="button" id="gAll">ولّد كل أصوات الكتاب مسبقاً</button><button class="btn ghost" type="button" id="gOff">إيقاف الصوت المولَّد</button>' : ''}</div>
+      <div class="small muted" id="gMsg"></div></div>`;
+  }
+  /** كل النصوص التي قد تُنطق بالصوت المولَّد: اللبنات، وأجزاء التجريد، وما ليس له صوت قارئ */
+  function allGenTexts() {
+    const set = new Set();
+    recordingPlan().forEach((g) => g.items.forEach((x) => set.add(normText(x.s))));
+    LESSONS.forEach((L) => L.items.forEach((x) => {
+      const it = itemOf(x, L.n);
+      if (!sourcesFor(it).kind.match(/reciter|teacher/)) set.add(normText(it.s));
+      if (L.n >= 4) tajSteps(it.s).forEach((sp) => { if (sp.silent) return; if (sp.syl) set.add(normText(sp.syl)); if (sp.cum) set.add(normText(sp.cum.replace(/\u0671/g, 'ا'))); });
+    }));
+    return [...set].filter((t) => t && t.length <= 120);
+  }
+  function wireGen() {
+    host.querySelectorAll('[data-gv]').forEach((b) => (b.onclick = () => { genV = b.dataset.gv; draw(); }));
+    host.querySelectorAll('[data-gs]').forEach((b) => (b.onclick = () => { const m = host.querySelector('#gMsg'); if (m) m.textContent = 'يُولَّد الصوت أول مرة (ثوانٍ)…'; playGenSample(b.dataset.gs, genV).done.then(() => { const m2 = host.querySelector('#gMsg'); if (m2 && m2.textContent.startsWith('يُولَّد')) m2.textContent = ''; }); }));
+    const on = host.querySelector('#gOn');
+    if (on) on.onclick = async () => { cfg = { ...cfg, genOn: true, genVoice: genV, genRate: 0.8 }; setGen({ on: true, voice: genV, rate: 0.8 }); try { await store.setIqraCfg(cfg); toast('اعتُمد الصوت المولَّد.'); } catch (e) { toast('تعذّر الحفظ: ' + e.message); } draw(); };
+    const off = host.querySelector('#gOff');
+    if (off) off.onclick = async () => { cfg = { ...cfg, genOn: false }; setGen({ on: false }); try { await store.setIqraCfg(cfg); } catch {} draw(); };
+    const all = host.querySelector('#gAll');
+    if (all) all.onclick = async () => {
+      if (genJob) { genJob.stop = true; return; }
+      const T = allGenTexts(), msg = () => host.querySelector('#gMsg');
+      genJob = { stop: false }; all.textContent = '⏸ إيقاف';
+      let done = 0, made = 0;
+      for (let i = 0; i < T.length && !genJob.stop; i += 30) {
+        try { const r = await ttsGen(T.slice(i, i + 30), { voice: cfg.genVoice, rate: cfg.genRate || 0.8 }); made += r.made || 0; }
+        catch (e) { if (msg()) msg().textContent = 'توقف: ' + e.message; break; }
+        done = Math.min(T.length, i + 30);
+        if (msg()) msg().textContent = `جارٍ التوليد: ${ar(done)} من ${ar(T.length)} (جديد ${ar(made)}). لا تُغلق الصفحة.`;
+      }
+      if (msg() && done >= T.length) msg().textContent = `✓ اكتمل: ${ar(T.length)} صوتاً جاهزاً.`;
+      genJob = null; const b = host.querySelector('#gAll'); if (b) b.textContent = 'ولّد كل أصوات الكتاب مسبقاً';
+    };
   }
   function openStudio(list, title, note, start = 0, onSaved = null) {
     let i = start, blob = null, rec = null, msg = '';

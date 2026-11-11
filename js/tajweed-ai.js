@@ -94,6 +94,16 @@ export async function phonemes(blob, signal) {
   return String(j.pred || '');
 }
 
+/** النطق المولَّد: يولّد غير المحفوظ ويحفظه في الخادم. audio=true يعيد الصوت base64 */
+export async function ttsGen(texts, { voice, rate = 0.8, audio = false } = {}, signal) {
+  const headers = { 'Content-Type': 'application/json' };
+  try { const t = await tokenProvider(); if (t) headers.Authorization = 'Bearer ' + t; } catch {}
+  const r = await fetch(base() + '/tts', { method: 'POST', headers, body: JSON.stringify({ texts, voice, rate, audio }), signal });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((typeof j.detail === 'string' && j.detail) || 'HTTP ' + r.status);
+  return j;
+}
+
 /** تحويل نتيجة الخادم إلى صيغة مختصرة مرتبطة بأرقام كلمات المقطع */
 function compact(res, { surah, from, to }) {
   const offset = {};

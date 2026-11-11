@@ -254,6 +254,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    // «اقرأ وارتقِ»: الأصوات المولَّدة (يكتبها خادم التحليل بحساب الخدمة، ويقرؤها كل من دخل)
+    match /iqraTts/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
     // بلاغات «النطق خاطئ» من الطلاب: الطالب يُنشئ بلاغاً صغيراً، والمعلم يقرأ ويحذف
     match /iqraFlags/{id} {
       allow create: if signedIn() && request.resource.data.keys().hasOnly(['key', 't', 's', 'n', 'pn', 'name', 'at']) && request.resource.data.t is string && request.resource.data.t.size() < 300;

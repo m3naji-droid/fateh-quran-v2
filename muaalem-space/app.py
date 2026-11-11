@@ -282,6 +282,97 @@ async def analyze(
     return {"job": jid, "status": "queued", "model_ready": STATE["ready"]}
 
 
+# ------------------------------------------------------------ النطق المولَّد («اقرأ وارتقِ»)
+# يولّد صوتاً عربياً مشكولاً بخدمة Google Cloud Text-to-Speech (بحساب خدمة Cloud Run، بلا مفاتيح)،
+# ويحفظه مرة واحدة في Firestore (iqraTts) ليسمعه الطلاب ملفاً صوتياً عادياً يعمل على كل الأجهزة.
+import base64
+import hashlib
+
+TTS_VOICES = {"ar-XA-Wavenet-A", "ar-XA-Wavenet-B", "ar-XA-Wavenet-C", "ar-XA-Wavenet-D",
+              "ar-XA-Standard-A", "ar-XA-Standard-B", "ar-XA-Standard-C", "ar-XA-Standard-D"}
+_g_session = None
+
+
+def _gsession():
+    global _g_session
+    if _g_session is None:
+        import google.auth
+        from google.auth.transport.requests import AuthorizedSession
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        _g_session = AuthorizedSession(creds)
+    return _g_session
+
+
+def tts_id(voice: str, rate: float, text: str) -> str:
+    return hashlib.sha1(f"{voice}|{rate:.2f}|{text}".encode("utf-8")).hexdigest()[:28]
+
+
+def _fs_base():
+    return f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT}/databases/(default)/documents"
+
+
+def _tts_get_many(ids: list[str]) -> dict:
+    """المحفوظ من قبل: {id: b64}"""
+    if not ids:
+        return {}
+    names = [f"projects/{FIREBASE_PROJECT}/databases/(default)/documents/iqraTts/{i}" for i in ids]
+    r = _gsession().post(f"{_fs_base()}:batchGet", json={"documents": names}, timeout=20)
+    out = {}
+    if r.status_code < 300:
+        for row in r.json():
+            d = row.get("found")
+            if d:
+                out[d["name"].rsplit("/", 1)[1]] = d.get("fields", {}).get("b64", {}).get("stringValue", "")
+    return out
+
+
+def _tts_synth(text: str, voice: str, rate: float) -> bytes:
+    body = {"input": {"text": text}, "voice": {"languageCode": "ar-XA", "name": voice},
+            "audioConfig": {"audioEncoding": "MP3", "speakingRate": rate, "sampleRateHertz": 24000}}
+    r = _gsession().post("https://texttospeech.googleapis.com/v1/text:synthesize", json=body, timeout=30)
+    if r.status_code >= 300:
+        raise HTTPException(502, "تعذّر توليد الصوت: " + r.text[:300])
+    return base64.b64decode(r.json()["audioContent"])
+
+
+def _tts_save(i: str, text: str, voice: str, rate: float, b64: str):
+    fields = {"b64": {"stringValue": b64}, "mime": {"stringValue": "audio/mpeg"}, "t": {"stringValue": text},
+              "voice": {"stringValue": voice}, "rate": {"doubleValue": rate}, "at": {"integerValue": str(int(time.time()))}}
+    _gsession().patch(f"{_fs_base()}/iqraTts/{i}", json={"fields": fields}, timeout=20)
+
+
+@app.post("/tts")
+async def tts(payload: dict, authorization: str | None = Header(None), x_internal_secret: str | None = Header(None)):
+    """{texts: [..≤40], voice, rate, audio: bool} ← يولّد غير المحفوظ ويحفظه. audio=true يعيد الصوت (base64)."""
+    check_auth(authorization, x_internal_secret)
+    if not FIREBASE_PROJECT:
+        raise HTTPException(503, "خدمة النطق تحتاج FIREBASE_PROJECT.")
+    texts = [str(t).strip()[:120] for t in (payload.get("texts") or []) if str(t).strip()][:40]
+    voice = payload.get("voice") or "ar-XA-Wavenet-B"
+    if voice not in TTS_VOICES:
+        raise HTTPException(400, "صوت غير معروف.")
+    rate = min(1.2, max(0.5, float(payload.get("rate") or 0.8)))
+    want_audio = bool(payload.get("audio"))
+
+    def work():
+        ids = [tts_id(voice, rate, t) for t in texts]
+        have = _tts_get_many(list(dict.fromkeys(ids)))
+        made = 0
+        for t, i in zip(texts, ids):
+            if have.get(i):
+                continue
+            b64 = base64.b64encode(_tts_synth(t, voice, rate)).decode()
+            _tts_save(i, t, voice, rate, b64)
+            have[i] = b64
+            made += 1
+        if made:
+            usage_inc(tts=made, tts_chars=sum(len(t) for t, i in zip(texts, ids)))
+        return [{"id": i, "t": t, **({"b64": have.get(i, "")} if want_audio else {})} for t, i in zip(texts, ids)], made
+
+    items, made = await asyncio.get_running_loop().run_in_executor(None, work)
+    return {"items": items, "made": made}
+
+
 @app.post("/phonemes")
 async def phonemes(
     file: UploadFile = File(...),

@@ -3,6 +3,7 @@
 // تسجيلات المعلم تُحفظ WAV أحادياً (١٦ كيلوهرتز) بعد قصّ الصمت، فتعمل على كل الأجهزة.
 import { store, blobToB64 } from './store.js';
 import { WBW } from './iqra-wbw.js';
+import { ttsGen, aiEnabled } from './tajweed-ai.js';
 import { LESSONS, NAMES, LETTERS, itemOf } from './iqra-data.js';
 const toAr = (n) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
 
@@ -100,7 +101,7 @@ function teacherUrl(key) {
 }
 export function dropCache(key) { urlCache.delete(key); urlReady.delete(key); }
 /** تحميل أصوات العنصر مسبقاً (عند عرضه) ليبدأ التشغيل فوراً عند الضغط */
-export function prefetch(list) { (list || []).forEach((s) => s.key && teacherUrl(s.key)); }
+export function prefetch(list) { (list || []).forEach((s) => { if (s.key) teacherUrl(s.key); else if (s.gen) genUrl(s.gen, s.opt || gen); }); }
 
 export function probeReciter() {}
 
@@ -121,6 +122,35 @@ function speakNow(text, done, first) {
   try { if (first) ss.cancel(); ss.speak(u); } catch { end(); }
   setTimeout(end, 3000 + text.length * 400);
 }
+
+/* ---------- الصوت المولَّد (Google): يُولَّد مرة ويُحفظ، ويُسمع ملفاً عادياً على كل الأجهزة ---------- */
+export const GEN_VOICES = [['ar-XA-Wavenet-B', 'رجل ١'], ['ar-XA-Wavenet-C', 'رجل ٢'], ['ar-XA-Wavenet-A', 'امرأة ١'], ['ar-XA-Wavenet-D', 'امرأة ٢']];
+let gen = { on: false, voice: 'ar-XA-Wavenet-B', rate: 0.8 };
+export function setGen(c) { gen = { ...gen, ...(c || {}) }; }
+export const genOn = () => gen.on && aiEnabled();
+const genReady = new Map(), genCache = new Map();
+async function sha1(t) { const h = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(t)); return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join(''); }
+export async function genId(text, voice = gen.voice, rate = gen.rate) { return (await sha1(`${voice}|${rate.toFixed(2)}|${normText(text).slice(0, 120)}`)).slice(0, 28); }
+const b64url = (b64, mime) => { const bin = atob(b64), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return URL.createObjectURL(new Blob([arr], { type: mime || 'audio/mpeg' })); };
+/** رابط الصوت المولَّد لنص: من المحفوظ، وإلا يُولَّد الآن ويُحفظ */
+export function genUrl(text, opt = gen) {
+  const t = normText(text).slice(0, 120), ck = opt.voice + '|' + opt.rate + '|' + t;
+  if (genCache.has(ck)) return genCache.get(ck);
+  const p = (async () => {
+    const id = await genId(t, opt.voice, opt.rate);
+    let d = await store.getIqraTts(id).catch(() => null);
+    let b64 = d?.b64;
+    if (!b64) { const r = await ttsGen([t], { voice: opt.voice, rate: opt.rate, audio: true }); b64 = r.items?.[0]?.b64; }
+    if (!b64) return null;
+    const u = b64url(b64, 'audio/mpeg'); genReady.set(ck, u); return u;
+  })().catch((e) => { console.warn('gen tts', e); genCache.delete(ck); return null; });
+  genCache.set(ck, p);
+  return p;
+}
+const genReadyUrl = (text, opt = gen) => genReady.get(opt.voice + '|' + opt.rate + '|' + normText(text).slice(0, 120));
+/** مصدر نص قصير: تسجيل المعلم، ثم المولَّد، ثم صوت الجهاز */
+export const srcFor = (t) => (hasRec(t) ? { key: keyOf(t), fallback: t } : genOn() ? { gen: t, fallback: t } : { tts: t });
+export function playGenSample(text, voice) { return playSeq([{ gen: text, fallback: text, opt: { ...gen, voice } }]); }
 
 let playing = null;
 export function stopAudio() { playing?.stop(); playing = null; try { SS()?.cancel(); } catch {} try { el?.pause(); } catch {} }
@@ -152,6 +182,10 @@ export function playSeq(list, { gap = 0.18 } = {}) {
     } else if (src.url) {
       if (urlFailed) return res();
       playUrl(src.url, res, () => { urlFailed = true; tts(src.fallback); });
+    } else if (src.gen) {
+      const o = src.opt || gen, ready = genReadyUrl(src.gen, o);
+      if (ready) return playUrl(ready, res, () => tts(src.fallback));
+      genUrl(src.gen, o).then((u) => (cancelled ? res() : u ? playUrl(u, res, () => tts(src.fallback)) : tts(src.fallback)));
     } else if (src.tts) tts(src.tts);
     else res();
   });
@@ -167,10 +201,10 @@ export function sourcesFor(item) {
   if (urls) return { list: urls.map((url, i) => ({ url, fallback: i ? '' : s })), kind: 'reciter' };
   const parts = s.split(/\s+/).filter(Boolean);
   if (parts.length > 1 && parts.every((p) => hasRec(p))) return { list: parts.map((p) => ({ key: keyOf(p), fallback: p })), kind: 'teacher' };
-  return { list: [{ tts: s }], kind: 'tts' };
+  return genOn() ? { list: [{ gen: s, fallback: s }], kind: 'gen' } : { list: [{ tts: s }], kind: 'tts' };
 }
 export const playItem = (item) => playSeq(sourcesFor(item).list);
-export const KIND_LABEL = { teacher: 'بصوت معلمك', reciter: 'بصوت القارئ', tts: 'صوت آلي' };
+export const KIND_LABEL = { teacher: 'بصوت معلمك', reciter: 'بصوت القارئ', gen: 'صوت مولَّد', tts: 'صوت الجهاز' };
 
 /* ---------- التسجيل: يتوقف بعد السكوت، ويُقصّ الصمت، ويُحفظ WAV ---------- */
 /** يبدأ التسجيل ويعيد { done: وعد بملف WAV, stop } */
