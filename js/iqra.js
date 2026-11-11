@@ -8,8 +8,10 @@ import { RecitationSession, hasRecorder, micErrorText } from './speech.js';
 import { aiEnabled, phonemes } from './tajweed-ai.js';
 import { judgePhonemes, judgeTranscript } from './phon.js';
 import { LESSONS, CONCEPTS, itemOf, lessonByN } from './iqra-data.js';
+import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob } from './iqra-audio.js';
+import { tajSteps } from './iqra-taj.js';
 
-export const IQ_DEFAULT = { count: 15, pass: 85, pts: 3 };
+export const IQ_DEFAULT = { count: 15, pass: 85, pts: 3, taj: 13 };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const today = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // توقيت مكة
 const ready = () => LESSONS.filter((l) => l.items.length);
@@ -122,7 +124,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   const save = (patch) => { Object.assign(st, patch); return store.saveIqra(me.id, patch).catch((e) => { console.warn('iqra save', e); toast('تعذّر حفظ تقدمك. تحقق من الاتصال.'); }); };
 
   (async () => {
-    [cfg, st] = await Promise.all([iqraCfg(), store.getIqra(me.id).catch(() => null)]);
+    [cfg, st] = await Promise.all([iqraCfg(), store.getIqra(me.id).catch(() => null), audioIndex()]);
     st = st || { placed: false, cur: 1, mastered: {}, wrong: {}, sessions: [] };
     st.mastered = st.mastered || {}; st.wrong = st.wrong || {}; st.sessions = st.sessions || [];
     await settleAwaiting();
@@ -197,27 +199,31 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   }
 
   /* --- التمرين الحر --- */
-  let freeN = null, freeK = 'syl';
+  let freeN = null, freeK = 'syl', freeTaj = null, freeTajN = null;
   function drawFree(box) {
     const R = ready();
     if (freeN == null) freeN = (R.find((l) => l.n === st.cur) || R[R.length - 1])?.n;
     const L = lessonByN(freeN);
     const items = (L?.items || []).map((x, i) => ({ ...itemOf(x, L.n), i }));
-    const hasSyl = items.some((x) => x.k === 'syl'), hasWord = items.some((x) => x.k === 'word');
+    const grp = (x) => (x.k === 'word' ? 'word' : 'syl');
+    const hasSyl = items.some((x) => grp(x) === 'syl'), hasWord = items.some((x) => grp(x) === 'word');
+    if (freeTaj == null || freeTajN !== freeN) { freeTaj = L.n >= 4 && L.n <= (cfg.taj ?? IQ_DEFAULT.taj); freeTajN = freeN; }
     if (!hasSyl) freeK = 'word'; if (!hasWord) freeK = 'syl';
     box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>🎯 تمرين حر</h3><span class="small muted">بلا درجات: اختر درساً، ثم الحروف أو الكلمات، واضغط أيّها لتتمرن عليه</span></div>
       <label class="field">الدرس<select id="iqFL">${R.map((l) => `<option value="${l.n}" ${l.n === freeN ? 'selected' : ''}>${ar(l.n)}. ${esc(l.t)}</option>`).join('')}</select></label>
       <div class="row" role="radiogroup">${hasSyl ? `<button type="button" class="chip iq-tg${freeK === 'syl' ? ' sel' : ''}" data-fk="syl" role="radio" aria-checked="${freeK === 'syl'}">الحروف</button>` : ''}${hasWord ? `<button type="button" class="chip iq-tg${freeK === 'word' ? ' sel' : ''}" data-fk="word" role="radio" aria-checked="${freeK === 'word'}">الكلمات</button>` : ''}</div>
-      <div class="iq-grid">${items.filter((x) => x.k === freeK).map((x) => `<button type="button" class="iq-cell" data-fi="${x.i}">${esc(x.t)}</button>`).join('')}</div>`;
+      ${L.n >= 4 ? `<label class="iq-tajtg"><input type="checkbox" id="iqFT" ${freeTaj ? 'checked' : ''}> بالتجريد (حرفاً حرفاً كما في الكتاب)</label>` : ''}
+      <div class="iq-grid">${items.filter((x) => grp(x) === freeK).map((x) => `<button type="button" class="iq-cell" data-fi="${x.i}">${esc(x.t)}</button>`).join('')}</div>`;
     box.querySelector('#iqFL').onchange = (e) => { freeN = +e.target.value; drawFree(box); };
     box.querySelectorAll('[data-fk]').forEach((b) => (b.onclick = () => { freeK = b.dataset.fk; drawFree(box); }));
-    box.querySelectorAll('[data-fi]').forEach((b) => (b.onclick = () => practiceItem(L, +b.dataset.fi, items.filter((x) => x.k === freeK).map((x) => x.i))));
+    const ft = box.querySelector('#iqFT'); if (ft) ft.onchange = () => { freeTaj = ft.checked; };
+    box.querySelectorAll('[data-fi]').forEach((b) => (b.onclick = () => practiceItem(L, +b.dataset.fi, items.filter((x) => grp(x) === freeK).map((x) => x.i))));
   }
   function practiceItem(L, i, seq) {
     const order = seq || [i];
     const at = order.indexOf(i);
     const list = order.slice(at).concat(order.slice(0, at)).map((k) => ({ ...itemOf(L.items[k], L.n), i: k, n: L.n }));
-    run({ mode: 'practice', items: list, title: `تمرين حر · الدرس ${ar(L.n)}` });
+    run({ mode: 'practice', items: list, title: `تمرين حر · الدرس ${ar(L.n)}`, taj: freeTaj ? 'opt' : null });
   }
 
   /* --- اختبار تحديد المستوى --- */
@@ -261,7 +267,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   async function runDaily(L) {
     const items = pickDaily(L, cfg.count, st.wrong[L.n] || []).map((x) => ({ ...x, n: L.n }));
     const sid = 's' + Date.now().toString(36);
-    const res = await run({ mode: 'daily', items, title: `درس اليوم · ${ar(L.n)}. ${L.t}`, sid });
+    const res = await run({ mode: 'daily', items, title: `درس اليوم · ${ar(L.n)}. ${L.t}`, sid, taj: L.n >= 4 && L.n <= (cfg.taj ?? IQ_DEFAULT.taj) ? 'must' : null });
     if (!res) return home();
     const total = res.length, ok = res.filter((r) => r.ok).length, pend = res.filter((r) => r.pending).length;
     const pct = Math.round((ok / total) * 100);
@@ -284,15 +290,49 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   }
 
   /* --- مشغّل العناصر (اختبار المستوى، الدرس اليومي، التمرين) --- */
-  function run({ mode, items, title, step, sid }) {
+  function run({ mode, items, title, step, sid, taj = null }) {
     return new Promise((resolve) => {
-      let k = 0, tries = 0, rec = null, busy = false;
+      let k = 0, tries = 0, rec = null, busy = false, ts = taj ? 0 : -1, steps = null;
       const results = [];
-      const tts = canSpeak();
-      const finish = (v) => { runner = null; rec?.cancel(); resolve(v); };
+      const finish = (v) => { runner = null; rec?.cancel(); stopAudio(); resolve(v); };
+      const flagged = new Set();
+      const flag = (it) => {
+        if (flagged.has(it.s)) return; flagged.add(it.s);
+        store.addIqraFlag({ key: keyOf(it.s), t: it.t, s: it.s, n: it.n, pn: me.id, name: me.name }).then(() => toast('شكراً! أُبلغ معلمك ليصحّح النطق.')).catch(() => toast('تعذّر الإرسال.'));
+      };
+      /* --- مرحلة التجريد: الكلمة حرفاً حرفاً --- */
+      const stepAudio = (sp) => playSeq([...sp.say.map((n) => (hasRec(n) ? { key: keyOf(n), fallback: n } : { tts: n })), ...(sp.syl ? [hasRec(sp.syl) ? { key: keyOf(sp.syl), fallback: sp.syl } : { tts: sp.syl }] : [])], { gap: 0.12 });
+      const paintTaj = () => {
+        const it = items[k];
+        steps = steps || tajSteps(it.s);
+        const sp = steps[ts];
+        const T = it.s, Z = '\u200d';
+        const hl = sp ? esc(T.slice(0, sp.at)) + (sp.at ? Z : '') + '<mark class="' + (sp.silent ? 'sil' : '') + '">' + Z + esc(T.slice(sp.at, sp.end)) + Z + '</mark>' + (sp.end < T.length ? Z : '') + esc(T.slice(sp.end)) : esc(T);
+        host.innerHTML = `<div class="card stack iq iq-run">
+          <div class="row" style="justify-content:space-between"><span class="small muted">${esc(title)} · التجريد</span><button class="btn sm ghost" type="button" id="iqX">✕ ${mode === 'practice' ? 'إغلاق' : 'خروج'}</button></div>
+          ${mode !== 'practice' ? `<div class="iq-prog" aria-hidden="true"><i style="width:${(k / items.length) * 100}%"></i></div><span class="small muted" style="text-align:center">${ar(k + 1)} من ${ar(items.length)}</span>` : ''}
+          <div class="iq-word iq-taj" lang="ar">${hl}</div>
+          <div class="iq-tstep">${sp.silent ? `<span class="iq-sil">${esc(sp.note)}</span>` : `<span class="iq-names">${sp.say.map(esc).join(' <i>+</i> ')}</span>${sp.syl ? ` <i>=</i> <b class="iq-syl">${esc(sp.syl)}</b>` : ''}`}</div>
+          <div class="iq-cum"><span class="small muted">ما بنيتَه حتى الآن</span><b lang="ar">${esc(sp.cum)}</b></div>
+          ${sp.note && !sp.silent ? `<span class="small muted" style="text-align:center">💡 ${esc(sp.note)}</span>` : ''}
+          <div class="iq-ctrl">
+            <button class="btn iq-say" type="button" id="iqTs" ${sp.silent ? 'disabled' : ''}>🔊 أعد</button>
+            <button class="btn primary" type="button" id="iqTn">${ts < steps.length - 1 ? 'التالي ←' : 'اقرأ الكلمة كاملة ←'}</button>
+          </div>
+          <div class="iq-tdots">${steps.map((x, j) => `<i class="${j < ts ? 'd' : j === ts ? 'c' : ''}${x.silent ? ' s' : ''}"></i>`).join('')}</div>
+          <p class="small muted" style="text-align:center;margin:0">ردِّد بعده بصوتك: اسم الحرف، ثم حركته، ثم صوته، ثم ما بنيتَه.${taj === 'opt' ? ' <button class="btn sm ghost" type="button" id="iqTk">تخطَّ التجريد</button>' : ''}</p>
+        </div>`;
+        host.querySelector('#iqX').onclick = () => finish(null);
+        if (!sp.silent) stepAudio(sp);
+        host.querySelector('#iqTs').onclick = () => stepAudio(sp);
+        host.querySelector('#iqTn').onclick = () => { stopAudio(); if (ts < steps.length - 1) { ts++; paintTaj(); } else { ts = -1; paint('الآن اقرأ الكلمة كاملة دون تقطيع.'); } };
+        const tk = host.querySelector('#iqTk'); if (tk) tk.onclick = () => { stopAudio(); ts = -1; paint(); };
+      };
       runner = { cancel: () => finish(null) };
       const paint = (msg = '', cls = '') => {
         const it = items[k];
+        if (ts >= 0) return paintTaj();
+        const src = sourcesFor(it);
         host.innerHTML = `<div class="card stack iq iq-run">
           <div class="row" style="justify-content:space-between"><span class="small muted">${esc(title)}${step ? ` · ${ar(step[0])}/${ar(step[1])}` : ''}</span>
             <button class="btn sm ghost" type="button" id="iqX">✕ ${mode === 'practice' ? 'إغلاق' : 'خروج'}</button></div>
@@ -300,20 +340,23 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
           <div class="iq-word" lang="ar">${esc(it.t)}</div>
           ${it.k === 'name' ? '<span class="small muted" style="text-align:center">اقرأ أسماء الحروف</span>' : it.s !== it.t ? '<span class="small muted" style="text-align:center">انتبه: تُقرأ بخلاف رسمها</span>' : ''}
           <div class="iq-ctrl">
-            ${tts ? `<button class="btn iq-say" type="button" id="iqSay" aria-label="استمع للنطق">🔊 استمع</button>` : ''}
+            <button class="btn iq-say" type="button" id="iqSay" aria-label="استمع للنطق">🔊 استمع</button>
             <button class="iq-mic" type="button" id="iqMic" aria-label="سجّل نطقك">🎤</button>
             ${mode === 'practice' ? `<button class="btn" type="button" id="iqNext">التالي ←</button>` : `<button class="btn ghost small" type="button" id="iqSkip">لا أعرفها</button>`}
           </div>
           <div class="iq-level"><i id="iqLv"></i></div>
+          <div class="row" style="justify-content:center;gap:8px"><span class="small muted">🔊 ${esc(KIND_LABEL[src.kind])}</span>${taj ? '<button class="btn sm ghost" type="button" id="iqTa">↺ التجريد مرة أخرى</button>' : ''}<button class="btn sm ghost" type="button" id="iqFl" title="أبلغ معلمك أن النطق المسموع غير صحيح">🚩 النطق خاطئ</button></div>
           <div class="iq-msg ${cls}" role="status" id="iqMsg">${msg || (tries ? 'حاول مرة أخرى بهدوء ووضوح.' : 'اضغط الميكروفون ثم انطق.')}</div>
         </div>`;
         host.querySelector('#iqX').onclick = () => finish(null);
-        const say = host.querySelector('#iqSay'); if (say) say.onclick = () => speak(it.s);
+        const say = host.querySelector('#iqSay'); if (say) say.onclick = () => playItem(it);
+        host.querySelector('#iqFl').onclick = (e) => { flag(it); e.currentTarget.disabled = true; };
+        const ta = host.querySelector('#iqTa'); if (ta) ta.onclick = () => { ts = 0; paintTaj(); };
         host.querySelector('#iqMic').onclick = () => (rec ? rec.stop() : listen());
         const nx = host.querySelector('#iqNext'); if (nx) nx.onclick = () => next();
         const sk = host.querySelector('#iqSkip'); if (sk) sk.onclick = () => { results.push({ item: items[k], ok: false, skip: true }); next(); };
       };
-      const next = () => { k++; tries = 0; if (k >= items.length) return mode === 'practice' ? (k = 0, paint('أكملت القائمة! تبدأ من جديد.')) : finish(results); paint(); };
+      const next = () => { k++; tries = 0; steps = null; ts = taj ? 0 : -1; stopAudio(); if (k >= items.length) return mode === 'practice' ? (k = 0, paint('أكملت القائمة! تبدأ من جديد.')) : finish(results); paint(); };
       async function listen() {
         if (busy) return;
         busy = true;
@@ -358,7 +401,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
    واجهة المعلم
    ===================================================================== */
 export function mountIqraTeacher(host, { students, classes, toast = () => {}, onChange = () => {} }) {
-  let cfg = null, states = {}, revs = [], q = '', cls = 'all', alive = true;
+  let cfg = null, states = {}, revs = [], flags = [], q = '', cls = 'all', alive = true, prevN = 4, studio = null;
   host.innerHTML = '<div class="loading">جارٍ التحميل…</div>';
   const byId = Object.fromEntries(students.map((s) => [s.id, s]));
   const load = async () => {
@@ -368,12 +411,15 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     states = Object.fromEntries(pns.map((p, i) => [p, S[i]]));
     const R = await Promise.all(pns.map((p) => store.listIqraRev(p).catch(() => [])));
     revs = R.flat().filter((r) => r.status === 'pending');
+    await audioIndex(true);
+    flags = await store.listIqraFlags().catch(() => []);
     onChange({ cfg, states });
     if (alive) draw();
   };
   load().catch((e) => { host.innerHTML = `<div class="card">تعذّر التحميل: ${esc(e.message)}</div>`; });
 
   function draw() {
+    if (studio) return studio.paint();
     const on = new Set(cfg.pns);
     const shown = students.filter((s) => (cls === 'all' || s.classId === cls) && (!q || s.name.includes(q)));
     const enabled = students.filter((s) => on.has(s.id));
@@ -384,10 +430,14 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>
           <label class="field" style="min-width:150px">نقاط كل درس في لوحة الشرف<input type="number" id="iqPts" min="0" max="20" value="${cfg.pts}"></label>
+          <label class="field" style="min-width:170px">التجريد إلزامي حتى الدرس<input type="number" id="iqTj" min="0" max="43" value="${cfg.taj ?? IQ_DEFAULT.taj}"></label>
           <button class="btn primary" type="button" id="iqSave" style="align-self:flex-end">حفظ</button>
         </div>
       </div>
 
+      ${studioCard()}
+      ${flagsCard()}
+      ${previewCard()}
       <div class="card stack" id="iqRev">
         <div class="row" style="justify-content:space-between"><h3>🎧 كلمات تنتظر سماعك <span class="pill ${revs.length ? 'warn' : 'mute'}">${ar(revs.length)}</span></h3>${revs.length ? '<span class="small muted">لم يتأكد منها النظام بعد محاولتين. استمع واحكم.</span>' : ''}</div>
         ${revs.length ? `<ul class="iq-revs">${revs.sort((a, b) => (a.at || '').localeCompare(b.at || '')).map((r) => `<li data-r="${esc(r.pn)}|${esc(r.id)}">
@@ -420,10 +470,12 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
       const c = Math.min(40, Math.max(5, +host.querySelector('#iqC').value || IQ_DEFAULT.count));
       const p = Math.min(100, Math.max(50, +host.querySelector('#iqP').value || IQ_DEFAULT.pass));
       const pts = Math.min(20, Math.max(0, +host.querySelector('#iqPts').value || 0));
-      cfg = { ...cfg, count: c, pass: p, pts };
+      const tj = Math.min(43, Math.max(0, +host.querySelector('#iqTj').value || 0));
+      cfg = { ...cfg, count: c, pass: p, pts, taj: tj };
       try { await store.setIqraCfg(cfg); toast('حُفظت إعدادات «اقرأ وارتقِ».'); onChange({ cfg, states }); } catch (e) { toast('تعذّر الحفظ: ' + e.message); }
       draw();
     };
+    wireAudio();
     host.querySelector('#iqQ').oninput = (e) => { q = e.target.value.trim(); const pos = e.target.selectionStart; draw(); const i = host.querySelector('#iqQ'); i.focus(); i.setSelectionRange(pos, pos); };
     host.querySelector('#iqCls').onchange = (e) => { cls = e.target.value; draw(); };
     host.querySelectorAll('[data-pn]').forEach((b) => (b.onchange = async () => {
@@ -457,6 +509,100 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
         catch (err) { li.style.opacity = ''; toast('تعذّر الحفظ: ' + err.message); }
       }));
     });
+  }
+
+  /* ---------- الأصوات: استوديو التسجيل، والمعاينة، والبلاغات ---------- */
+  const plan = () => recordingPlan();
+  function studioCard() {
+    const G = plan();
+    const req = G.filter((g) => !g.optional), done = (g) => g.items.filter((x) => hasRec(x.s)).length;
+    const tot = req.reduce((n, g) => n + g.items.length, 0), dn = req.reduce((n, g) => n + done(g), 0);
+    return `<div class="card stack">
+      <div class="row" style="justify-content:space-between"><h3>🎙 استوديو التسجيل</h3><span class="pill ${dn >= tot ? 'ok' : 'warn'}">${ar(dn)} / ${ar(tot)}</span></div>
+      <p class="small muted" style="margin:0">سجّل «اللبنات» بصوتك مرة واحدة: أسماء الحروف، وأسماء الحركات، ومقاطع جداول الدروس. منها يُبنى صوت التجريد كله، وتسمعها الطلاب في الدروس. الكلمات القرآنية بصوت القارئ تلقائياً. سجّل في مكان هادئ، واضغط 🎙 ثم انطق واسكت فيتوقف وحده.</p>
+      <div class="iq-groups">${G.map((g, gi) => { const d = done(g); return `<div class="iq-grp"><div><b>${ar(gi + 1)}. ${esc(g.t)}</b>${g.optional ? ' <span class="small muted">(اختياري)</span>' : ''}<div class="small muted">${ar(d)} من ${ar(g.items.length)}</div></div>
+        <button class="btn sm ${d < g.items.length ? 'primary' : ''}" type="button" data-grp="${gi}">${d === 0 ? 'ابدأ' : d < g.items.length ? 'تابع' : 'راجع'}</button>
+        <div class="meter"><i style="width:${g.items.length ? (d / g.items.length) * 100 : 0}%"></i></div></div>`; }).join('')}</div>
+    </div>`;
+  }
+  function flagsCard() {
+    const by = {}; flags.forEach((f) => { (by[f.key] = by[f.key] || { ...f, n: 0, who: [] }).n++; by[f.key].who.push(f.name); });
+    const L = Object.values(by);
+    return `<div class="card stack"><div class="row" style="justify-content:space-between"><h3>🚩 بلاغات «النطق خاطئ» <span class="pill ${L.length ? 'warn' : 'mute'}">${ar(L.length)}</span></h3></div>
+      ${L.length ? `<ul class="iq-prev">${L.map((f) => `<li data-fk="${esc(f.key)}"><b lang="ar">${esc(f.t)}</b><span class="small muted">الدرس ${ar(f.n || 0)} · ${esc(f.who.slice(0, 3).join('، '))}</span>
+        <span class="row" style="gap:6px"><button class="btn sm" type="button" data-fplay>▶ الحالي</button><button class="btn sm primary" type="button" data-frec>🎙 سجّل بصوتك</button><button class="btn sm ghost" type="button" data-fok>تجاهل</button></span></li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">لا بلاغات. يظهر هنا ما يُبلغ عنه الطلاب بزر «🚩 النطق خاطئ».</p>'}</div>`;
+  }
+  function previewCard() {
+    const L = lessonByN(prevN);
+    const items = (L?.items || []).map((x, i) => ({ ...itemOf(x, L.n), i, n: L.n }));
+    return `<div class="card stack"><h3>📖 معاينة الدروس وإعادة التسجيل</h3>
+      <label class="field">الدرس<select id="iqPv">${LESSONS.filter((l) => l.items.length).map((l) => `<option value="${l.n}" ${l.n === prevN ? 'selected' : ''}>${ar(l.n)}. ${esc(l.t)}</option>`).join('')}</select></label>
+      <ul class="iq-prev">${items.map((x) => { const k = sourcesFor(x).kind; return `<li data-pi="${x.i}"><b lang="ar">${esc(x.t)}</b><span class="row" style="gap:6px"><span class="pill ${k === 'teacher' ? 'rec' : k === 'reciter' ? 'ok' : 'mute'}">${esc(KIND_LABEL[k])}</span>
+        <button class="btn sm" type="button" data-pplay>▶</button><button class="btn sm" type="button" data-prec>🎙</button>${hasRec(x.s) ? '<button class="btn sm danger" type="button" data-pdel title="احذف تسجيلك">🗑</button>' : ''}</span></li>`; }).join('')}</ul></div>`;
+  }
+  function wireAudio() {
+    host.querySelectorAll('[data-grp]').forEach((b) => (b.onclick = () => { const g = plan()[+b.dataset.grp]; const first = Math.max(0, g.items.findIndex((x) => !hasRec(x.s))); openStudio(g.items, g.t, g.note, first); }));
+    const pv = host.querySelector('#iqPv'); if (pv) pv.onchange = () => { prevN = +pv.value; draw(); };
+    const L = lessonByN(prevN);
+    host.querySelectorAll('[data-pi]').forEach((li) => {
+      const it = { ...itemOf(L.items[+li.dataset.pi], L.n), n: L.n };
+      li.querySelector('[data-pplay]').onclick = () => playItem(it);
+      li.querySelector('[data-prec]').onclick = () => openStudio([it], 'إعادة تسجيل · الدرس ' + ar(L.n), '');
+      const d = li.querySelector('[data-pdel]'); if (d) d.onclick = async () => { await deleteRecording(it.s).catch((e) => toast(e.message)); draw(); };
+    });
+    host.querySelectorAll('[data-fk]').forEach((li) => {
+      const f = flags.find((x) => x.key === li.dataset.fk); const it = { t: f.t, s: f.s, k: 'word', n: f.n };
+      li.querySelector('[data-fplay]').onclick = () => playItem(it);
+      li.querySelector('[data-frec]').onclick = () => openStudio([it], 'بلاغ نطق · الدرس ' + ar(f.n || 0), '', 0, async () => { await store.deleteIqraFlags(f.key).catch(() => {}); flags = flags.filter((x) => x.key !== f.key); });
+      li.querySelector('[data-fok]').onclick = async () => { await store.deleteIqraFlags(f.key).catch(() => {}); flags = flags.filter((x) => x.key !== f.key); draw(); };
+    });
+  }
+  function openStudio(list, title, note, start = 0, onSaved = null) {
+    let i = start, blob = null, rec = null, msg = '';
+    const close = () => { rec?.stop(); stopAudio(); studio = null; draw(); };
+    studio = { paint: () => {
+      const it = list[i];
+      host.innerHTML = `<div class="card stack iq iq-studio">
+        <div class="row" style="justify-content:space-between"><span class="small muted">🎙 ${esc(title)} · ${ar(i + 1)} من ${ar(list.length)}</span><button class="btn sm ghost" type="button" id="sX">✕ إنهاء</button></div>
+        ${note ? `<p class="iq-hint" style="margin:0">💡 ${esc(note)}</p>` : ''}
+        <div class="iq-word" lang="ar">${esc(it.t)}</div>
+        ${it.s !== it.t ? `<div class="iq-src">انطق: <b style="font:28px var(--f-quran)">${esc(it.s)}</b></div>` : ''}
+        <div class="iq-src">${hasRec(it.s) ? '<span class="pill rec">✓ مسجّل بصوتك</span>' : '<span class="pill mute">غير مسجّل</span>'}</div>
+        <div class="iq-ctrl">
+          <button class="btn" type="button" id="sPrev" ${i ? '' : 'disabled'}>→ السابق</button>
+          <button class="iq-mic${rec ? ' on' : ''}" type="button" id="sRec" aria-label="سجّل">🎙</button>
+          <button class="btn" type="button" id="sNext" ${i < list.length - 1 ? '' : 'disabled'}>التالي ←</button>
+        </div>
+        <div class="iq-level"><i id="sLv"></i></div>
+        <div class="row" style="justify-content:center">
+          <button class="btn" type="button" id="sPlay" ${blob ? '' : 'disabled'}>▶ استمع لتسجيلك</button>
+          <button class="btn primary" type="button" id="sSave" ${blob ? '' : 'disabled'}>✓ احفظ وانتقل</button>
+          <button class="btn ghost" type="button" id="sCur">🔊 الصوت الحالي</button>
+        </div>
+        <div class="iq-msg" id="sMsg">${esc(msg || (blob ? 'استمع، ثم احفظ أو أعد التسجيل.' : 'اضغط 🎙 ثم انطق، واسكت لحظة فيتوقف التسجيل وحده.'))}</div>
+      </div>`;
+      host.querySelector('#sX').onclick = close;
+      host.querySelector('#sPrev').onclick = () => { if (i) { i--; blob = null; msg = ''; studio.paint(); } };
+      host.querySelector('#sNext').onclick = () => { if (i < list.length - 1) { i++; blob = null; msg = ''; studio.paint(); } };
+      host.querySelector('#sCur').onclick = () => playItem(it);
+      host.querySelector('#sPlay').onclick = () => blob && playBlob(blob);
+      host.querySelector('#sRec').onclick = async () => {
+        if (rec) return rec.stop();
+        stopAudio(); blob = null;
+        const lv = () => host.querySelector('#sLv');
+        try { rec = await recordClip({ onLevel: (l) => { const e = lv(); if (e) e.style.width = Math.round(l * 100) + '%'; } }); }
+        catch (e) { msg = 'تعذّر فتح الميكروفون: ' + (e.message || e.name); studio.paint(); return; }
+        msg = 'أستمع… انطق الآن'; studio.paint();
+        try { blob = await rec.done; msg = ''; rec = null; studio.paint(); playBlob(blob); }
+        catch (e) { rec = null; blob = null; msg = e.message; studio.paint(); }
+      };
+      host.querySelector('#sSave').onclick = async (e) => {
+        if (!blob) return; e.currentTarget.disabled = true;
+        try { await saveRecording(it.s, blob); await onSaved?.(); blob = null; msg = '✓ حُفظ.'; if (i < list.length - 1) { i++; msg = ''; } studio.paint(); }
+        catch (err) { msg = 'تعذّر الحفظ: ' + err.message; studio.paint(); }
+      };
+    } };
+    studio.paint();
   }
   return () => { alive = false; };
 }

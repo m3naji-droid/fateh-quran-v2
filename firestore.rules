@@ -249,6 +249,17 @@ service cloud.firestore {
       allow read: if isTeacher();
     }
     // طابور تحليل التجويد على الخادم: الطالب يضيف تسليمه الذي لم يكتمل تحليله، والخادم يعالجه
+    // «اقرأ وارتقِ»: تسجيلات المعلم للحروف والكلمات (يقرؤها كل من دخل، ويكتبها المعلم)
+    match /iqraAudio/{key} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+    // بلاغات «النطق خاطئ» من الطلاب: الطالب يُنشئ بلاغاً صغيراً، والمعلم يقرأ ويحذف
+    match /iqraFlags/{id} {
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['key', 't', 's', 'n', 'pn', 'name', 'at']) && request.resource.data.t is string && request.resource.data.t.size() < 300;
+      allow update: if signedIn() && request.resource.data.keys().hasOnly(['key', 't', 's', 'n', 'pn', 'name', 'at']);
+      allow read, delete: if isTeacher();
+    }
     match /aiq/{qid} {
       allow create: if isStudent(request.resource.data.pn)
         && qid == request.resource.data.pn + '__' + request.resource.data.sid
