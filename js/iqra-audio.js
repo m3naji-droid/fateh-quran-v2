@@ -49,12 +49,16 @@ export function recordingPlan() {
   return groups;
 }
 
-/** صوت القارئ للكلمة المفردة الموجودة بنصها في المصحف (لا للعبارات ولا لصيغ الوقف) */
-export function reciterUrl(item) {
-  if (!item || item.s !== item.t || /\s/.test(item.t.trim())) return null;
-  const p = WBW[normText(item.t)];
-  return p ? `${WBW_BASE}${pad3(p[0])}_${pad3(p[1])}_${pad3(p[2])}.mp3` : null;
+/** صوت القارئ (كلمةً كلمة من quran.com) لكلمات الكتاب الموجودة في المصحف: قائمة روابط بالترتيب، أو null */
+const wbwKey = (t) => String(t || '').normalize('NFC').replace(/\u0640/g, '').replace(/[\u06D6-\u06DC\u06DE\u06E9]/g, '').replace(/\u06E1/g, '\u0652').replace(/\s+/g, ' ').trim();
+const wordsIn = (t) => wbwKey(t).split(' ').filter((w) => /[\u0621-\u064A\u0671]/.test(w)).length;
+export function reciterUrls(item) {
+  const v = item && WBW[wbwKey(item.t)];
+  if (!v) return null;
+  const locs = v.length === 1 && wordsIn(item.t) > 1 ? Array.from({ length: wordsIn(item.t) }, (_, k) => [v[0][0], v[0][1], v[0][2] + k]) : v;
+  return locs.map(([s, a, w]) => `${WBW_BASE}${pad3(s)}_${pad3(a)}_${pad3(w)}.mp3`);
 }
+export const reciterUrl = (item) => reciterUrls(item)?.[0] || null;
 
 /* ---------- فهرس التسجيلات ---------- */
 let idx = null, idxP = null;
@@ -98,16 +102,7 @@ export function dropCache(key) { urlCache.delete(key); urlReady.delete(key); }
 /** تحميل أصوات العنصر مسبقاً (عند عرضه) ليبدأ التشغيل فوراً عند الضغط */
 export function prefetch(list) { (list || []).forEach((s) => s.key && teacherUrl(s.key)); }
 
-// صوت القارئ: نتحقق مرة واحدة أن روابطه تعمل على هذا الجهاز، وإلا نستعمل صوت الجهاز مباشرة
-let reciterOK = null;
-export function probeReciter() {
-  if (reciterOK !== null || typeof Audio === 'undefined') return;
-  reciterOK = false;
-  const t = new Audio(); t.preload = 'metadata'; let done = false;
-  const fin = (v) => { if (done) return; done = true; reciterOK = v; };
-  t.onloadedmetadata = () => fin(true); t.onerror = () => fin(false); setTimeout(() => fin(false), 8000);
-  t.src = WBW_BASE + '001_001_001.mp3';
-}
+export function probeReciter() {}
 
 // صوت الجهاز: كما كان يعمل أولاً (اختيار الصوت العربي نفسه، وإلغاء ثم نطق داخل لمسة المستخدم)
 let voice = null;
@@ -133,11 +128,13 @@ export function stopAudio() { playing?.stop(); playing = null; try { SS()?.cance
 /** يشغّل قائمة مصادر متتالية: {key} تسجيل المعلم، {url} صوت القارئ، {tts} صوت الجهاز */
 export function playSeq(list, { gap = 0.18 } = {}) {
   playing?.stop(); try { el?.pause(); } catch {}
-  let cancelled = false, first = true;
+  let cancelled = false, first = true, urlFailed = false;
   const me = { stop: () => { cancelled = true; try { el?.pause(); } catch {} try { SS()?.cancel(); } catch {} } };
   playing = me;
   const playUrl = (u, res, fail) => {
-    const a = audioEl(); let ok = false;
+    const a = audioEl(); let ok = false, over = false;
+    const once = (fn) => () => { if (over) return; over = true; fn(); };
+    res = once(res); fail = once(fail);
     const t = setTimeout(() => (ok ? res() : fail()), 12000);
     a.onended = () => { clearTimeout(t); res(); }; a.onerror = () => { clearTimeout(t); fail(); };
     a.onplaying = () => { ok = true; };
@@ -153,8 +150,8 @@ export function playSeq(list, { gap = 0.18 } = {}) {
       if (ready) return playUrl(ready, res, () => tts(src.fallback));
       teacherUrl(src.key).then((u) => (cancelled ? res() : u ? playUrl(u, res, () => tts(src.fallback)) : tts(src.fallback)));
     } else if (src.url) {
-      if (reciterOK !== true) return tts(src.fallback);
-      playUrl(src.url, res, () => { reciterOK = false; tts(src.fallback); });
+      if (urlFailed) return res();
+      playUrl(src.url, res, () => { urlFailed = true; tts(src.fallback); });
     } else if (src.tts) tts(src.tts);
     else res();
   });
@@ -166,8 +163,8 @@ export function playSeq(list, { gap = 0.18 } = {}) {
 export function sourcesFor(item) {
   const s = item.s;
   if (hasRec(s)) return { list: [{ key: keyOf(s), fallback: s }], kind: 'teacher' };
-  const url = reciterOK === true ? reciterUrl(item) : null;
-  if (url) return { list: [{ url, fallback: s }], kind: 'reciter' };
+  const urls = reciterUrls(item);
+  if (urls) return { list: urls.map((url, i) => ({ url, fallback: i ? '' : s })), kind: 'reciter' };
   const parts = s.split(/\s+/).filter(Boolean);
   if (parts.length > 1 && parts.every((p) => hasRec(p))) return { list: parts.map((p) => ({ key: keyOf(p), fallback: p })), kind: 'teacher' };
   return { list: [{ tts: s }], kind: 'tts' };
