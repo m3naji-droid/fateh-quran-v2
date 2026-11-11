@@ -8,7 +8,7 @@ import { RecitationSession, hasRecorder, micErrorText } from './speech.js';
 import { aiEnabled, phonemes } from './tajweed-ai.js';
 import { judgePhonemes, judgeTranscript } from './phon.js';
 import { LESSONS, CONCEPTS, itemOf, lessonByN } from './iqra-data.js';
-import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob } from './iqra-audio.js';
+import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, prefetch, probeReciter, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob } from './iqra-audio.js';
 import { tajSteps } from './iqra-taj.js';
 
 export const IQ_DEFAULT = { count: 15, pass: 85, pts: 3, taj: 13 };
@@ -29,28 +29,6 @@ export function iqraBonus(states, pts = IQ_DEFAULT.pts) {
   const out = [];
   Object.entries(states || {}).forEach(([pn, st]) => Object.values(st?.mastered || {}).forEach((m) => { if (m && !m.skip && m.at) out.push({ pn, bonus: pts, createdAt: m.at }); }));
   return out;
-}
-
-/* ---------- النطق النموذجي (صوت الجهاز) ---------- */
-let voice = null;
-function pickVoice() {
-  if (typeof speechSynthesis === 'undefined') return null;
-  const V = speechSynthesis.getVoices().filter((v) => /^ar/i.test(v.lang));
-  voice = V.find((v) => /SA|Maged|Majed|Tarik/i.test(v.lang + v.name)) || V[0] || null;
-  return voice;
-}
-if (typeof speechSynthesis !== 'undefined') { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
-export const canSpeak = () => typeof speechSynthesis !== 'undefined' && !!(voice || pickVoice());
-export function speak(text) {
-  if (typeof speechSynthesis === 'undefined') return false;
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = voice?.lang || 'ar-SA'; if (voice) u.voice = voice;
-    u.rate = 0.72; u.pitch = 1;
-    speechSynthesis.speak(u);
-    return true;
-  } catch { return false; }
 }
 
 /* ---------- تسجيل كلمة واحدة: يتوقف وحده بعد سكوت الطالب ---------- */
@@ -124,6 +102,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   const save = (patch) => { Object.assign(st, patch); return store.saveIqra(me.id, patch).catch((e) => { console.warn('iqra save', e); toast('تعذّر حفظ تقدمك. تحقق من الاتصال.'); }); };
 
   (async () => {
+    probeReciter();
     [cfg, st] = await Promise.all([iqraCfg(), store.getIqra(me.id).catch(() => null), audioIndex()]);
     st = st || { placed: false, cur: 1, mastered: {}, wrong: {}, sessions: [] };
     st.mastered = st.mastered || {}; st.wrong = st.wrong || {}; st.sessions = st.sessions || [];
@@ -223,7 +202,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
     const order = seq || [i];
     const at = order.indexOf(i);
     const list = order.slice(at).concat(order.slice(0, at)).map((k) => ({ ...itemOf(L.items[k], L.n), i: k, n: L.n }));
-    run({ mode: 'practice', items: list, title: `تمرين حر · الدرس ${ar(L.n)}`, taj: freeTaj ? 'opt' : null });
+    run({ mode: 'practice', items: list, title: `تمرين حر · الدرس ${ar(L.n)}`, taj: freeTaj ? 'opt' : null }).then(() => { if (alive) home(); });
   }
 
   /* --- اختبار تحديد المستوى --- */
@@ -305,6 +284,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
       const paintTaj = () => {
         const it = items[k];
         steps = steps || tajSteps(it.s);
+        if (ts === 0) { steps.forEach((x) => prefetch((x.say || []).concat(x.syl ? [x.syl] : []).filter((n) => hasRec(n)).map((n) => ({ key: keyOf(n) })))); prefetch(sourcesFor(it).list); }
         const sp = steps[ts];
         const T = it.s, Z = '\u200d';
         const hl = sp ? esc(T.slice(0, sp.at)) + (sp.at ? Z : '') + '<mark class="' + (sp.silent ? 'sil' : '') + '">' + Z + esc(T.slice(sp.at, sp.end)) + Z + '</mark>' + (sp.end < T.length ? Z : '') + esc(T.slice(sp.end)) : esc(T);
@@ -333,6 +313,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         const it = items[k];
         if (ts >= 0) return paintTaj();
         const src = sourcesFor(it);
+        prefetch(src.list);
         host.innerHTML = `<div class="card stack iq iq-run">
           <div class="row" style="justify-content:space-between"><span class="small muted">${esc(title)}${step ? ` · ${ar(step[0])}/${ar(step[1])}` : ''}</span>
             <button class="btn sm ghost" type="button" id="iqX">✕ ${mode === 'practice' ? 'إغلاق' : 'خروج'}</button></div>
@@ -411,7 +392,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     states = Object.fromEntries(pns.map((p, i) => [p, S[i]]));
     const R = await Promise.all(pns.map((p) => store.listIqraRev(p).catch(() => [])));
     revs = R.flat().filter((r) => r.status === 'pending');
-    await audioIndex(true);
+    await audioIndex(true); probeReciter();
     flags = await store.listIqraFlags().catch(() => []);
     onChange({ cfg, states });
     if (alive) draw();

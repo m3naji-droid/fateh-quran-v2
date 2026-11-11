@@ -67,80 +67,98 @@ export const hasRec = (text) => !!(idx && idx[keyOf(text)]);
 export function setIdxLocal(key, v) { idx = idx || {}; if (v) idx[key] = v; else delete idx[key]; }
 
 /* ---------- التشغيل ---------- */
+// عنصر صوت واحد يُعاد استعماله: آيفون يسمح بتشغيله لاحقاً بعد أن يُفتح بلمسة واحدة من المستخدم
 let ac = null;
 const ctx = () => (ac = ac || new (window.AudioContext || window.webkitAudioContext)());
-const bufCache = new Map();
-async function teacherBuffer(key) {
-  if (bufCache.has(key)) return bufCache.get(key);
-  const p = (async () => {
-    const d = await store.getIqraAudio(key);
-    if (!d?.b64) return null;
-    const bin = atob(d.b64), arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return await ctx().decodeAudioData(arr.buffer);
-  })().catch((e) => { console.warn('iqra audio', e); return null; });
-  bufCache.set(key, p);
-  return p;
-}
-export function dropCache(key) { bufCache.delete(key); }
-
-let playing = null;
-const SS = () => (typeof speechSynthesis !== 'undefined' ? speechSynthesis : null);
-/** إيقاف صوت الجهاز فقط إن كان يتكلم: الإلغاء ثم النطق فوراً يُسقط النطق في بعض المتصفحات */
-function hush() { const ss = SS(); try { if (ss && (ss.speaking || ss.pending)) { ss.cancel(); return true; } } catch {} return false; }
-export function stopAudio() { playing?.stop(); playing = null; hush(); }
-
-/* آيفون وبعض متصفحات أندرويد لا تسمح بالصوت إلا بعد لمسة من المستخدم:
-   عند أول لمسة نفتح سياق الصوت ونُطلق نطقاً فارغاً، فيعمل الصوت بعدها حتى لو بدأ متأخراً (بعد تحميل) */
+let el = null;
+const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+const audioEl = () => { if (!el) { el = new Audio(); el.preload = 'auto'; } return el; };
 let unlocked = false;
 function unlock() {
-  try { const a = ctx(); if (a.state === 'suspended') a.resume().catch(() => {}); } catch {}
   if (unlocked) return; unlocked = true;
-  try { const ss = SS(); if (ss) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; ss.speak(u); } } catch {}
+  try { const a = audioEl(); a.src = SILENT; a.play().catch(() => { unlocked = false; }); } catch {}
 }
 if (typeof document !== 'undefined') ['pointerdown', 'touchend', 'keydown'].forEach((e) => document.addEventListener(e, unlock, { capture: true, passive: true }));
 
-const held = new Set(); // يمنع حذف النطق من الذاكرة قبل انتهائه (خلل معروف في كروم)
-let arVoice = null;
-const pickAr = () => { const V = SS()?.getVoices?.() || []; arVoice = V.find((v) => /^ar[-_]SA/i.test(v.lang)) || V.find((v) => /^ar/i.test(v.lang)) || arVoice; return arVoice; };
-if (SS()) { pickAr(); try { SS().addEventListener?.('voiceschanged', pickAr); } catch {} }
-function speakNow(text, done) {
-  const ss = SS(); if (!ss || !text) return done();
-  let fin = false; const end = () => { if (fin) return; fin = true; held.delete(u); done(); };
-  const u = new SpeechSynthesisUtterance(text);
-  const v = pickAr(); if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'ar-SA';
-  u.rate = 0.75; u.onend = end; u.onerror = end; held.add(u);
-  const go = () => { try { ss.resume?.(); ss.speak(u); } catch { end(); } };
-  if (hush()) setTimeout(go, 90); else go();
-  setTimeout(end, 2500 + text.length * 350);
+// تسجيلات المعلم: تُحمَّل مسبقاً وتُحوَّل إلى رابط محلي
+const urlCache = new Map(), urlReady = new Map();
+function teacherUrl(key) {
+  if (urlCache.has(key)) return urlCache.get(key);
+  const p = store.getIqraAudio(key).then((d) => {
+    if (!d?.b64) return null;
+    const bin = atob(d.b64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const u = URL.createObjectURL(new Blob([arr], { type: d.mime || 'audio/wav' }));
+    urlReady.set(key, u); return u;
+  }).catch((e) => { console.warn('iqra audio', e); urlCache.delete(key); return null; });
+  urlCache.set(key, p);
+  return p;
 }
+export function dropCache(key) { urlCache.delete(key); urlReady.delete(key); }
+/** تحميل أصوات العنصر مسبقاً (عند عرضه) ليبدأ التشغيل فوراً عند الضغط */
+export function prefetch(list) { (list || []).forEach((s) => s.key && teacherUrl(s.key)); }
+
+// صوت القارئ: نتحقق مرة واحدة أن روابطه تعمل على هذا الجهاز، وإلا نستعمل صوت الجهاز مباشرة
+let reciterOK = null;
+export function probeReciter() {
+  if (reciterOK !== null || typeof Audio === 'undefined') return;
+  reciterOK = false;
+  const t = new Audio(); t.preload = 'metadata'; let done = false;
+  const fin = (v) => { if (done) return; done = true; reciterOK = v; };
+  t.onloadedmetadata = () => fin(true); t.onerror = () => fin(false); setTimeout(() => fin(false), 8000);
+  t.src = WBW_BASE + '001_001_001.mp3';
+}
+
+// صوت الجهاز: كما كان يعمل أولاً (اختيار الصوت العربي نفسه، وإلغاء ثم نطق داخل لمسة المستخدم)
+let voice = null;
+const SS = () => (typeof speechSynthesis !== 'undefined' ? speechSynthesis : null);
+function pickVoice() { const V = (SS()?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)); voice = V.find((v) => /SA|Maged|Majed|Tarik/i.test(v.lang + v.name)) || V[0] || null; return voice; }
+if (SS()) { pickVoice(); try { SS().onvoiceschanged = pickVoice; } catch {} }
+export const canSpeak = () => !!SS();
+const held = new Set(); // يمنع حذف النطق من الذاكرة قبل انتهائه (خلل في كروم)
+function speakNow(text, done, first) {
+  const ss = SS(); if (!ss || !text) return done();
+  if (!voice) pickVoice();
+  let fin = false; const u = new SpeechSynthesisUtterance(text);
+  const end = () => { if (fin) return; fin = true; held.delete(u); done(); };
+  u.lang = voice?.lang || 'ar-SA'; if (voice) u.voice = voice; u.rate = 0.72; u.pitch = 1;
+  u.onend = end; u.onerror = end; held.add(u);
+  try { if (first) ss.cancel(); ss.speak(u); } catch { end(); }
+  setTimeout(end, 3000 + text.length * 400);
+}
+
+let playing = null;
+export function stopAudio() { playing?.stop(); playing = null; try { SS()?.cancel(); } catch {} try { el?.pause(); } catch {} }
 
 /** يشغّل قائمة مصادر متتالية: {key} تسجيل المعلم، {url} صوت القارئ، {tts} صوت الجهاز */
 export function playSeq(list, { gap = 0.18 } = {}) {
-  stopAudio();
-  let cancelled = false, cur = null;
-  const me = { stop: () => { cancelled = true; try { cur?.stop?.(); cur?.pause?.(); } catch {} hush(); } };
+  playing?.stop(); try { el?.pause(); } catch {}
+  let cancelled = false, first = true;
+  const me = { stop: () => { cancelled = true; try { el?.pause(); } catch {} try { SS()?.cancel(); } catch {} } };
   playing = me;
+  const playUrl = (u, res, fail) => {
+    const a = audioEl(); let ok = false;
+    const t = setTimeout(() => (ok ? res() : fail()), 12000);
+    a.onended = () => { clearTimeout(t); res(); }; a.onerror = () => { clearTimeout(t); fail(); };
+    a.onplaying = () => { ok = true; };
+    a.src = u; a.currentTime = 0;
+    a.play().catch(() => { clearTimeout(t); fail(); });
+  };
   const one = (src) => new Promise((res) => {
     if (cancelled) return res();
+    const f = first; first = false;
+    const tts = (txt) => speakNow(txt, res, f);
     if (src.key) {
-      teacherBuffer(src.key).then((b) => {
-        if (!b || cancelled) return res(b ? undefined : one({ tts: src.fallback }));
-        const n = ctx().createBufferSource(); n.buffer = b; n.connect(ctx().destination); n.onended = () => res(); cur = n;
-        if (ctx().state === 'suspended') ctx().resume().catch(() => {});
-        n.start();
-      });
+      const ready = urlReady.get(src.key);
+      if (ready) return playUrl(ready, res, () => tts(src.fallback));
+      teacherUrl(src.key).then((u) => (cancelled ? res() : u ? playUrl(u, res, () => tts(src.fallback)) : tts(src.fallback)));
     } else if (src.url) {
-      const a = new Audio(src.url); cur = a;
-      let failed = false; const fail = () => { if (failed) return; failed = true; res(one({ tts: src.fallback })); };
-      a.onended = () => res(); a.onerror = fail;
-      a.play().catch(fail);
-    } else if (src.tts) {
-      speakNow(src.tts, res);
-    } else res();
+      if (reciterOK !== true) return tts(src.fallback);
+      playUrl(src.url, res, () => { reciterOK = false; tts(src.fallback); });
+    } else if (src.tts) tts(src.tts);
+    else res();
   });
-  const done = (async () => { for (const s of list) { if (cancelled) break; await one(s); if (gap) await new Promise((r) => setTimeout(r, gap * 1000)); } if (playing === me) playing = null; })();
-  me.done = done;
+  me.done = (async () => { for (const s of list) { if (cancelled) break; await one(s); if (gap) await new Promise((r) => setTimeout(r, gap * 1000)); } if (playing === me) playing = null; })();
   return me;
 }
 
@@ -148,7 +166,7 @@ export function playSeq(list, { gap = 0.18 } = {}) {
 export function sourcesFor(item) {
   const s = item.s;
   if (hasRec(s)) return { list: [{ key: keyOf(s), fallback: s }], kind: 'teacher' };
-  const url = reciterUrl(item);
+  const url = reciterOK === true ? reciterUrl(item) : null;
   if (url) return { list: [{ url, fallback: s }], kind: 'reciter' };
   const parts = s.split(/\s+/).filter(Boolean);
   if (parts.length > 1 && parts.every((p) => hasRec(p))) return { list: parts.map((p) => ({ key: keyOf(p), fallback: p })), kind: 'teacher' };
@@ -220,6 +238,7 @@ async function toWav(blob) {
 export async function saveRecording(text, blob) {
   const key = keyOf(text), b64 = await blobToB64(blob);
   await store.saveIqraAudio(key, { b64, mime: 'audio/wav', t: normText(text), at: new Date().toISOString() });
+  dropCache(key);
   const v = { t: normText(text), at: Date.now() };
   await store.setIqraAudioIdx(key, v);
   setIdxLocal(key, v); dropCache(key);
@@ -230,4 +249,4 @@ export async function deleteRecording(text) {
   await store.deleteIqraAudio(key); await store.setIqraAudioIdx(key, null);
   setIdxLocal(key, null); dropCache(key);
 }
-export function playBlob(blob) { stopAudio(); const a = new Audio(URL.createObjectURL(blob)); a.play().catch(() => {}); playing = { stop: () => a.pause() }; return a; }
+export function playBlob(blob) { stopAudio(); const a = audioEl(); a.onended = a.onerror = a.onplaying = null; a.src = URL.createObjectURL(blob); a.play().catch(() => {}); return a; }
