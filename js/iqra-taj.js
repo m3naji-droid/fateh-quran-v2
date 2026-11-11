@@ -86,7 +86,10 @@ export function tajSteps(text) {
       if (u.m.includes(MADDA)) say.push(M.madda);
       const sylBase = (HAMZA.has(u.c) ? (v === KASRA ? 'إ' : 'أ') : u.c === 'ة' ? 'ت' : u.c) + (u.m.match(/[ً-ِ]/)?.[0] || '');
       built += seg;
-      steps.push({ wi, at, end, say, syl: sylBase + (u.m.includes(TF) ? 'ا' : '') + (u.m.includes(DAGGER) ? 'ا' : smallMadd === M.swaw ? 'و' : smallMadd === M.syaa ? 'ي' : ''), cum: built });
+      // ألف تنوين الفتح أو ياؤه بعده: لا تُذكر ولا تُنطق، فتُضم إلى الخطوة نفسها «قاف فتحتان = قًا»
+      let endX = end, note = '';
+      if (u.m.includes(TF) && U[i + 1] && !U[i + 1].m && (U[i + 1].c === 'ا' || U[i + 1].c === 'ى')) { i++; built += w.slice(U[i].at, U[i].end); endX = base + U[i].end; note = 'الألف بعد الفتحتين لا تُنطق'; }
+      steps.push({ wi, at, end: endX, note, say, syl: sylBase + (u.m.includes(TF) ? 'ا' : '') + (u.m.includes(DAGGER) ? 'ا' : smallMadd === M.swaw ? 'و' : smallMadd === M.syaa ? 'ي' : ''), cum: built });
     }
     base += w.length + 1;
   });

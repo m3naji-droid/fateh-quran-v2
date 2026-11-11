@@ -280,7 +280,17 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         store.addIqraFlag({ key: keyOf(it.s), t: it.t, s: it.s, n: it.n, pn: me.id, name: me.name }).then(() => toast('شكراً! أُبلغ معلمك ليصحّح النطق.')).catch(() => toast('تعذّر الإرسال.'));
       };
       /* --- مرحلة التجريد: الكلمة حرفاً حرفاً --- */
-      const stepAudio = (sp) => playSeq([...sp.say.map((n) => (hasRec(n) ? { key: keyOf(n), fallback: n } : { tts: n })), ...(sp.syl ? [hasRec(sp.syl) ? { key: keyOf(sp.syl), fallback: sp.syl } : { tts: sp.syl }] : [])], { gap: 0.12 });
+      // كل خطوة كما في الكتاب: اسم الحرف، ثم اسم حركته، ثم صوته، ثم ما بُني مجموعاً بتشكيله
+      // «فا فتحة فَ» ← «را ساكنة فَرْ» ← «قاف فتحتان فَرْقًا». والخطوة الأخيرة تُختم بالكلمة كاملة (صوت القارئ أو المعلم)
+      const src1 = (t) => (hasRec(t) ? { key: keyOf(t), fallback: t } : { tts: t });
+      const stepAudio = (sp) => {
+        const spoken = steps.filter((x) => !x.silent), last = spoken[spoken.length - 1] === sp, firstOfWord = !steps.some((x) => !x.silent && x.wi === sp.wi && steps.indexOf(x) < steps.indexOf(sp));
+        const list = sp.say.map(src1);
+        if (sp.syl && (firstOfWord || sp.syl !== sp.cum)) list.push(src1(sp.syl));
+        if (last) list.push(...sourcesFor(items[k]).list);
+        else if (!firstOfWord || !sp.syl) list.push(src1(sp.cum.replace(/[\u0671]/g, 'ا')));
+        return playSeq(list, { gap: 0.12 });
+      };
       const paintTaj = () => {
         const it = items[k];
         steps = steps || tajSteps(it.s);
@@ -292,7 +302,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
           <div class="row" style="justify-content:space-between"><span class="small muted">${esc(title)} · التجريد</span><button class="btn sm ghost" type="button" id="iqX">✕ ${mode === 'practice' ? 'إغلاق' : 'خروج'}</button></div>
           ${mode !== 'practice' ? `<div class="iq-prog" aria-hidden="true"><i style="width:${(k / items.length) * 100}%"></i></div><span class="small muted" style="text-align:center">${ar(k + 1)} من ${ar(items.length)}</span>` : ''}
           <div class="iq-word iq-taj" lang="ar">${hl}</div>
-          <div class="iq-tstep">${sp.silent ? `<span class="iq-sil">${esc(sp.note)}</span>` : `<span class="iq-names">${sp.say.map(esc).join(' <i>+</i> ')}</span>${sp.syl ? ` <i>=</i> <b class="iq-syl">${esc(sp.syl)}</b>` : ''}`}</div>
+          <div class="iq-tstep">${sp.silent ? `<span class="iq-sil">${esc(sp.note)}</span>` : `<span class="iq-names">${sp.say.map(esc).join(' <i>+</i> ')}</span>${sp.syl ? ` <i>=</i> <b class="iq-syl">${esc(sp.syl)}</b>` : ''}${steps.some((x) => !x.silent && x.wi === sp.wi && steps.indexOf(x) < steps.indexOf(sp)) || !sp.syl ? ` <i>←</i> <b class="iq-syl">${esc(sp.cum)}</b>` : ''}`}</div>
           <div class="iq-cum"><span class="small muted">ما بنيتَه حتى الآن</span><b lang="ar">${esc(sp.cum)}</b></div>
           ${sp.note && !sp.silent ? `<span class="small muted" style="text-align:center">💡 ${esc(sp.note)}</span>` : ''}
           <div class="iq-ctrl">
