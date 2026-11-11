@@ -282,6 +282,41 @@ async def analyze(
     return {"job": jid, "status": "queued", "model_ready": STATE["ready"]}
 
 
+@app.post("/phonemes")
+async def phonemes(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(None),
+    x_internal_secret: str | None = Header(None),
+):
+    """الرسم الصوتي لتسجيل قصير (حرف أو كلمة من دروس «اقرأ وارتقِ»)، ويقارنه الموقع بالمرجع بنفسه."""
+    t_req = time.time()
+    check_auth(authorization, x_internal_secret)
+    if STATE["error"]:
+        raise HTTPException(503, "تعذر تحميل النموذج: " + STATE["error"])
+    data = await file.read()
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(413, "الملف كبير جداً.")
+    wave = decode_audio(data)
+    if len(wave) / A.SR > 20:
+        raise HTTPException(413, "التسجيل أطول من ٢٠ ثانية.")
+
+    def run():
+        while not STATE["ready"] and not STATE["error"]:
+            time.sleep(1)
+        if STATE["error"]:
+            raise RuntimeError("تعذر تحميل النموذج.")
+        chunks = A.split_on_silence(wave)
+        return transcribe(chunks) if chunks else ""
+
+    try:
+        pred = await asyncio.get_running_loop().run_in_executor(pool, run)
+    except Exception as e:
+        raise HTTPException(500, str(e)[:200])
+    billed = round(time.time() - t_req, 1)
+    await asyncio.get_running_loop().run_in_executor(None, lambda: usage_inc(phonemes=1, billed_seconds=billed, audio_seconds=round(len(wave) / A.SR, 1)))
+    return {"pred": pred, "seconds": round(len(wave) / A.SR, 2), "took": billed}
+
+
 def _wait_then_run(*args):
     while not STATE["ready"] and not STATE["error"]:
         time.sleep(1)

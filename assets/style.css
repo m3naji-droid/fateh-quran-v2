@@ -965,3 +965,60 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .lists-ol .lr-name { display: grid; }
 .lists-ol .lr-v { text-align: end; display: grid; }
 .lists-me { padding: 6px 8px; border-radius: 10px; background: var(--sheet, rgba(0,0,0,.03)); }
+
+/* ---------- اقرأ وارتقِ ---------- */
+.iq h2 { font-size: 20px; }
+.iq h3 { font-size: 17px; margin: 0; }
+.iq-head { display: flex; gap: 14px; align-items: center; }
+.iq-n { flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; background: var(--green); color: #fff; font: 700 22px var(--f-display); }
+.iq-hint { margin: 10px 0; padding: 8px 12px; background: var(--gold-soft); border-radius: 10px; font-size: 14px; }
+.iq-today p { margin: 10px 0; }
+.btn.iq-big { padding: 12px 26px; font-size: 17px; border-radius: 12px; }
+.iq-note { padding: 10px 14px; border-radius: 10px; font-size: 14px; }
+.iq-note.ok { background: var(--ok-bg); color: var(--ok); }
+.iq-note.bad { background: var(--bad-bg); color: var(--bad); }
+.iq-wrong { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.iq-chip { font: 22px var(--f-quran); border: 1px solid var(--line); background: var(--paper); border-radius: 10px; padding: 0 12px; cursor: pointer; color: var(--ink); }
+.iq-chip:hover { border-color: var(--green); }
+.iq-path { display: flex; flex-wrap: wrap; gap: 6px; }
+.iq-dot { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--line); font-size: 13px; font-weight: 700; color: var(--muted); background: var(--card); font-variant-numeric: tabular-nums; }
+.iq-dot.done { background: var(--green); border-color: var(--green); color: #fff; }
+.iq-dot.skip { background: var(--green-2); border-color: var(--green-2); color: var(--green); }
+.iq-dot.cur { border-color: var(--gold); background: var(--gold-soft); color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 25%, transparent); }
+.iq-dot.soon { border-style: dashed; opacity: .55; }
+.iq-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.iq-cell { font: 24px/1.9 var(--f-quran); border: 1px solid var(--line); background: var(--paper); border-radius: 12px; cursor: pointer; color: var(--ink); padding: 4px 6px; min-height: 58px; }
+.iq-cell:hover { border-color: var(--green); background: var(--green-2); }
+.chip.iq-tg.sel { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.iq-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.iq-log li { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.iq-run { align-items: stretch; }
+.iq-prog { height: 6px; border-radius: 3px; background: var(--paper); overflow: hidden; }
+.iq-prog i { display: block; height: 100%; background: var(--green); transition: width .3s; }
+.iq-word { font: 64px/1.8 var(--f-quran); text-align: center; padding: 18px 8px; background: var(--sheet, var(--paper)); border: 1px solid var(--line); border-radius: 18px; color: var(--ink); overflow-wrap: anywhere; }
+.iq-ctrl { display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.iq-mic { width: 84px; height: 84px; border-radius: 50%; border: 0; background: var(--green); color: #fff; font-size: 34px; cursor: pointer; box-shadow: 0 6px 18px color-mix(in srgb, var(--green) 35%, transparent); transition: transform .15s; }
+.iq-mic:active { transform: scale(.94); }
+.iq-mic.on { background: var(--bad); animation: iqPulse 1.1s infinite; }
+@keyframes iqPulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--bad) 45%, transparent); } 50% { box-shadow: 0 0 0 14px transparent; } }
+.iq-level { height: 6px; border-radius: 3px; background: var(--paper); overflow: hidden; max-width: 260px; width: 100%; margin: 0 auto; }
+.iq-level i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .08s; }
+.iq-msg { text-align: center; min-height: 28px; font-weight: 600; color: var(--muted); }
+.iq-msg.ok { color: var(--ok); font-size: 20px; }
+.iq-msg.bad { color: var(--bad); }
+.iq-msg.warn { color: var(--warn); }
+.iq-score { width: 112px; height: 112px; border-radius: 50%; display: grid; place-items: center; font: 700 30px var(--f-display); border: 6px solid var(--line); }
+.iq-score.pass { border-color: var(--ok); color: var(--ok); }
+.iq-score.fail { border-color: var(--bad); color: var(--bad); }
+.iq-score.await { border-color: var(--warn); color: var(--warn); }
+.iq-revs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.iq-revs li { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.iq-revs li > .row { grid-column: 1 / -1; }
+.iq-rw { font: 28px/1.6 var(--f-quran); }
+.iq-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.iq-table th, .iq-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: middle; }
+.iq-table th { color: var(--muted); font-weight: 600; font-size: 13px; }
+.iq-pick { display: flex; flex-wrap: wrap; gap: 6px; max-height: 320px; overflow-y: auto; }
+.iq-st { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 14px; }
+.iq-st.on { background: var(--green-2); border-color: var(--green); color: var(--green); font-weight: 600; }
+@media (max-width: 520px) { .iq-word { font-size: 48px; } .iq-mic { width: 74px; height: 74px; } }

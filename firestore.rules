@@ -202,6 +202,14 @@ service cloud.firestore {
           && request.resource.data.hp is number && request.resource.data.hp >= 0 && request.resource.data.hp <= 200
           && request.resource.data.hm is number && request.resource.data.hm >= 0 && request.resource.data.hm <= 30;
       }
+      // «اقرأ وارتقِ»: الكلمات التي تعثّر فيها الطالب بتسجيلها (صغير)، يسمعها المعلم ويحكم عليها ثم يُحذف الصوت
+      match /iqrarev/{rid} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create: if isStudent(pn)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.get('b64', '').size() < 300000;
+        allow update, delete: if isTeacher();
+      }
       // طلبات إعادة التسميع: يكتبها المعلم، ويقرؤها الطالب
       match /retakes/{rid} {
         allow read: if isTeacher() || isStudent(pn);

@@ -188,6 +188,15 @@ const local = {
   // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
   async getProgress(pn) { return LS.get('progress_' + pn, null); },
   async saveProgress(pn, patch) { LS.set('progress_' + pn, { ...(LS.get('progress_' + pn, {}) || {}), ...patch }); },
+  // «اقرأ وارتقِ»: إعداد المعلم (الطلاب المختارون والعدد والنسبة)، وتقدم الطالب، والكلمات المتعثرة لسماع المعلم
+  async getIqraCfg() { return LS.get('iqraCfg', null); },
+  async setIqraCfg(c) { LS.set('iqraCfg', c); },
+  async getIqra(pn) { return LS.get('iqra_' + pn, null); },
+  async saveIqra(pn, patch) { LS.set('iqra_' + pn, { ...(LS.get('iqra_' + pn, {}) || {}), ...patch, at: now() }); },
+  async addIqraRev(pn, r) { const all = LS.get('iqrarev', []); const id = r.id || uid(); all.push({ ...r, id, pn, at: now(), status: 'pending' }); LS.set('iqrarev', all); return id; },
+  async listIqraRev(pn) { return LS.get('iqrarev', []).filter((x) => x.pn === pn).map(({ b64, ...x }) => ({ ...x, hasAudio: !!b64 })); },
+  async getIqraRevAudio(pn, id) { const x = LS.get('iqrarev', []).find((r) => r.pn === pn && r.id === id); return x?.b64 ? { b64: x.b64, mime: x.mime } : null; },
+  async decideIqraRev(pn, id, patch) { const all = LS.get('iqrarev', []); const i = all.findIndex((x) => x.pn === pn && x.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch, b64: null, decidedAt: now() }; LS.set('iqrarev', all); } },
   // رأيك يهمنا: ملاحظات الطلاب وردود المعلم
   async enqueueAi() {},
   async requestLate(pn, taskId, d) { const all = LS.get('late', []).filter((x) => !(x.pn === pn && x.id === taskId)); all.push({ ...d, id: taskId, pn, status: 'pending', at: now() }); LS.set('late', all); },
@@ -526,6 +535,14 @@ async function makeCloud() {
     async setChallengeCfg(c) { await setDoc(doc(db, 'leaderboard', 'challengeCfg'), c); },
     async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
     async saveProgress(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'map'), { ...patch, at: now() }, { merge: true }); },
+    async getIqraCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'iqraCfg')); return d.exists() ? d.data() : null; },
+    async setIqraCfg(c) { await setDoc(doc(db, 'leaderboard', 'iqraCfg'), { ...c, at: now() }); },
+    async getIqra(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'iqra')); return d.exists() ? d.data() : null; },
+    async saveIqra(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'iqra'), { ...patch, at: now() }, { merge: true }); },
+    async addIqraRev(pn, r) { const id = r.id || uid(); await setDoc(doc(db, 'roster', pn, 'iqrarev', id), { ...r, id, pn, at: now(), status: 'pending' }); return id; },
+    async listIqraRev(pn) { await ensureAnon(); return (await getDocs(collection(db, 'roster', pn, 'iqrarev'))).docs.map((d) => { const { b64, ...x } = d.data(); return { ...x, id: d.id, hasAudio: !!b64 }; }); },
+    async getIqraRevAudio(pn, id) { const d = await getDoc(doc(db, 'roster', pn, 'iqrarev', id)); const x = d.exists() ? d.data() : null; return x?.b64 ? { b64: x.b64, mime: x.mime } : null; },
+    async decideIqraRev(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'iqrarev', id), { ...patch, b64: null, decidedAt: now() }); },
     async requestLate(pn, taskId, d) { await setDoc(doc(db, 'roster', pn, 'late', taskId), { ...d, pn, status: 'pending', at: now() }); },
     /** طابور تحليل التجويد على الخادم: تسليم لم يكتمل تحليله على جهاز الطالب */
     async enqueueAi(pn, sid, running = false) { await setDoc(doc(db, 'aiq', pn + '__' + sid), { pn, sid, status: 'queued', running: !!running, at: now() }); },

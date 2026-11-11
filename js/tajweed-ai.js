@@ -77,6 +77,23 @@ export async function analyze(blob, { surah, from, to }, onProgress = () => {}, 
   }
 }
 
+/** الرسم الصوتي لتسجيل قصير (حرف أو كلمة في «اقرأ وارتقِ»). يعيد النص الصوتي أو يرمي خطأ. */
+export async function phonemes(blob, signal) {
+  const fd = new FormData();
+  fd.append('file', blob, 'say.' + ((blob.type || '').includes('mp4') ? 'mp4' : 'webm'));
+  const headers = {};
+  try { const t = await tokenProvider(); if (t) headers.Authorization = 'Bearer ' + t; } catch {}
+  let r, j;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    r = await fetch(base() + '/phonemes', { method: 'POST', body: fd, headers, signal });
+    j = await r.json().catch(() => ({}));
+    if (r.status !== 429 && r.status !== 503) break;
+    await new Promise((res) => setTimeout(res, 2500 * (attempt + 1)));
+  }
+  if (!r.ok) throw new Error((typeof j.detail === 'string' && j.detail) || 'HTTP ' + r.status);
+  return String(j.pred || '');
+}
+
 /** تحويل نتيجة الخادم إلى صيغة مختصرة مرتبطة بأرقام كلمات المقطع */
 function compact(res, { surah, from, to }) {
   const offset = {};
