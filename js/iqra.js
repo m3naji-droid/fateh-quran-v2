@@ -419,7 +419,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const enabled = students.filter((s) => on.has(s.id));
     host.innerHTML = `<div class="stack iq">
       <div class="card stack">
-        <div><h2>📖 اقرأ وارتقِ <span class="small muted" style="font-weight:400">· إصدار ١١/١١ (٤)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
+        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٥)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
         <div class="row">
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>
@@ -442,7 +442,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
       </div>
 
       <div class="card stack">
-        <h3>تقدّم الطلاب (${ar(enabled.length)})</h3>
+        <h3>👥 تقدّم الطلاب (${ar(enabled.length)})</h3>
         ${enabled.length ? `<div class="table-wrap"><table class="iq-table"><thead><tr><th>الطالب</th><th>الدرس الحالي</th><th>أتقن</th><th>آخر درس يومي</th><th>تغيير الدرس</th></tr></thead><tbody>
           ${enabled.map((s) => { const x = states[s.id]; const last = (x?.sessions || []).filter((z) => z.kind !== 'place').slice(-1)[0]; const L = x ? lessonByN(x.cur) : null;
             return `<tr><td>${esc(s.name)}<div class="small muted">${esc(classes.find((c) => c.id === s.classId)?.name || '')}</div></td>
@@ -450,11 +450,11 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
               <td>${ar(Object.values(x?.mastered || {}).filter((m) => !m.skip).length)}</td>
               <td>${last ? `<span class="pill ${last.status === 'pass' ? 'ok' : last.status === 'await' ? 'warn' : 'bad'}">${last.status === 'pass' ? 'أتقن' : last.status === 'await' ? 'ينتظرك' : 'يعيد'} ${last.pct != null ? pctTxt(last.pct) : ''}</span> <span class="small muted">${esc(last.day)}</span>` : '—'}</td>
               <td><select data-cur="${esc(s.id)}" aria-label="درس ${esc(s.name)}"><option value="">—</option>${LESSONS.map((l) => `<option value="${l.n}" ${x?.cur === l.n ? 'selected' : ''}>${ar(l.n)}${l.items.length ? '' : ' (قريباً)'}</option>`).join('')}</select></td></tr>`; }).join('')}
-          </tbody></table></div>` : '<p class="small muted" style="margin:0">لم تختر أحداً بعد. اختر من القائمة التالية.</p>'}
+          </tbody></table></div>` : '<p class="small muted" style="margin:0">لم تختر أحداً بعد. اختر الطلاب من قسم «✅ اختيار الطلاب».</p>'}
       </div>
 
       <div class="card stack">
-        <h3>اختر الطلاب المحتاجين لعناية مكثفة</h3>
+        <h3>✅ اختيار الطلاب</h3><p class="small muted" style="margin:0">اختر الطلاب المحتاجين لعناية مكثفة في النطق والقراءة.</p>
         <div class="row"><input type="search" id="iqQ" placeholder="ابحث بالاسم" value="${esc(q)}" style="flex:1;min-width:160px">
           <select id="iqCls"><option value="all">كل الصفوف</option>${classes.map((c) => `<option value="${esc(c.id)}" ${cls === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
         <div class="iq-pick">${shown.map((s) => `<label class="iq-st${on.has(s.id) ? ' on' : ''}"><input type="checkbox" data-pn="${esc(s.id)}" ${on.has(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">لا نتائج.</span>'}</div>
@@ -470,6 +470,10 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
       try { await store.setIqraCfg(cfg); toast('حُفظت إعدادات «اقرأ وارتقِ».'); onChange({ cfg, states }); } catch (e) { toast('تعذّر الحفظ: ' + e.message); }
       draw();
     };
+    { // الترتيب: ما يحتاج متابعة يومية أولاً، والإعدادات آخراً
+      const root = host.querySelector('.stack.iq'), order = ['🎧', '👥', '✅', '🚩', '🎙', '🗣', '📖', '⚙️'];
+      if (root) [...root.children].sort((a, b) => { const i = (el) => { const t = el.querySelector('h2, h3')?.textContent.trim() || ''; const k = order.findIndex((e) => t.startsWith(e)); return k < 0 ? 99 : k; }; return i(a) - i(b); }).forEach((el) => root.append(el));
+    }
     wireAudio(); wireGen();
     host.querySelector('#iqQ').oninput = (e) => { q = e.target.value.trim(); const pos = e.target.selectionStart; draw(); const i = host.querySelector('#iqQ'); i.focus(); i.setSelectionRange(pos, pos); };
     host.querySelector('#iqCls').onchange = (e) => { cls = e.target.value; draw(); };

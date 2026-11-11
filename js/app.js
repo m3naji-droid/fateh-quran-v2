@@ -2265,6 +2265,53 @@ function viewTeacher(app) {
     const body = $('#tBody', app); if (!body) return;
     offIqraT?.(); offIqraT = null;
     ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+    sectionize(body);
+  }
+
+  /* --- الأقسام مربعات: التبويبات الطويلة تُعرض أقسامها مربعات في الأعلى، والنقر يفتح القسم وحده --- */
+  const SECT_TABS = new Set(['iqra', 'settings', 'honor', 'reports']);
+  let secObs = null;
+  function sectionize(body) {
+    secObs?.disconnect(); secObs = null;
+    body.querySelector(':scope > .sec-bar')?.remove();
+    if (!SECT_TABS.has(tab)) return;
+    const myTab = tab, key = 'tSec_' + myTab;
+    const bar = document.createElement('div'); bar.className = 'sec-bar';
+    body.prepend(bar);
+    let last = '', timer = 0;
+    const titleOf = (el) => { const h = el.querySelector('h2, h3'); if (!h) return null; const c = h.cloneNode(true); c.querySelectorAll('.pill, .small, .tab-n').forEach((x) => x.remove()); return c.textContent.replace(/\s+/g, ' ').trim(); };
+    const badgeOf = (el) => { const b = (el.querySelector('h2 .pill, h3 .pill')?.textContent || '').trim(); return /^[0٠]$/.test(b) ? '' : b; };
+    const sections = () => {
+      let c = body;
+      for (;;) { const kids = [...c.children].filter((x) => x !== bar); if (kids.length === 1 && !kids[0].classList.contains('card') && kids[0].children.length) c = kids[0]; else break; }
+      return [...c.children].filter((x) => x !== bar && !x.matches('.sec-bar')).map((el) => ({ el, t: titleOf(el), b: badgeOf(el) })).filter((x) => x.t);
+    };
+    const keyOf = (t) => t.replace(/[\d٠-٩]+/g, '').replace(/[^\p{L}\s]/gu, '').trim();
+    const render = () => {
+      if (tab !== myTab || !body.isConnected) return;
+      if (!bar.isConnected) { body.prepend(bar); last = ''; } // أعاد القسم رسم الصفحة كلها
+      const S = sections();
+      if (S.length < 2) { bar.hidden = true; S.forEach((x) => (x.el.style.display = '')); return; }
+      bar.hidden = false;
+      const sel = pref.get(key, null);
+      const cur = S.find((x) => keyOf(x.t) === sel);
+      const sig = (cur ? keyOf(cur.t) : '') + '|' + S.map((x) => x.t + x.b).join('|');
+      if (sig !== last) {
+        last = sig;
+        bar.className = 'sec-bar' + (cur ? ' strip' : '');
+        bar.innerHTML = (cur ? '<button type="button" class="sec-all" data-sec="">☰ كل الأقسام</button>' : '') + S.map((x) => {
+          const m = x.t.match(/^(\p{Extended_Pictographic}\uFE0F?)\s*/u);
+          const ICON = [[/مساحة/, '💾'], [/حفظ/, '🗄️'], [/استهلاك/, '📊'], [/إشعار/, '🔔'], [/خادم/, '🤖'], [/شيخ/, '👑'], [/متوسط|دقة/, '📈'], [/خريطة/, '🗺️'], [/طلاب|الطالب/, '👥'], [/أخطاء/, '⚠️']];
+          const ic = m ? m[1] : (ICON.find(([r]) => r.test(x.t)) || [0, '📌'])[1], name = m ? x.t.slice(m[0].length) : x.t;
+          return `<button type="button" class="sec-tile${cur && cur.el === x.el ? ' on' : ''}" data-sec="${esc(keyOf(x.t))}"><span class="sec-ic">${ic}</span><span class="sec-name">${esc(name)}</span>${x.b ? `<span class="sec-b">${esc(x.b)}</span>` : ''}</button>`;
+        }).join('');
+        bar.querySelectorAll('[data-sec]').forEach((b) => (b.onclick = () => { pref.set(key, b.dataset.sec || null); last = ''; render(); body.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+      }
+      S.forEach((x) => (x.el.style.display = cur && cur.el === x.el ? '' : 'none'));
+    };
+    secObs = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(render, 80); });
+    secObs.observe(body, { childList: true, subtree: true, characterData: true });
+    render();
   }
 
   /* --- يحتاجون انتباهك --- */
