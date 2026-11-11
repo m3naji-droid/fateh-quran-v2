@@ -92,11 +92,11 @@ function pickDaily(lesson, n, wrongIdx = []) {
   const all = lesson.items.map((x, i) => ({ ...itemOf(x, lesson.n), i }));
   const again = all.filter((x) => wrongIdx.includes(x.i)).slice(0, Math.ceil(n / 2));
   const rest = shuffle(all.filter((x) => !wrongIdx.includes(x.i)));
-  const syl = rest.filter((x) => x.k === 'syl'), word = rest.filter((x) => x.k === 'word');
+  const syl = rest.filter((x) => x.k !== 'word'), word = rest.filter((x) => x.k === 'word');
   const out = again.slice();
   // نصف من جدول الحروف ونصف من الكلمات حين يوجد الاثنان
   while (out.length < Math.min(n, all.length) && (syl.length || word.length)) {
-    const takeSyl = word.length === 0 || (syl.length && out.filter((x) => x.k === 'syl').length <= out.filter((x) => x.k === 'word').length);
+    const takeSyl = word.length === 0 || (syl.length && out.filter((x) => x.k !== 'word').length <= out.filter((x) => x.k === 'word').length);
     out.push(takeSyl ? syl.shift() : word.shift());
   }
   return shuffle(out);
@@ -106,7 +106,7 @@ function pickPlacement(concept) {
   const out = [];
   Ls.forEach((l, k) => {
     const all = l.items.map((x, i) => ({ ...itemOf(x, l.n), i, n: l.n }));
-    const syl = shuffle(all.filter((x) => x.k === 'syl')), word = shuffle(all.filter((x) => x.k === 'word'));
+    const syl = shuffle(all.filter((x) => x.k !== 'word')), word = shuffle(all.filter((x) => x.k === 'word'));
     out.push(...(k % 2 ? [word[0] || syl[0]] : [syl[0] || word[0]]).filter(Boolean));
   });
   // ثلاثة على الأقل من كل مفهوم

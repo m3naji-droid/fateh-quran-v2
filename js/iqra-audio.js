@@ -85,13 +85,41 @@ async function teacherBuffer(key) {
 export function dropCache(key) { bufCache.delete(key); }
 
 let playing = null;
-export function stopAudio() { playing?.stop(); playing = null; try { speechSynthesis.cancel(); } catch {} }
+const SS = () => (typeof speechSynthesis !== 'undefined' ? speechSynthesis : null);
+/** إيقاف صوت الجهاز فقط إن كان يتكلم: الإلغاء ثم النطق فوراً يُسقط النطق في بعض المتصفحات */
+function hush() { const ss = SS(); try { if (ss && (ss.speaking || ss.pending)) { ss.cancel(); return true; } } catch {} return false; }
+export function stopAudio() { playing?.stop(); playing = null; hush(); }
+
+/* آيفون وبعض متصفحات أندرويد لا تسمح بالصوت إلا بعد لمسة من المستخدم:
+   عند أول لمسة نفتح سياق الصوت ونُطلق نطقاً فارغاً، فيعمل الصوت بعدها حتى لو بدأ متأخراً (بعد تحميل) */
+let unlocked = false;
+function unlock() {
+  try { const a = ctx(); if (a.state === 'suspended') a.resume().catch(() => {}); } catch {}
+  if (unlocked) return; unlocked = true;
+  try { const ss = SS(); if (ss) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; ss.speak(u); } } catch {}
+}
+if (typeof document !== 'undefined') ['pointerdown', 'touchend', 'keydown'].forEach((e) => document.addEventListener(e, unlock, { capture: true, passive: true }));
+
+const held = new Set(); // يمنع حذف النطق من الذاكرة قبل انتهائه (خلل معروف في كروم)
+let arVoice = null;
+const pickAr = () => { const V = SS()?.getVoices?.() || []; arVoice = V.find((v) => /^ar[-_]SA/i.test(v.lang)) || V.find((v) => /^ar/i.test(v.lang)) || arVoice; return arVoice; };
+if (SS()) { pickAr(); try { SS().addEventListener?.('voiceschanged', pickAr); } catch {} }
+function speakNow(text, done) {
+  const ss = SS(); if (!ss || !text) return done();
+  let fin = false; const end = () => { if (fin) return; fin = true; held.delete(u); done(); };
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickAr(); if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'ar-SA';
+  u.rate = 0.75; u.onend = end; u.onerror = end; held.add(u);
+  const go = () => { try { ss.resume?.(); ss.speak(u); } catch { end(); } };
+  if (hush()) setTimeout(go, 90); else go();
+  setTimeout(end, 2500 + text.length * 350);
+}
 
 /** يشغّل قائمة مصادر متتالية: {key} تسجيل المعلم، {url} صوت القارئ، {tts} صوت الجهاز */
 export function playSeq(list, { gap = 0.18 } = {}) {
   stopAudio();
   let cancelled = false, cur = null;
-  const me = { stop: () => { cancelled = true; try { cur?.stop?.(); cur?.pause?.(); } catch {} try { speechSynthesis.cancel(); } catch {} } };
+  const me = { stop: () => { cancelled = true; try { cur?.stop?.(); cur?.pause?.(); } catch {} hush(); } };
   playing = me;
   const one = (src) => new Promise((res) => {
     if (cancelled) return res();
@@ -104,14 +132,11 @@ export function playSeq(list, { gap = 0.18 } = {}) {
       });
     } else if (src.url) {
       const a = new Audio(src.url); cur = a;
-      a.onended = () => res(); a.onerror = () => res(one({ tts: src.fallback }));
-      a.play().catch(() => res(one({ tts: src.fallback })));
+      let failed = false; const fail = () => { if (failed) return; failed = true; res(one({ tts: src.fallback })); };
+      a.onended = () => res(); a.onerror = fail;
+      a.play().catch(fail);
     } else if (src.tts) {
-      if (typeof speechSynthesis === 'undefined') return res();
-      const u = new SpeechSynthesisUtterance(src.tts); u.lang = 'ar-SA'; u.rate = 0.72;
-      const v = speechSynthesis.getVoices().find((x) => /^ar/i.test(x.lang)); if (v) u.voice = v;
-      u.onend = () => res(); u.onerror = () => res();
-      speechSynthesis.speak(u); setTimeout(res, 6000);
+      speakNow(src.tts, res);
     } else res();
   });
   const done = (async () => { for (const s of list) { if (cancelled) break; await one(s); if (gap) await new Promise((r) => setTimeout(r, gap * 1000)); } if (playing === me) playing = null; })();
