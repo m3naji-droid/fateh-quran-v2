@@ -419,7 +419,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const enabled = students.filter((s) => on.has(s.id));
     host.innerHTML = `<div class="stack iq">
       <div class="card stack">
-        <div><h2>📖 اقرأ وارتقِ</h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
+        <div><h2>📖 اقرأ وارتقِ <span class="small muted" style="font-weight:400">· إصدار ١١/١١ (٤)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
         <div class="row">
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>
