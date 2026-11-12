@@ -23,7 +23,7 @@ export function micErrorText(e) {
 }
 
 /** يفتح الميكروفون بإعدادات الجودة، ويتراجع إلى الإعداد البسيط إن رفضها الجهاز، ويعيد المحاولة مرة إن كان مشغولاً للحظة */
-async function openMic() {
+export async function openMic() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error(micErrorText(null));
   const best = { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true, sampleRate: { ideal: 48000 } } };
   const tries = [best, { audio: true }, { audio: true }];
@@ -40,7 +40,9 @@ async function openMic() {
 }
 
 export class RecitationSession {
-  constructor({ onTranscript, onLevel, onError, onTick, maxSeconds = 300 } = {}) {
+  // stream/ac: ميكروفون وسياق صوتي مشتركان يُعاد استعمالهما ولا يُغلقان هنا. noSR: بلا تعرف على الكلام
+  constructor({ onTranscript, onLevel, onError, onTick, maxSeconds = 300, stream = null, ac = null, noSR = false } = {}) {
+    this.extStream = stream; this.extAc = ac; this.noSR = noSR;
     this.onTranscript = onTranscript || (() => {});
     this.onLevel = onLevel || (() => {});
     this.onError = onError || (() => {});
@@ -65,7 +67,7 @@ export class RecitationSession {
     this.startedAt = Date.now();
     try {
       // صوت خام قدر الإمكان: كبت الضوضاء وإلغاء الصدى يشوّهان الغنة والمدود فيضعف حكم التحليل الآلي
-      this.stream = await openMic();
+      this.stream = this.extStream || await openMic();
     } catch (e) {
       this.active = false;
       throw e;
@@ -86,10 +88,10 @@ export class RecitationSession {
     // مقياس مستوى الصوت
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
-      this.ac = new AC();
+      this.ac = this.extAc || new AC();
       // يبدأ موقوفاً في بعض المتصفحات فيبقى مقياس الصوت ساكناً كأن الميكروفون لا يعمل
       if (this.ac.state === 'suspended') this.ac.resume().catch(() => {});
-      const src = this.ac.createMediaStreamSource(this.stream);
+      const src = this.ac.createMediaStreamSource(this.stream); this.src = src;
       const an = this.ac.createAnalyser();
       an.fftSize = 512;
       src.connect(an);
@@ -111,7 +113,12 @@ export class RecitationSession {
       if (s >= this.maxSeconds) { this.reason = 'max'; this.stop(); this.onAutoStop && this.onAutoStop(); }
     }, 250);
 
-    if (SR) this._startRecognition();
+    if (SR && !this.noSR) this._startRecognition();
+  }
+  _release() {
+    if (!this.extStream) this.stream?.getTracks().forEach((t) => t.stop());
+    try { this.src?.disconnect(); } catch {}
+    if (!this.extAc) try { if (this.ac && this.ac.state !== 'closed') this.ac.close(); } catch {}
   }
 
   _startRecognition() {
@@ -179,8 +186,7 @@ export class RecitationSession {
       let over = false;
       const finish = () => {
         if (over) return; over = true;
-        this.stream?.getTracks().forEach((t) => t.stop());
-        try { if (this.ac && this.ac.state !== 'closed') this.ac.close(); } catch {}
+        this._release();
         const blob = this.chunks.length ? new Blob(this.chunks, { type: this.rec?.mimeType || 'audio/webm' }) : null;
         // ننتظر قليلاً لوصول آخر نتيجة من التعرف
         setTimeout(() => {
@@ -201,8 +207,7 @@ export class RecitationSession {
     cancelAnimationFrame(this.raf);
     try { this.recog?.abort(); } catch {}
     try { this.rec?.state !== 'inactive' && this.rec.stop(); } catch {}
-    this.stream?.getTracks().forEach((t) => t.stop());
-    try { if (this.ac && this.ac.state !== 'closed') this.ac.close(); } catch {}
+    this._release();
   }
 }
 

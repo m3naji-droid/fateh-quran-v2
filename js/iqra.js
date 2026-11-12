@@ -4,7 +4,7 @@
 // وما لم يتأكد منه النظام يصل إلى المعلم ليسمعه ويحكم عليه.
 import { store, blobToB64, b64ToBlob } from './store.js';
 import { toArabicDigits as ar } from './quran.js';
-import { RecitationSession, hasRecorder, micErrorText } from './speech.js';
+import { RecitationSession, hasRecorder, micErrorText, openMic, isIOS } from './speech.js';
 import { aiEnabled, phonemes, ttsGen, warm } from './tajweed-ai.js';
 import { judgePhonemes, judgeTranscript } from './phon.js';
 import { LESSONS, CONCEPTS, itemOf, lessonByN } from './iqra-data.js';
@@ -80,8 +80,33 @@ export function iqraBonus(states, pts = IQ_DEFAULT.pts, dayPts = IQ_DEFAULT.dayP
 }
 
 /* ---------- تسجيل كلمة واحدة: يتوقف وحده بعد سكوت الطالب ---------- */
-function recordOnce({ onLevel, onLive, expect, quiet = 1100 }) {
-  const s = new RecitationSession({ maxSeconds: 9, onLevel: (l) => tick(l), onTranscript: (t) => { onLive?.(t); if (expect && expect(t)) setTimeout(stop, 250); } });
+/* ---------- ميكروفون مشترك لكل كلمات الجلسة ----------
+   آيفون: فتح الميكروفون وإغلاقه مع كل كلمة (ومعه التعرف على الكلام وتشغيل الأصوات بينها) يجعل التسجيل
+   الثاني صامتاً. فنفتحه مرة ونُبقيه مفتوحاً ما دام الطالب في التمرين، ونغلقه عند الخروج. */
+const MIC = { stream: null, ac: null };
+const micLive = () => MIC.stream && MIC.stream.getAudioTracks().some((t) => t.readyState === 'live' && !t.muted);
+/** يُستدعى داخل ضغطة الزر نفسها (قبل أي انتظار) حتى يسمح آيفون بتشغيل مقياس الصوت */
+function micGesture() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!MIC.ac || MIC.ac.state === 'closed') MIC.ac = new AC();
+    if (MIC.ac.state !== 'running') MIC.ac.resume().catch(() => {});
+  } catch {}
+}
+async function micStream() {
+  if (micLive()) return MIC.stream;
+  MIC.stream?.getTracks().forEach((t) => t.stop());
+  MIC.stream = await openMic();
+  return MIC.stream;
+}
+export function releaseMic() {
+  MIC.stream?.getTracks().forEach((t) => t.stop()); MIC.stream = null;
+  try { MIC.ac?.close(); } catch {} MIC.ac = null;
+}
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.hidden) releaseMic(); });
+
+function recordOnce({ onLevel, onLive, expect, quiet = 1100, stream = null }) {
+  const s = new RecitationSession({ maxSeconds: 9, stream, ac: MIC.ac, noSR: isIOS, onLevel: (l) => tick(l), onTranscript: (t) => { onLive?.(t); if (expect && expect(t)) setTimeout(stop, 250); } });
   let voiced = false, lastLoud = 0, loudSince = 0, t0 = Date.now(), stopped = false, resolve;
   const done = new Promise((r) => (resolve = r));
   const empty = { blob: null, transcript: '' };
@@ -474,7 +499,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
       const results = [];
       const stageOf = (it) => (mode === 'place' || E.echo === false ? 2 : st.lv[ikey(it.n, it.i)] ?? 0);
       const setStage = (it, v) => { if (mode === 'place' || E.echo === false) return; st.lv[ikey(it.n, it.i)] = Math.max(0, Math.min(2, v)); };
-      const finish = (v) => { live = false; runner = null; rec?.cancel(); stopAudio(); if (mode !== 'place' && acted) { touchDay(); persist(); } resolve(v); };
+      const finish = (v) => { live = false; runner = null; rec?.cancel(); stopAudio(); releaseMic(); if (mode !== 'place' && acted) { touchDay(); persist(); } resolve(v); };
       const flagged = new Set();
       const flag = (it) => {
         if (flagged.has(it.s)) return; flagged.add(it.s);
@@ -556,6 +581,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         host.querySelector('#iqFl').onclick = (e) => { flag(it); e.currentTarget.disabled = true; };
         const ta = host.querySelector('#iqTa'); if (ta) ta.onclick = () => { ts = 0; paintTaj(); };
         host.querySelector('#iqMic').onclick = () => {
+          micGesture();
           if (rec && rec.stopped) { rec.cancel(); rec = null; busy = false; return listen(); } // تسجيل سابق عالق
           if (rec) return rec.stop();
           if (busy && Date.now() - busyAt > 8000) busy = false;
@@ -623,7 +649,10 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         const it = items[k], j = k;
         const mic = host.querySelector('#iqMic'), lv = host.querySelector('#iqLv'), msg = host.querySelector('#iqMsg');
         mic.classList.add('on'); msg.className = 'iq-msg'; msg.textContent = 'أستمع… انطق الآن';
-        rec = recordOnce({ quiet: quietFor(it), onLevel: (l) => { if (lv) lv.style.width = Math.round(l * 100) + '%'; }, expect: it.k !== 'syl' ? (t) => judgeTranscript(it.s, t, { names: it.k === 'name' }).ok : null });
+        let stream;
+        try { stream = await micStream(); } catch (e) { busy = false; mic.classList.remove('on'); msg.className = 'iq-msg bad'; msg.textContent = e.message || micErrorText(e); return; }
+        if (!live || items[k] !== it) { busy = false; return; }
+        rec = recordOnce({ stream, quiet: quietFor(it), onLevel: (l) => { if (lv) lv.style.width = Math.round(l * 100) + '%'; }, expect: it.k !== 'syl' ? (t) => judgeTranscript(it.s, t, { names: it.k === 'name' }).ok : null });
         try { await rec.start(); } catch (e) { rec = null; busy = false; mic.classList.remove('on'); msg.className = 'iq-msg bad'; msg.textContent = e.message || micErrorText(e); return; }
         const r = await rec.done;
         rec = null; mic.classList.remove('on'); if (lv) lv.style.width = '0';
@@ -663,7 +692,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
     });
   }
 
-  return () => { alive = false; runner?.cancel(); try { speechSynthesis.cancel(); } catch {} };
+  return () => { alive = false; runner?.cancel(); releaseMic(); try { speechSynthesis.cancel(); } catch {} };
 }
 
 /* =====================================================================
@@ -696,7 +725,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const G = { ...IQ_DEFAULT, ...cfg };
     host.innerHTML = `<div class="stack iq">
       <div class="card stack">
-        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٩)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
+        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (١٠)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
         <div class="row">
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>
