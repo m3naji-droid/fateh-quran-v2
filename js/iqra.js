@@ -82,21 +82,23 @@ export function iqraBonus(states, pts = IQ_DEFAULT.pts, dayPts = IQ_DEFAULT.dayP
 /* ---------- تسجيل كلمة واحدة: يتوقف وحده بعد سكوت الطالب ---------- */
 function recordOnce({ onLevel, onLive, expect, quiet = 1100 }) {
   const s = new RecitationSession({ maxSeconds: 9, onLevel: (l) => tick(l), onTranscript: (t) => { onLive?.(t); if (expect && expect(t)) setTimeout(stop, 250); } });
-  let voiced = false, lastLoud = 0, t0 = Date.now(), stopped = false, resolve;
+  let voiced = false, lastLoud = 0, loudSince = 0, t0 = Date.now(), stopped = false, resolve;
   const done = new Promise((r) => (resolve = r));
   const stop = async () => { if (stopped) return; stopped = true; const r = await s.stop(); resolve(r); };
   function tick(l) {
     onLevel?.(l);
     const now = Date.now();
-    if (l > 0.14) { voiced = true; lastLoud = now; }
+    // أول ٤٠٠ م.ث يُتجاهل (طقطقة فتح الميكروفون وبقايا الصوت المشغَّل)، ولا يُعدّ كلاماً إلا صوت متصل ١٢٠ م.ث
+    if (now - t0 > 400 && l > 0.14) { if (!loudSince) loudSince = now; if (now - loudSince >= 120) voiced = true; lastLoud = now; }
+    else if (l <= 0.14) loudSince = 0;
     if (voiced && now - lastLoud > quiet) stop();
-    if (!voiced && now - t0 > 6000) stop();
+    if (!voiced && now - t0 > 7000) stop();
   }
   s.onAutoStop = () => { stopped = true; s._done?.then(resolve); };
   return { start: () => s.start(), stop, done, cancel: () => { stopped = true; s.cancel(); resolve({ blob: null, transcript: '' }); } };
 }
 /** مدة السكوت التي تُنهي التسجيل: أقصر للمقاطع، وأطول للعبارات حتى لا يُقطع الطالب وهو يتنفس */
-const quietFor = (it) => (/\s/.test(it.s) ? 1100 : it.k === 'word' ? 800 : 650);
+const quietFor = (it) => (/\s/.test(it.s) ? 1200 : it.k === 'name' ? 1000 : it.k === 'word' ? 900 : 800);
 
 /** الحكم الفوري في المتصفح: الكلمات وأسماء الحروف التي تعرّف عليها المتصفح */
 const judgeASR = (item, rec) => (item.k === 'word' || item.k === 'name') && judgeTranscript(item.s, rec.transcript, { names: item.k === 'name' }).ok;
@@ -608,6 +610,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         if (busy) return;
         busy = true;
         stopAudio();
+        await new Promise((r) => setTimeout(r, 150)); // يهدأ مكبّر الصوت قبل فتح الميكروفون
         const it = items[k], j = k;
         const mic = host.querySelector('#iqMic'), lv = host.querySelector('#iqLv'), msg = host.querySelector('#iqMsg');
         mic.classList.add('on'); msg.className = 'iq-msg'; msg.textContent = 'أستمع… انطق الآن';
@@ -684,7 +687,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const G = { ...IQ_DEFAULT, ...cfg };
     host.innerHTML = `<div class="stack iq">
       <div class="card stack">
-        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٧)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
+        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٨)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
         <div class="row">
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>
