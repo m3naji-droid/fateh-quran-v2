@@ -1048,17 +1048,18 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .iq-prev li b { font: 24px/1.6 var(--f-quran); }
 .pill.rec { background: var(--green-2); color: var(--green); }
 /* أقسام المعلم مربعات */
-.sec-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.sec-bar { display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto); grid-auto-columns: minmax(78px, 1fr); gap: 6px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+.sec-bar::-webkit-scrollbar { display: none; }
 .sec-bar[hidden] { display: none; }
-.sec-tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 96px; padding: 12px 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); cursor: pointer; font: inherit; text-align: center; transition: border-color .15s, transform .15s; }
+.sec-tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 54px; padding: 6px 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); cursor: pointer; font: inherit; text-align: center; transition: border-color .15s, transform .15s; }
 .sec-tile:hover { border-color: var(--green); transform: translateY(-1px); }
-.sec-ic { font-size: 26px; line-height: 1; }
-.sec-name { font-weight: 600; font-size: 14px; line-height: 1.4; }
-.sec-b { position: absolute; top: 8px; inset-inline-start: 8px; min-width: 22px; padding: 0 6px; border-radius: 11px; background: var(--gold-soft); color: var(--ink); font-size: 12px; font-weight: 700; }
+.sec-ic { font-size: 17px; line-height: 1; }
+.sec-name { font-weight: 600; font-size: 11.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sec-b { position: absolute; top: 3px; inset-inline-start: 3px; min-width: 18px; padding: 0 4px; border-radius: 9px; font-size: 10px !important; background: var(--gold-soft); color: var(--ink); font-size: 12px; font-weight: 700; }
 .sec-bar.strip { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
 .sec-bar.strip .sec-tile { flex: none; flex-direction: row; min-height: 0; padding: 6px 12px; border-radius: 999px; gap: 6px; }
 .sec-bar.strip .sec-ic { font-size: 16px; }
-.sec-bar.strip .sec-name { font-size: 13px; white-space: nowrap; }
+.sec-bar.strip .sec-name { font-size: 13px; white-space: nowrap; display: inline; }
 .sec-bar.strip .sec-b { position: static; }
 .sec-tile.on { border-color: var(--green); background: var(--green-2); color: var(--green); }
 .sec-all { flex: none; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); padding: 6px 12px; cursor: pointer; font: inherit; font-size: 13px; white-space: nowrap; color: var(--ink); }

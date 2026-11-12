@@ -2302,7 +2302,7 @@ function viewTeacher(app) {
         bar.innerHTML = (cur ? '<button type="button" class="sec-all" data-sec="">☰ كل الأقسام</button>' : '') + S.map((x) => {
           const m = x.t.match(/^(\p{Extended_Pictographic}\uFE0F?)\s*/u);
           const ICON = [[/مساحة/, '💾'], [/حفظ/, '🗄️'], [/استهلاك/, '📊'], [/إشعار/, '🔔'], [/خادم/, '🤖'], [/شيخ/, '👑'], [/متوسط|دقة/, '📈'], [/خريطة/, '🗺️'], [/طلاب|الطالب/, '👥'], [/أخطاء/, '⚠️']];
-          const ic = m ? m[1] : (ICON.find(([r]) => r.test(x.t)) || [0, '📌'])[1], name = m ? x.t.slice(m[0].length) : x.t;
+          const ic = m ? m[1] : (ICON.find(([r]) => r.test(x.t)) || [0, '📌'])[1], name = (m ? x.t.slice(m[0].length) : x.t).replace(/\s*[·•].*$/, '').replace(/\s*\([^)]*\)\s*/g, ' ').trim();
           return `<button type="button" class="sec-tile${cur && cur.el === x.el ? ' on' : ''}" data-sec="${esc(keyOf(x.t))}"><span class="sec-ic">${ic}</span><span class="sec-name">${esc(name)}</span>${x.b ? `<span class="sec-b">${esc(x.b)}</span>` : ''}</button>`;
         }).join('');
         bar.querySelectorAll('[data-sec]').forEach((b) => (b.onclick = () => { pref.set(key, b.dataset.sec || null); last = ''; render(); body.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
@@ -4544,7 +4544,7 @@ function viewTeacher(app) {
       </div>
       ${aiEnabled() ? '<div class="card stack usage-card" id="aiUse" style="gap:12px;grid-column:1 / -1"></div>' : ''}
  <div class="card stack" style="gap:10px" id="tPush"></div>
-      <div class="card stack" style="gap:10px"><h3>الإشعارات على الجوال</h3><div id="pushStat" class="small muted">${pushConfigured() && PUSH.url ? 'جارٍ العدّ…' : '<span class="pill warn">غير مفعّلة</span> تظهر التنبيهات للطلاب داخل الموقع فقط. لتفعيل إشعارات الجوال ضع <code>vapidKey</code> و<code>url</code> في ملف js/firebase-config.js (راجع notify-service/README.md).'}</div></div>
+      <div class="card stack" style="gap:10px"><h3>📲 إشعارات الطلاب على الجوال</h3><div id="pushStat" class="small muted">${pushConfigured() && PUSH.url ? 'جارٍ العدّ…' : '<span class="pill warn">غير مفعّلة</span> تظهر التنبيهات للطلاب داخل الموقع فقط. لتفعيل إشعارات الجوال ضع <code>vapidKey</code> و<code>url</code> في ملف js/firebase-config.js (راجع notify-service/README.md).'}</div></div>
       <div class="card stack" style="gap:10px"><h3>خادم تحليل التجويد</h3><div id="aiStatus" class="small muted">${aiEnabled() ? 'جارٍ الفحص…' : 'غير مفعّل. ضع رابط الخادم في ملف js/firebase-config.js (راجع muaalem-space/README.md).'}</div></div>
       ${store.mode === 'cloud' ? `<div class="card stack" style="gap:10px"><h3>نقل بيانات النسخة السابقة</h3>
         <p class="muted small" style="margin:0">ينسخ الطلاب وواجبات سورة يس من «مقرأة الفاتح» القديمة إلى النظام الجديد. التسليمات القديمة لا تُنقل.</p>
