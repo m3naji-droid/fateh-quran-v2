@@ -5,10 +5,10 @@
 import { store, blobToB64, b64ToBlob } from './store.js';
 import { toArabicDigits as ar } from './quran.js';
 import { RecitationSession, hasRecorder, micErrorText } from './speech.js';
-import { aiEnabled, phonemes, ttsGen } from './tajweed-ai.js';
+import { aiEnabled, phonemes, ttsGen, warm } from './tajweed-ai.js';
 import { judgePhonemes, judgeTranscript } from './phon.js';
 import { LESSONS, CONCEPTS, itemOf, lessonByN } from './iqra-data.js';
-import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, prefetch, probeReciter, setGen, srcFor, GEN_VOICES, genOn, playGenSample, normText, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob } from './iqra-audio.js';
+import { audioIndex, playItem, playSeq, stopAudio, sourcesFor, keyOf, hasRec, KIND_LABEL, prefetch, probeReciter, setGen, srcFor, GEN_VOICES, genOn, playGenSample, normText, recordingPlan, recordClip, saveRecording, deleteRecording, playBlob, toWav } from './iqra-audio.js';
 import { tajSteps } from './iqra-taj.js';
 
 export const IQ_DEFAULT = { count: 15, pass: 85, pts: 3, taj: 13, dayPts: 1, echo: true, color: true, ease: true, big: false };
@@ -80,8 +80,8 @@ export function iqraBonus(states, pts = IQ_DEFAULT.pts, dayPts = IQ_DEFAULT.dayP
 }
 
 /* ---------- تسجيل كلمة واحدة: يتوقف وحده بعد سكوت الطالب ---------- */
-function recordOnce({ onLevel, onLive, expect }) {
-  const s = new RecitationSession({ maxSeconds: 9, onLevel: (l) => tick(l), onTranscript: (t) => { onLive?.(t); if (expect && expect(t)) setTimeout(stop, 350); } });
+function recordOnce({ onLevel, onLive, expect, quiet = 1100 }) {
+  const s = new RecitationSession({ maxSeconds: 9, onLevel: (l) => tick(l), onTranscript: (t) => { onLive?.(t); if (expect && expect(t)) setTimeout(stop, 250); } });
   let voiced = false, lastLoud = 0, t0 = Date.now(), stopped = false, resolve;
   const done = new Promise((r) => (resolve = r));
   const stop = async () => { if (stopped) return; stopped = true; const r = await s.stop(); resolve(r); };
@@ -89,26 +89,27 @@ function recordOnce({ onLevel, onLive, expect }) {
     onLevel?.(l);
     const now = Date.now();
     if (l > 0.14) { voiced = true; lastLoud = now; }
-    if (voiced && now - lastLoud > 1100) stop();
+    if (voiced && now - lastLoud > quiet) stop();
     if (!voiced && now - t0 > 6000) stop();
   }
   s.onAutoStop = () => { stopped = true; s._done?.then(resolve); };
   return { start: () => s.start(), stop, done, cancel: () => { stopped = true; s.cancel(); resolve({ blob: null, transcript: '' }); } };
 }
+/** مدة السكوت التي تُنهي التسجيل: أقصر للمقاطع، وأطول للعبارات حتى لا يُقطع الطالب وهو يتنفس */
+const quietFor = (it) => (/\s/.test(it.s) ? 1100 : it.k === 'word' ? 800 : 650);
 
-/** يحكم على نطق عنصر: التعرف الفوري للكلمات وأسماء الحروف، ثم خادم التجويد. */
-async function judge(item, lessonN, rec) {
-  const names = item.k === 'name';
-  if (item.k === 'word' || names) {
-    const j = judgeTranscript(item.s, rec.transcript, { names });
-    if (j.ok) return { ok: true, via: 'asr', score: j.score };
-  }
-  if (!rec.blob || rec.blob.size < 1500) return { ok: false, empty: !rec.transcript };
+/** الحكم الفوري في المتصفح: الكلمات وأسماء الحروف التي تعرّف عليها المتصفح */
+const judgeASR = (item, rec) => (item.k === 'word' || item.k === 'name') && judgeTranscript(item.s, rec.transcript, { names: item.k === 'name' }).ok;
+/** حكم خادم التجويد (الحروف والحركات): يُرسَل الصوت ١٦ك أحادياً مقصوص الصمت. يعيد {ok|empty|unsure} */
+async function judgeAI(item, rec) {
+  if (!rec.blob || rec.blob.size < 1500) return { ok: false, empty: true };
   if (!aiEnabled()) return { ok: false, unsure: true };
+  let blob = rec.blob;
+  try { blob = await toWav(rec.blob); } catch (e) { if (/لم يُسمع/.test(e.message || '')) return { ok: false, empty: true }; }
   try {
-    const pred = await phonemes(rec.blob);
+    const pred = await Promise.race([phonemes(blob), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000))]);
     if (!pred) return { ok: false, empty: true };
-    const j = judgePhonemes(item.s, pred, { strict: item.k === 'syl' && !names });
+    const j = judgePhonemes(item.s, pred, { strict: item.k === 'syl' });
     return { ok: j.ok, via: 'ai', score: j.score, got: j.got, ref: j.ref };
   } catch (e) { console.warn('iqra ai', e); return { ok: false, unsure: true }; }
 }
@@ -153,6 +154,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
     probeReciter();
     [cfg, st] = await Promise.all([iqraCfg(), store.getIqra(me.id).catch(() => null), audioIndex()]);
     E = effCfg(cfg, me.id);
+    warm(); // يوقظ خادم التصحيح الآن، قبل أول كلمة
     setGen({ on: !!cfg.genOn, voice: cfg.genVoice || 'ar-XA-Wavenet-B', rate: cfg.genRate || 0.8 });
     st = st || { placed: false, cur: 1, mastered: {}, wrong: {}, sessions: [] };
     st.mastered = st.mastered || {}; st.wrong = st.wrong || {}; st.sessions = st.sessions || [];
@@ -388,7 +390,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
       if (!res) return home(); // خرج قبل النهاية
       log.push({ c, ok: res.filter((r) => r.ok).length, n: res.length });
       const okN = res.filter((r) => r.ok).length;
-      if (okN < Math.ceil(items.length * 0.67)) { startN = Math.min(...res.filter((r) => !r.ok).map((r) => r.item.n)); break; }
+      if (okN < Math.ceil(res.length * 0.67)) { startN = Math.min(...res.filter((r) => !r.ok).map((r) => r.item.n)); break; }
     }
     const last = ready().slice(-1)[0];
     if (startN == null) startN = nextLesson(last.n);
@@ -460,11 +462,13 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   const STAGE = ['👂 اسمع ثم كرّر', '🤝 اقرأ مع المساعدة', '💪 اقرأ وحدك'];
   function run({ mode, items, title, step, sid, taj = null }) {
     return new Promise((resolve) => {
-      let k = 0, tries = 0, rec = null, busy = false, ts = taj ? 0 : -1, steps = null, autoK = -1, acted = false;
+      let k = 0, tries = 0, rec = null, busy = false, ts = taj ? 0 : -1, steps = null, autoK = -1, acted = false, live = true, srv = aiEnabled() ? 'wait' : 'ok';
+      const pend = new Set(), marks = [];
+      warm().then((ok) => { srv = ok ? 'ok' : 'fail'; const e = host.querySelector('#iqSrv'); if (e) e.textContent = ''; });
       const results = [];
       const stageOf = (it) => (mode === 'place' || E.echo === false ? 2 : st.lv[ikey(it.n, it.i)] ?? 0);
       const setStage = (it, v) => { if (mode === 'place' || E.echo === false) return; st.lv[ikey(it.n, it.i)] = Math.max(0, Math.min(2, v)); };
-      const finish = (v) => { runner = null; rec?.cancel(); stopAudio(); if (mode !== 'place' && acted) { touchDay(); persist(); } resolve(v); };
+      const finish = (v) => { live = false; runner = null; rec?.cancel(); stopAudio(); if (mode !== 'place' && acted) { touchDay(); persist(); } resolve(v); };
       const flagged = new Set();
       const flag = (it) => {
         if (flagged.has(it.s)) return; flagged.add(it.s);
@@ -492,7 +496,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         const hl = sp ? esc(T.slice(0, sp.at)) + (sp.at && T[sp.at - 1] !== ' ' ? Z : '') + '<mark class="' + (sp.silent ? 'sil' : '') + '">' + (sp.at && T[sp.at - 1] !== ' ' ? Z : '') + esc(T.slice(sp.at, sp.end)) + (sp.end < T.length && T[sp.end] !== ' ' ? Z : '') + '</mark>' + (sp.end < T.length && T[sp.end] !== ' ' ? Z : '') + esc(T.slice(sp.end)) : esc(T);
         host.innerHTML = `<div class="card stack iq iq-run${E.big ? ' iq-bigtxt' : ''}">
           <div class="row" style="justify-content:space-between"><span class="small muted">${esc(title)} · التجريد</span><button class="btn sm ghost" type="button" id="iqX">✕ ${mode === 'practice' ? 'إغلاق' : 'خروج'}</button></div>
-          ${mode !== 'practice' ? `<div class="iq-prog" aria-hidden="true"><i style="width:${(k / items.length) * 100}%"></i></div><span class="small muted" style="text-align:center">${ar(k + 1)} من ${ar(items.length)}</span>` : ''}
+          ${progHtml()}
           <div class="iq-word iq-taj" lang="ar">${hl}</div>
           <div class="iq-tstep">${sp.silent ? `<span class="iq-sil">${esc(sp.note)}</span>` : `<span class="iq-names">${sp.say.map(esc).join(' <i>+</i> ')}</span>${sp.syl ? ` <i>=</i> <b class="iq-syl">${esc(sp.syl)}</b>` : ''}${steps.some((x) => !x.silent && x.wi === sp.wi && steps.indexOf(x) < steps.indexOf(sp)) || !sp.syl ? ` <i>←</i> <b class="iq-syl">${esc(sp.cum)}</b>` : ''}`}</div>
           <div class="iq-cum"><span class="small muted">ما بنيتَه حتى الآن</span><b lang="ar">${esc(sp.cum)}</b></div>
@@ -510,6 +514,11 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         host.querySelector('#iqTn').onclick = () => { stopAudio(); if (ts < steps.length - 1) { ts++; paintTaj(); } else { ts = -1; autoK = k; paint('الآن اقرأ الكلمة كاملة دون تقطيع.'); } };
         const tk = host.querySelector('#iqTk'); if (tk) tk.onclick = () => { stopAudio(); ts = -1; paint(); };
       };
+      // شريط التقدم: نقطة لكل كلمة تتلوّن حين يصل حكمها (✓ أخضر، ↺ برتقالي تعود إليه، ✗ أحمر، رمادي ينتظر التصحيح)
+      const dotsHtml = () => `<div class="iq-dots2" aria-hidden="true">${items.map((_, j) => `<i class="${marks[j] || ''}${j === k ? ' cur' : ''}"></i>`).join('')}</div>`;
+      const progHtml = () => (mode === 'practice' ? '' : `${dotsHtml()}<span class="small muted" style="text-align:center">${ar(Math.min(k + 1, items.length))} من ${ar(items.length)} <span id="iqSrv">${srv === 'wait' ? '· ⏳ يجهَّز المصحّح…' : ''}</span></span>`);
+      const updDots = () => { const d = host.querySelector('.iq-dots2'); if (d) d.outerHTML = dotsHtml(); };
+      const bgNote = (t, c) => { const e = host.querySelector('#iqBg'); if (!e) return; e.className = 'iq-bg ' + c; e.textContent = t; clearTimeout(e._t); e._t = setTimeout(() => { e.textContent = ''; }, 3500); };
       runner = { cancel: () => finish(null) };
       const paint = (msg = '', cls = '') => {
         const it = items[k];
@@ -517,11 +526,11 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         const src = sourcesFor(it);
         prefetch(src.list);
         const stg = stageOf(it);
-        const showSay = mode === 'practice' || stg < 2 || tries > 0;
+        const showSay = mode === 'practice' || stg < 2 || tries > 0 || (it.replay && mode !== 'place');
         host.innerHTML = `<div class="card stack iq iq-run${E.big ? ' iq-bigtxt' : ''}">
           <div class="row" style="justify-content:space-between"><span class="small muted">${esc(title)}${step ? ` · ${ar(step[0])}/${ar(step[1])}` : ''}</span>
             <button class="btn sm ghost" type="button" id="iqX">✕ ${mode === 'practice' ? 'إغلاق' : 'خروج'}</button></div>
-          ${mode !== 'practice' ? `<div class="iq-prog" aria-hidden="true"><i style="width:${(k / items.length) * 100}%"></i></div><span class="small muted" style="text-align:center">${ar(k + 1)} من ${ar(items.length)}</span>` : ''}
+          ${progHtml()}
           <div class="row" style="justify-content:center;gap:6px">${mode !== 'place' && E.echo !== false ? `<span class="iq-stage s${stg}">${STAGE[stg]}</span>` : ''}${it.rev ? `<span class="iq-stage rv">🔁 مراجعة · الدرس ${ar(it.n)}</span>` : ''}${it.again ? '<span class="iq-stage rv">↺ عدنا إليها</span>' : ''}</div>
           <div class="iq-word" lang="ar">${E.color ? colorize(it.t) : esc(it.t)}</div>
           ${E.color ? LEGEND : ''}
@@ -533,7 +542,8 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
           </div>
           <div class="iq-level"><i id="iqLv"></i></div>
           <div class="row" style="justify-content:center;gap:8px">${showSay ? `<span class="small muted">🔊 ${esc(KIND_LABEL[src.kind])}</span>` : ''}${taj ? '<button class="btn sm ghost" type="button" id="iqTa">↺ التجريد مرة أخرى</button>' : ''}<button class="btn sm ghost" type="button" id="iqFl" title="أبلغ معلمك أن النطق المسموع غير صحيح">🚩 النطق خاطئ</button></div>
-          <div class="iq-msg ${cls}" role="status" id="iqMsg">${msg || (tries ? 'حاول مرة أخرى بهدوء ووضوح.' : stg === 0 && mode !== 'place' ? 'استمع جيداً، ثم اضغط الميكروفون وكرّر.' : 'اضغط الميكروفون ثم انطق.')}</div>
+          <div class="iq-msg ${cls}" role="status" id="iqMsg">${msg || (it.replay && mode !== 'place' ? 'عدنا إليها: استمع جيداً، ثم كرّر بعده 👂' : tries ? 'حاول مرة أخرى بهدوء ووضوح.' : stg === 0 && mode !== 'place' ? 'استمع جيداً، ثم اضغط الميكروفون وكرّر.' : 'اضغط الميكروفون ثم انطق.')}</div>
+          <div class="iq-bg" id="iqBg" role="status"></div>
         </div>`;
         host.querySelector('#iqX').onclick = () => finish(null);
         const say = host.querySelector('#iqSay'); if (say) say.onclick = () => playItem(it);
@@ -547,62 +557,95 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
           // «ساعدني»: لا يُحسب خطأ؛ يسمع النطق ويكرره (ويرجع للمرحلة الأولى)
           setStage(it, 0); tries = Math.max(tries, 1); paint('استمع جيداً، ثم كرّر بعده 👂', 'warn'); playItem(it);
         };
-        if (stg === 0 && mode !== 'place' && autoK !== k && !msg) { autoK = k; setTimeout(() => { if (runner && items[k] === it && ts < 0) playItem(it); }, 300); }
+        if ((stg === 0 || it.replay) && mode !== 'place' && autoK !== k && !msg) { autoK = k; setTimeout(() => { if (runner && items[k] === it && ts < 0) playItem(it); }, 300); }
       };
-      const next = () => { k++; tries = 0; steps = null; ts = taj ? 0 : -1; stopAudio(); if (k >= items.length) return mode === 'practice' ? (k = 0, paint('أكملت القائمة! تبدأ من جديد.')) : finish(results); paint(); };
-      const praise = () => { const p = PRAISE[Math.floor(Math.random() * PRAISE.length)]; if (hasRec(p) || genOn()) { playSeq([srcFor(p)]); return 1300; } return 850; };
-      const afterAudio = (fn, it) => { const pl = playItem(it); Promise.race([pl.done, new Promise((r) => setTimeout(r, 7000))]).then(() => setTimeout(() => { if (runner && items[k] === it) fn(); }, 500)); };
+      const next = () => {
+        k++; tries = 0; steps = null; ts = taj ? 0 : -1; stopAudio();
+        if (k >= items.length) { if (mode === 'practice') { k = 0; return paint('أكملت القائمة! تبدأ من جديد.'); } return waitEnd(); }
+        paint();
+      };
+      // آخر الكلمات قد يكون تصحيحها لم يصل بعد: ننتظره، وما عاد منها يُعرض قبل النهاية
+      const waitEnd = async () => {
+        while (pend.size && live) {
+          host.innerHTML = `<div class="card stack iq iq-run" style="text-align:center;align-items:center"><span class="small muted">${esc(title)}</span>${dotsHtml()}<div style="font-size:40px">⏳</div><p style="margin:0">نُكمل تصحيح آخر كلماتك…</p></div>`;
+          await Promise.all([...pend]);
+        }
+        if (!live) return;
+        if (k < items.length) return paint();
+        finish(results);
+      };
+      const praise = () => { const p = PRAISE[Math.floor(Math.random() * PRAISE.length)]; if (hasRec(p) || genOn()) { playSeq([srcFor(p)]); return 1300; } return 800; };
+      /** نتيجة كلمة (فورية أو وصلت من الخادم في الخلفية) */
+      function settle(it, j, v, r) {
+        if (!live) return;
+        const stg = stageOf(it);
+        if (v.ok) {
+          marks[j] = 'ok';
+          if (mode !== 'place') { st.stars += 1; setStage(it, stg + 1); srsHit(it, true); }
+          if (mode !== 'practice') results.push({ item: it, ok: true });
+          if (j !== k) bgNote(`✓ «${it.t}» صحيحة`, 'ok');
+        } else if (mode === 'practice') {
+          if (!v.empty && !v.unsure) { marks[j] = 'bad'; setStage(it, stg - 1); srsHit(it, false); }
+        } else if (!it.again) {
+          // أول تعثّر: لا نوقف الطالب؛ تعود الكلمة في آخر الدرس ويسمع نطقها الصحيح قبلها
+          marks[j] = 'again';
+          if (mode !== 'place' && !v.empty) srsHit(it, false);
+          items.push({ ...it, again: true, replay: true });
+          bgNote(v.empty ? `لم يُسمع صوتك في «${it.t}»، نعود إليها بعد قليل.` : `↺ «${it.t}» نعود إليها بعد قليل.`, 'warn');
+        } else {
+          marks[j] = 'bad';
+          if (mode !== 'place') { setStage(it, stg - 1); srsHit(it, false); }
+          // عادت ولم تثبت: في الدرس اليومي يسمعها المعلم
+          if (mode === 'daily' && !it.rev && r?.blob && !v.empty) {
+            results.push({ item: it, ok: false, pending: true });
+            blobToB64(r.blob).then((b64) => store.addIqraRev(me.id, { sid, n: it.n, i: it.i, t: it.t, s: it.s, b64, mime: r.blob.type, got: v.got || '', said: r.transcript || '' })).catch((e) => console.warn('iqra rev', e));
+            if (j !== k) bgNote(`«${it.t}» سيسمعها معلمك.`, 'warn');
+          } else results.push({ item: it, ok: false });
+        }
+        updDots();
+      }
       async function listen() {
         if (busy) return;
         busy = true;
         stopAudio();
-        const it = items[k];
+        const it = items[k], j = k;
         const mic = host.querySelector('#iqMic'), lv = host.querySelector('#iqLv'), msg = host.querySelector('#iqMsg');
         mic.classList.add('on'); msg.className = 'iq-msg'; msg.textContent = 'أستمع… انطق الآن';
-        rec = recordOnce({ onLevel: (l) => { if (lv) lv.style.width = Math.round(l * 100) + '%'; }, expect: it.k !== 'syl' ? (t) => judgeTranscript(it.s, t, { names: it.k === 'name' }).ok : null });
+        rec = recordOnce({ quiet: quietFor(it), onLevel: (l) => { if (lv) lv.style.width = Math.round(l * 100) + '%'; }, expect: it.k !== 'syl' ? (t) => judgeTranscript(it.s, t, { names: it.k === 'name' }).ok : null });
         try { await rec.start(); } catch (e) { rec = null; busy = false; mic.classList.remove('on'); msg.className = 'iq-msg bad'; msg.textContent = e.message || micErrorText(e); return; }
         const r = await rec.done;
         rec = null; mic.classList.remove('on'); if (lv) lv.style.width = '0';
-        if (!r.blob && !r.transcript) { busy = false; return; }
-        msg.textContent = 'جارٍ التحقق من نطقك…';
-        const j = await judge(it, it.n, r);
         busy = false;
-        if (!host.isConnected || runner == null) return;
-        if (j.empty) { paint('لم أسمع صوتك. قرّب الجوال وانطق بصوت أوضح.', 'warn'); return; }
+        if (!host.isConnected || runner == null || items[k] !== it) return;
+        if (!r.transcript && (!r.blob || r.blob.size < 1500)) { paint('لم أسمع صوتك. قرّب الجوال وانطق بصوت أوضح.', 'warn'); return; }
         acted = true;
         if (mode !== 'place') st.stars += 1; // نجمة على كل محاولة
-        const stg = stageOf(it);
-        if (j.ok) {
-          if (mode !== 'place') { st.stars += 1; setStage(it, stg + 1); srsHit(it, true); }
-          msg.className = 'iq-msg ok'; msg.textContent = ['أحسنت! ⭐', 'ممتاز! ⭐', 'بارك الله فيك ⭐', 'صحيح ⭐'][Math.floor(Math.random() * 4)] + (mode !== 'place' && stg < 2 && E.echo !== false ? (stg === 1 ? ' في المرة القادمة تقرؤها وحدك 💪' : '') : '');
-          if (mode !== 'practice') results.push({ item: it, ok: true });
-          setTimeout(() => next(), mode === 'place' ? 850 : praise());
+        // ١) حكم فوري من المتصفح
+        if (judgeASR(it, r)) {
+          settle(it, j, { ok: true }, r);
+          const stg = stageOf(it);
+          msg.className = 'iq-msg ok'; msg.textContent = ['أحسنت! ⭐', 'ممتاز! ⭐', 'بارك الله فيك ⭐', 'صحيح ⭐'][Math.floor(Math.random() * 4)] + (mode !== 'place' && stg === 2 && E.echo !== false ? ' في المرة القادمة تقرؤها وحدك 💪' : '');
+          setTimeout(() => { if (items[k] === it) next(); }, mode === 'place' ? 700 : praise());
           return;
         }
-        tries++;
-        if (mode === 'place') {
-          if (tries < 2) { paint(j.unsure ? 'تعذّر التحقق، حاول مرة أخرى.' : 'حاول مرة أخرى بهدوء ووضوح.', 'bad'); return; }
-          results.push({ item: it, ok: false }); msg.className = 'iq-msg'; msg.textContent = 'ننتقل للتالية.';
-          setTimeout(() => next(), 1000); return;
+        // التمرين الحر بلا عجلة: ينتظر الحكم ثم يُسمَع النطق الصحيح إن لزم
+        if (mode === 'practice') {
+          msg.className = 'iq-msg'; msg.textContent = 'جارٍ التحقق من نطقك…';
+          const v = await judgeAI(it, r);
+          if (!live || items[k] !== it) return;
+          settle(it, j, v, r);
+          if (v.ok) { msg.className = 'iq-msg ok'; msg.textContent = 'أحسنت! ⭐'; setTimeout(() => { if (items[k] === it) next(); }, praise()); return; }
+          tries++;
+          paint(v.empty ? 'لم أسمع صوتك. قرّب الجوال وانطق بصوت أوضح.' : v.unsure ? 'تعذّر التحقق الآن. استمع ثم كرّر بعده 👂' : 'قريب! استمع جيداً ثم كرّر بعده 👂', 'warn');
+          if (!v.empty) playItem(it);
+          return;
         }
-        // المحاولة الأولى: يُسمَع النطق الصحيح فوراً ويكرره
-        if (tries < 2) { paint(j.unsure ? 'تعذّر التحقق. استمع ثم كرّر بعده 👂' : 'قريب! استمع جيداً ثم كرّر بعده 👂', 'warn'); playItem(it); return; }
-        // المحاولة الثانية: لا نكرر الفشل؛ يسمعها مرة أخرى ونعود إليها لاحقاً
-        setStage(it, stg - 1); srsHit(it, false);
-        if (mode === 'practice') { msg.className = 'iq-msg warn'; msg.textContent = 'لا بأس 🌱 استمع إليها، وستعود إليك في المراجعة.'; afterAudio(next, it); return; }
-        if (mode === 'review' || it.rev) { results.push({ item: it, ok: false }); msg.className = 'iq-msg warn'; msg.textContent = 'لا بأس 🌱 استمع إليها، وستعود إليك غداً.'; afterAudio(next, it); return; }
-        if (!it.again) {
-          items.push({ ...it, again: true });
-          msg.className = 'iq-msg warn'; msg.textContent = 'لا بأس 🌱 استمع إليها، وسنعود إليها بعد قليل.';
-          afterAudio(next, it); return;
-        }
-        // عادت ولم تثبت: في الدرس اليومي يسمعها المعلم
-        if (mode === 'daily' && r.blob) {
-          results.push({ item: it, ok: false, pending: true });
-          blobToB64(r.blob).then((b64) => store.addIqraRev(me.id, { sid, n: it.n, i: it.i, t: it.t, s: it.s, b64, mime: r.blob.type, got: j.got || '', said: r.transcript || '' })).catch((e) => console.warn('iqra rev', e));
-          msg.className = 'iq-msg warn'; msg.textContent = 'سيستمع معلمك لنطقك ويحكم عليه. ننتقل للتالية.';
-        } else { results.push({ item: it, ok: false }); msg.className = 'iq-msg warn'; msg.textContent = 'ننتقل للتالية، وتعود إليك في المراجعة.'; }
-        setTimeout(() => next(), 1400);
+        // ٢) خادم التجويد في الخلفية: ينتقل الطالب فوراً، ويصل الحكم على شريط التقدم
+        marks[j] = 'wait'; updDots();
+        const p = judgeAI(it, r).then((v) => settle(it, j, v, r));
+        pend.add(p); p.finally(() => pend.delete(p));
+        msg.className = 'iq-msg'; msg.textContent = '✓ سُجّل نطقك، ويصلك التصحيح على الشريط بعد لحظة.';
+        setTimeout(() => { if (items[k] === it) next(); }, 650);
       }
       paint();
     });
@@ -641,7 +684,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const G = { ...IQ_DEFAULT, ...cfg };
     host.innerHTML = `<div class="stack iq">
       <div class="card stack">
-        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٦)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
+        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٧)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
         <div class="row">
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>

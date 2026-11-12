@@ -240,7 +240,8 @@ export async function recordClip({ onLevel = () => {}, maxSec = 8, silenceMs = 9
   });
   return { done, stop: () => stopFn() };
 }
-async function toWav(blob) {
+/** صوت جاهز للخادم: ١٦ كيلوهرتز أحادي، بعد قصّ الصمت (أصغر وأسرع ولا يحتاج تحويلاً هناك) */
+export async function toWav(blob) {
   const buf = await ctx().decodeAudioData(await blob.arrayBuffer());
   const ch = buf.getChannelData(0), sr = buf.sampleRate;
   // قصّ الصمت: أول وآخر نافذة (٢٠ م.ث) فيها صوت، مع هامش صغير

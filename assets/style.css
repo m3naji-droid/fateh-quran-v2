@@ -1095,3 +1095,14 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .iq-rep { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .iq-rep > li { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
 .iq-repst { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.iq-dots2 { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.iq-dots2 i { width: 12px; height: 12px; border-radius: 50%; background: var(--line); transition: background .2s, transform .2s; }
+.iq-dots2 i.cur { box-shadow: 0 0 0 2px var(--green); }
+.iq-dots2 i.wait { background: var(--pending, #9aa); animation: iqPulse 1s ease-in-out infinite; }
+.iq-dots2 i.ok { background: var(--ok); }
+.iq-dots2 i.again { background: var(--warn); }
+.iq-dots2 i.bad { background: var(--bad); }
+@keyframes iqPulse { 50% { transform: scale(.6); opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .iq-dots2 i.wait { animation: none; } }
+.iq-bg { min-height: 1.4em; text-align: center; font-size: 13px; }
+.iq-bg.ok { color: var(--ok); } .iq-bg.warn { color: var(--warn); }

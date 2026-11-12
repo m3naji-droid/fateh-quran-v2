@@ -77,10 +77,21 @@ export async function analyze(blob, { surah, from, to }, onProgress = () => {}, 
   }
 }
 
+/** إيقاظ الخادم مسبقاً (يحمّل النموذج قبل أول كلمة). مرة كل ٤ دقائق على الأكثر. يعيد true إن كان جاهزاً */
+let warmAt = 0, warmP = null;
+export function warm() {
+  if (!aiEnabled()) return Promise.resolve(false);
+  if (warmP && Date.now() - warmAt < 4 * 60e3) return warmP;
+  warmAt = Date.now();
+  warmP = fetch(base() + '/health', { cache: 'no-store' }).then((r) => r.json()).then((j) => !!j.model_ready).catch(() => { warmAt = 0; return false; });
+  return warmP;
+}
+
 /** الرسم الصوتي لتسجيل قصير (حرف أو كلمة في «اقرأ وارتقِ»). يعيد النص الصوتي أو يرمي خطأ. */
 export async function phonemes(blob, signal) {
   const fd = new FormData();
-  fd.append('file', blob, 'say.' + ((blob.type || '').includes('mp4') ? 'mp4' : 'webm'));
+  const ty = blob.type || '';
+  fd.append('file', blob, 'say.' + (ty.includes('wav') ? 'wav' : ty.includes('mp4') ? 'mp4' : 'webm'));
   const headers = {};
   try { const t = await tokenProvider(); if (t) headers.Authorization = 'Bearer ' + t; } catch {}
   let r, j;

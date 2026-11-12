@@ -102,12 +102,15 @@ def usage_inc(**fields):
 STATE = {"ready": False, "error": None, "loaded_at": None}
 device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.bfloat16 if device == "cuda" else torch.float32
-model = processor = vocab = None
+model = processor = vocab = quick_model = None
 model_lock = threading.Lock()
+# أولوية الكلمات القصيرة: تحليل التلاوة الطويلة يتنحّى بين مقاطعه ما دامت كلمة تنتظر
+QUICK = {"waiting": 0}
+quick_cv = threading.Lock()
 
 
 def load_model():
-    global model, processor, vocab
+    global model, processor, vocab, quick_model
     try:
         token = os.environ.get("HF_TOKEN") or None
         processor = AutoFeatureExtractor.from_pretrained(MODEL_ID, token=token)
@@ -119,6 +122,10 @@ def load_model():
         model = m
         if device == "cpu":
             torch.set_num_threads(max(1, os.cpu_count() or 2))
+            # اختياري: نسخة مضغوطة (int8) أسرع لكلمات «اقرأ وارتقِ» فقط. تُفعَّل بالمتغير QUICK_INT8=1
+            if os.environ.get("QUICK_INT8") == "1":
+                quick_model = torch.quantization.quantize_dynamic(m, {torch.nn.Linear}, dtype=torch.qint8, inplace=False)
+                quick_model.eval()
         STATE.update(ready=True, loaded_at=time.time())
     except Exception as e:  # نعرض السبب في /health
         STATE["error"] = f"{type(e).__name__}: {e}"[:500]
@@ -137,22 +144,59 @@ else:
 MAX_FEATURES = int(np.ceil((A.SR * CHUNK_SECONDS - 400) / (160 * 2)))
 
 
-def transcribe(chunks: list[np.ndarray]) -> str:
-    """الرسم الصوتي لكل مقطع ثم وصلها (مقطع واحد في كل مرة لتقليل الذاكرة على المعالج)."""
+def transcribe(chunks: list[np.ndarray], quick: bool = False) -> str:
+    """الرسم الصوتي لكل مقطع ثم وصلها (مقطع واحد في كل مرة لتقليل الذاكرة على المعالج).
+    quick: لكلمات «اقرأ وارتقِ» القصيرة: بلا حشو إلى ١٤٫٥ ثانية (يُحلَّل طول الصوت الحقيقي فقط)، ولها الأولوية."""
     out = []
     for ch in chunks:
-        feats = processor(ch, sampling_rate=A.SR, return_tensors="pt", padding="max_length", max_length=MAX_FEATURES)
+        if quick:
+            feats = processor(ch, sampling_rate=A.SR, return_tensors="pt")
+        else:
+            feats = processor(ch, sampling_rate=A.SR, return_tensors="pt", padding="max_length", max_length=MAX_FEATURES)
         x = feats["input_features"].to(device, dtype=dtype)
-        mask = feats["attention_mask"].to(device, dtype=dtype)
-        with model_lock, torch.inference_mode():
-            logits = model(x, mask, return_dict=False)[0]["phonemes"]
+        am = feats.get("attention_mask")
+        mask = (am if am is not None else torch.ones(x.shape[:2], dtype=torch.long)).to(device, dtype=dtype)
+        if quick:
+            with quick_cv:
+                QUICK["waiting"] += 1
+            try:
+                with model_lock, torch.inference_mode():
+                    m = quick_model if quick_model is not None else model
+                    logits = m(x, mask, return_dict=False)[0]["phonemes"]
+            finally:
+                with quick_cv:
+                    QUICK["waiting"] -= 1
+        else:
+            while QUICK["waiting"] > 0:
+                time.sleep(0.01)
+            with model_lock, torch.inference_mode():
+                logits = model(x, mask, return_dict=False)[0]["phonemes"]
         probs = torch.nn.functional.softmax(logits.float().cpu(), dim=-1)
         out.append(phonemes_level_greedy_decode(probs, vocab)[0].text)
     return "".join(out)
 
 
+def _fast_wav(data: bytes):
+    """ملف WAV جاهز (16kHz أحادي 16 بت كما يرسله الموقع): يُقرأ مباشرة بلا ffmpeg."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    try:
+        import io
+        import wave as _wave
+        with _wave.open(io.BytesIO(data)) as w:
+            if w.getframerate() != A.SR or w.getnchannels() != 1 or w.getsampwidth() != 2:
+                return None
+            raw = w.readframes(w.getnframes())
+        return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    except Exception:
+        return None
+
+
 def decode_audio(data: bytes) -> np.ndarray:
     """تحويل أي صيغة (webm/ogg/mp4/wav) إلى موجة 16kHz أحادية عبر ffmpeg."""
+    fast = _fast_wav(data)
+    if fast is not None:
+        return fast
     with tempfile.NamedTemporaryFile(suffix=".bin") as f:
         f.write(data)
         f.flush()
@@ -166,6 +210,12 @@ def decode_audio(data: bytes) -> np.ndarray:
 
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
+_TOKENS: dict[str, dict] = {}
+try:
+    import requests as _rq
+    _CERT_SESSION = _rq.Session()  # اتصال واحد يُعاد استعماله لجلب الشهادات
+except Exception:  # pragma: no cover
+    _CERT_SESSION = None
 
 
 def check_auth(authorization: str | None, internal: str | None = None):
@@ -176,12 +226,21 @@ def check_auth(authorization: str | None, internal: str | None = None):
         return
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "يجب تسجيل الدخول في الموقع لاستخدام التحليل.")
-    try:
-        from google.auth.transport import requests as g_requests
-        from google.oauth2 import id_token
-        claims = id_token.verify_firebase_token(authorization[7:], g_requests.Request(), audience=FIREBASE_PROJECT)
-    except Exception:
-        claims = None
+    tok = authorization[7:]
+    hit = _TOKENS.get(tok)
+    if hit and hit.get("exp", 0) > time.time() + 30:
+        claims = hit  # تحقق سابق من الرمز نفسه: لا نعيد جلب شهادات Google عند كل كلمة
+    else:
+        try:
+            from google.auth.transport import requests as g_requests
+            from google.oauth2 import id_token
+            claims = id_token.verify_firebase_token(tok, g_requests.Request(session=_CERT_SESSION), audience=FIREBASE_PROJECT)
+        except Exception:
+            claims = None
+        if claims and claims.get("aud") == FIREBASE_PROJECT:
+            if len(_TOKENS) > 2000:
+                _TOKENS.clear()
+            _TOKENS[tok] = claims
     if not claims or claims.get("aud") != FIREBASE_PROJECT:
         raise HTTPException(401, "انتهت جلسة الدخول. حدّث الصفحة ثم أعد المحاولة.")
     # الزائر المجهول لا يُقبل: فقط الطالب الذي دخل بكلمة سره والمعلم
@@ -192,6 +251,7 @@ def check_auth(authorization: str | None, internal: str | None = None):
 # ------------------------------------------------------------ المهام
 JOBS: dict[str, dict] = {}
 pool = ThreadPoolExecutor(max_workers=1)  # مهمة واحدة في كل مرة على الخادم المجاني
+quick_pool = ThreadPoolExecutor(max_workers=2)  # كلمات «اقرأ وارتقِ»: مسار مستقل لا ينتظر تحليل التلاوات
 
 
 def run_job(jid: str, wave: np.ndarray, surah: int, start: int, end: int, mk: tuple):
@@ -396,11 +456,13 @@ async def phonemes(
             time.sleep(1)
         if STATE["error"]:
             raise RuntimeError("تعذر تحميل النموذج.")
-        chunks = A.split_on_silence(wave)
-        return transcribe(chunks) if chunks else ""
+        if len(wave) < A.SR * 0.15:
+            return ""
+        chunks = A.split_on_silence(wave) if len(wave) > A.SR * 14 else [wave]
+        return transcribe(chunks, quick=True) if chunks else ""
 
     try:
-        pred = await asyncio.get_running_loop().run_in_executor(pool, run)
+        pred = await asyncio.get_running_loop().run_in_executor(quick_pool, run)
     except Exception as e:
         raise HTTPException(500, str(e)[:200])
     billed = round(time.time() - t_req, 1)
