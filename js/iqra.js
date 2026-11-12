@@ -84,7 +84,11 @@ function recordOnce({ onLevel, onLive, expect, quiet = 1100 }) {
   const s = new RecitationSession({ maxSeconds: 9, onLevel: (l) => tick(l), onTranscript: (t) => { onLive?.(t); if (expect && expect(t)) setTimeout(stop, 250); } });
   let voiced = false, lastLoud = 0, loudSince = 0, t0 = Date.now(), stopped = false, resolve;
   const done = new Promise((r) => (resolve = r));
-  const stop = async () => { if (stopped) return; stopped = true; const r = await s.stop(); resolve(r); };
+  const empty = { blob: null, transcript: '' };
+  // لا يعلق أبداً: إن لم ينتهِ الإيقاف خلال ٣ ثوانٍ يُلغى التسجيل ويُفتح الطريق للمحاولة التالية
+  const stop = async () => { if (stopped) return; stopped = true; const t = setTimeout(() => { try { s.cancel(); } catch {} resolve(empty); }, 3000); try { resolve(await s.stop()); } catch { resolve(empty); } clearTimeout(t); };
+  const cap = setTimeout(stop, 12000);
+  done.then(() => clearTimeout(cap));
   function tick(l) {
     onLevel?.(l);
     const now = Date.now();
@@ -94,8 +98,8 @@ function recordOnce({ onLevel, onLive, expect, quiet = 1100 }) {
     if (voiced && now - lastLoud > quiet) stop();
     if (!voiced && now - t0 > 7000) stop();
   }
-  s.onAutoStop = () => { stopped = true; s._done?.then(resolve); };
-  return { start: () => s.start(), stop, done, cancel: () => { stopped = true; s.cancel(); resolve({ blob: null, transcript: '' }); } };
+  s.onAutoStop = () => { stopped = true; (s._done || Promise.resolve(empty)).then(resolve, () => resolve(empty)); };
+  return { start: () => s.start(), stop, done, cancel: () => { stopped = true; try { s.cancel(); } catch {} resolve(empty); }, get stopped() { return stopped; } };
 }
 /** مدة السكوت التي تُنهي التسجيل: أقصر للمقاطع، وأطول للعبارات حتى لا يُقطع الطالب وهو يتنفس */
 const quietFor = (it) => (/\s/.test(it.s) ? 1200 : it.k === 'name' ? 1000 : it.k === 'word' ? 900 : 800);
@@ -464,7 +468,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
   const STAGE = ['👂 اسمع ثم كرّر', '🤝 اقرأ مع المساعدة', '💪 اقرأ وحدك'];
   function run({ mode, items, title, step, sid, taj = null }) {
     return new Promise((resolve) => {
-      let k = 0, tries = 0, rec = null, busy = false, ts = taj ? 0 : -1, steps = null, autoK = -1, acted = false, live = true, srv = aiEnabled() ? 'wait' : 'ok';
+      let k = 0, tries = 0, rec = null, busy = false, busyAt = 0, ts = taj ? 0 : -1, steps = null, autoK = -1, acted = false, live = true, srv = aiEnabled() ? 'wait' : 'ok';
       const pend = new Set(), marks = [];
       warm().then((ok) => { srv = ok ? 'ok' : 'fail'; const e = host.querySelector('#iqSrv'); if (e) e.textContent = ''; });
       const results = [];
@@ -551,7 +555,12 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
         const say = host.querySelector('#iqSay'); if (say) say.onclick = () => playItem(it);
         host.querySelector('#iqFl').onclick = (e) => { flag(it); e.currentTarget.disabled = true; };
         const ta = host.querySelector('#iqTa'); if (ta) ta.onclick = () => { ts = 0; paintTaj(); };
-        host.querySelector('#iqMic').onclick = () => (rec ? rec.stop() : listen());
+        host.querySelector('#iqMic').onclick = () => {
+          if (rec && rec.stopped) { rec.cancel(); rec = null; busy = false; return listen(); } // تسجيل سابق عالق
+          if (rec) return rec.stop();
+          if (busy && Date.now() - busyAt > 8000) busy = false;
+          listen();
+        };
         const nx = host.querySelector('#iqNext'); if (nx) nx.onclick = () => next();
         const sk = host.querySelector('#iqSkip');
         if (sk) sk.onclick = () => {
@@ -608,7 +617,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
       }
       async function listen() {
         if (busy) return;
-        busy = true;
+        busy = true; busyAt = Date.now();
         stopAudio();
         await new Promise((r) => setTimeout(r, 150)); // يهدأ مكبّر الصوت قبل فتح الميكروفون
         const it = items[k], j = k;
@@ -687,7 +696,7 @@ export function mountIqraTeacher(host, { students, classes, toast = () => {}, on
     const G = { ...IQ_DEFAULT, ...cfg };
     host.innerHTML = `<div class="stack iq">
       <div class="card stack">
-        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٨)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
+        <div><h2>⚙️ إعدادات «اقرأ وارتقِ» <span class="small muted" style="font-weight:400">· إصدار ١٢/١١ (٩)</span></h2><p class="small muted" style="margin:4px 0 0">تدريب على نطق الحروف والكلمات من كتاب «اقرأ وارتقِ» (الفصول ١–٤)، للطلاب الذين تختارهم فقط. يظهر لهم تبويب خاص: اختبار مستوى، ثم درس يومي، وتمرين حر.</p></div>
         <div class="row">
           <label class="field" style="min-width:150px">عدد الكلمات في الدرس اليومي<input type="number" id="iqC" min="5" max="40" value="${cfg.count}"></label>
           <label class="field" style="min-width:150px">نسبة الإتقان للانتقال (٪)<input type="number" id="iqP" min="50" max="100" value="${cfg.pass}"></label>

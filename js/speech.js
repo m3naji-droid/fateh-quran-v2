@@ -176,7 +176,9 @@ export class RecitationSession {
     cancelAnimationFrame(this.raf);
     const duration = Math.round((Date.now() - this.startedAt) / 1000);
     this._done = new Promise((resolve) => {
+      let over = false;
       const finish = () => {
+        if (over) return; over = true;
         this.stream?.getTracks().forEach((t) => t.stop());
         try { if (this.ac && this.ac.state !== 'closed') this.ac.close(); } catch {}
         const blob = this.chunks.length ? new Blob(this.chunks, { type: this.rec?.mimeType || 'audio/webm' }) : null;
@@ -187,7 +189,8 @@ export class RecitationSession {
         }, 600);
       };
       try { this.recog?.stop(); } catch {}
-      if (this.rec && this.rec.state !== 'inactive') { this.rec.onstop = finish; this.rec.stop(); } else finish();
+      // في آيفون قد لا يصل حدث الإيقاف أحياناً فيعلق التسجيل التالي: ننهي بعد مهلة قصيرة على كل حال
+      if (this.rec && this.rec.state !== 'inactive') { this.rec.onstop = finish; try { this.rec.stop(); } catch { finish(); } setTimeout(finish, 1500); } else finish();
     });
     return this._done;
   }
