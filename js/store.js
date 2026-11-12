@@ -547,7 +547,7 @@ async function makeCloud() {
     async getIqraCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'iqraCfg')); return d.exists() ? d.data() : null; },
     async setIqraCfg(c) { await setDoc(doc(db, 'leaderboard', 'iqraCfg'), { ...c, at: now() }); },
     async getIqra(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'iqra')); return d.exists() ? d.data() : null; },
-    async saveIqra(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'iqra'), { ...patch, at: now() }, { merge: true }); },
+    async saveIqra(pn, patch) { const d = { ...patch, at: now() }; await setDoc(doc(db, 'roster', pn, 'progress', 'iqra'), d, { mergeFields: Object.keys(d) }); }, // الحقول تُستبدل كاملة (لا دمج عميق) فيُحذف ما حُذف من الخرائط
     async addIqraRev(pn, r) { const id = r.id || uid(); await setDoc(doc(db, 'roster', pn, 'iqrarev', id), { ...r, id, pn, at: now(), status: 'pending' }); return id; },
     async listIqraRev(pn) { await ensureAnon(); return (await getDocs(collection(db, 'roster', pn, 'iqrarev'))).docs.map((d) => { const { b64, ...x } = d.data(); return { ...x, id: d.id, hasAudio: !!b64 }; }); },
     async getIqraRevAudio(pn, id) { const d = await getDoc(doc(db, 'roster', pn, 'iqrarev', id)); const x = d.exists() ? d.data() : null; return x?.b64 ? { b64: x.b64, mime: x.mime } : null; },

@@ -208,7 +208,7 @@ export const KIND_LABEL = { teacher: 'بصوت معلمك', reciter: 'بصوت �
 
 /* ---------- التسجيل: يتوقف بعد السكوت، ويُقصّ الصمت، ويُحفظ WAV ---------- */
 /** يبدأ التسجيل ويعيد { done: وعد بملف WAV, stop } */
-export async function recordClip({ onLevel = () => {}, maxSec = 8 } = {}) {
+export async function recordClip({ onLevel = () => {}, maxSec = 8, silenceMs = 900 } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
   const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'];
   const mimeType = types.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
@@ -232,7 +232,7 @@ export async function recordClip({ onLevel = () => {}, maxSec = 8 } = {}) {
       const l = Math.min(1, Math.sqrt(sum / data.length) / 40); onLevel(l);
       const now = Date.now();
       if (l > 0.14) { voiced = true; last = now; }
-      if ((voiced && now - last > 900) || now - t0 > maxSec * 1000 || (!voiced && now - t0 > 6000)) return stop();
+      if ((voiced && now - last > silenceMs) || now - t0 > maxSec * 1000 || (!voiced && now - t0 > 6000)) return stop();
       raf = requestAnimationFrame(loop);
     };
     rec.start(200); loop();

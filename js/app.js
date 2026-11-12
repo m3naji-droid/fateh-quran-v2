@@ -3829,7 +3829,7 @@ function viewTeacher(app) {
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
   const boardSubs = () => {
-    const base = D.subs.concat(D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts) : []);
+    const base = D.subs.concat(D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
   function schedulePublish() {
