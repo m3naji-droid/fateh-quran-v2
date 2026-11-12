@@ -557,7 +557,7 @@ export function mountIqraStudent(host, { me, toast = () => {}, confetti = () => 
           // «ساعدني»: لا يُحسب خطأ؛ يسمع النطق ويكرره (ويرجع للمرحلة الأولى)
           setStage(it, 0); tries = Math.max(tries, 1); paint('استمع جيداً، ثم كرّر بعده 👂', 'warn'); playItem(it);
         };
-        if ((stg === 0 || it.replay) && mode !== 'place' && autoK !== k && !msg) { autoK = k; setTimeout(() => { if (runner && items[k] === it && ts < 0) playItem(it); }, 300); }
+        if ((stg === 0 || it.replay) && mode !== 'place' && autoK !== k && !msg) { autoK = k; setTimeout(() => { if (runner && items[k] === it && ts < 0 && !rec && !busy) playItem(it); }, 300); }
       };
       const next = () => {
         k++; tries = 0; steps = null; ts = taj ? 0 : -1; stopAudio();
