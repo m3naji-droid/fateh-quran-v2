@@ -1,7 +1,9 @@
 // مواقيت الصلاة لمملكة البحرين (المنامة)، تُحسب في الجهاز بلا إنترنت.
-// طريقة أم القرى: الفجر ١٨٫٥° تحت الأفق، والعشاء بعد المغرب بـ٩٠ دقيقة، والعصر على المذهب الشافعي (ظل المثل).
+// مضبوطة على تقويم البحرين الرسمي: الفجر والعشاء عند ١٨° تحت الأفق، والعصر على المذهب الشافعي (ظل المثل)،
+// مع دقيقة احتياط لكل الأوقات عدا الفجر.
 const LAT = 26.2235, LNG = 50.5876, TZ = 3; // توقيت البحرين UTC+3 بلا توقيت صيفي
-const FAJR = 18.5, ISHA_MIN = 90;
+const FAJR = 18, ISHA = 18;
+const OFF = { fajr: 0, sunrise: 1, dhuhr: 1, asr: 1, maghrib: 1, isha: 1 }; // دقائق تُضاف (احتياط)
 const rad = (d) => (d * Math.PI) / 180, deg = (r) => (r * 180) / Math.PI;
 const fix = (a, b) => { a -= b * Math.floor(a / b); return a < 0 ? a + b : a; };
 
@@ -33,7 +35,11 @@ function hours(y, m, d) {
   }
   const adj = (h) => h + TZ - LNG / 15;
   const out = { fajr: adj(T.fajr), sunrise: adj(T.sunrise), dhuhr: adj(T.dhuhr), asr: adj(T.asr), maghrib: adj(T.maghrib) };
-  out.isha = out.maghrib + ISHA_MIN / 60;
+  // العشاء: ١٨° تحت الأفق بعد الغروب (تكراران للدقة)
+  let ti = out.maghrib / 24, iv = 0;
+  for (let i = 0; i < 2; i++) iv = angleT(ISHA, ti, false), (ti = iv / 24);
+  out.isha = adj(iv);
+  for (const k in out) out[k] += OFF[k] / 60;
   return out;
 }
 
