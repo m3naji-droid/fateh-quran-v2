@@ -42,7 +42,7 @@ export async function promptInstall() {
  * إن تغيّرت عما فُتحت به الصفحة: صدر تحديث، فيظهر شريط «يوجد تحديث، اضغط هنا».
  * لا يحتاج رقم إصدار يدوياً: أي نشر جديد يغيّر البصمة تلقائياً. */
 // كل ملفات الموقع التي تتغير كثيراً: أي تعديل فيها يُظهر رسالة التحديث
-const WATCH = ['./', 'js/app.js', 'js/store.js', 'assets/style.css', 'js/iqra.js', 'js/iqra-audio.js', 'js/iqra-taj.js', 'js/iqra-data.js', 'js/tajweed-ai.js', 'js/speech.js', 'js/speech-issues.js'];
+const WATCH = ['./', 'js/app.js', 'js/store.js', 'assets/style.css', 'js/iqra.js', 'js/iqra-audio.js', 'js/iqra-taj.js', 'js/iqra-data.js', 'js/tajweed-ai.js', 'js/speech.js', 'js/speech-issues.js', 'js/countdown.js', 'js/prayer.js'];
 async function fingerprint() {
   const parts = await Promise.all(WATCH.map((u) => fetch(u, { method: 'HEAD', cache: 'no-store' })
     .then((r) => (r.ok ? r.headers.get('etag') || r.headers.get('last-modified') || r.headers.get('content-length') || '' : null))

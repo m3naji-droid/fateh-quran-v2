@@ -20,6 +20,7 @@ import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange 
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi } from './push.js';
 import { mountIssueTile, drawIssuesTeacher } from './speech-issues.js';
+import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
@@ -1620,7 +1621,8 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div id="spTileW" class="sp-wrap"></div>' : ''}
+      ${tab === 'tasks' ? '<div id="cdMonth"></div>' : ''}
+      <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -1632,7 +1634,12 @@ function viewStudent(app) {
     $('#stBell', app).onclick = openBell;
     paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
-    if (tab === 'tasks') mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
+    if (tab === 'tasks') {
+      mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
+      mountPrayerTile($('#prTileW', app));
+      mountMonthCountdown($('#cdMonth', app), { onHonor: () => { tab = 'honor'; draw(); } });
+    }
+    startPrayerAlerts((m) => toast(m));
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
@@ -2203,9 +2210,11 @@ function viewTeacher(app) {
       <div id="dbWarn"></div>
       <div id="monthBar"></div>
       <div class="kpis" id="tKpis"></div>
+      <div id="cdMonthT" style="margin-top:12px"></div>
       <div id="attn"></div>
       <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['iqra', 'اقرأ وارتقِ'], ['fb', 'رأيك يهمنا'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'fb' ? '<span class="tab-n" id="fbTabN"></span>' : k === 'iqra' ? '<span class="tab-n" id="iqTabN"></span>' : ''}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
+    mountMonthCountdown($('#cdMonthT', app), { teacher: true, onHonor: () => { tab = 'honor'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'honor')); drawBody(); } });
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
     drawBody();
