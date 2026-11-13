@@ -217,6 +217,12 @@ const local = {
   async listAllFeedback() { return LS.get('feedback', []); },
   async updateFeedback(pn, id, patch) { const all = LS.get('feedback', []); const i = all.findIndex((x) => x.id === id && x.pn === pn); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('feedback', all); } },
   async deleteFeedback(pn, id) { LS.set('feedback', LS.get('feedback', []).filter((x) => !(x.id === id && x.pn === pn))); },
+  // شكاوى التعرف على الكلام
+  async addSpeechIssue(pn, f) { const all = LS.get('speechIssues', []); const id = uid(); all.push({ ...f, id, pn, createdAt: now() }); LS.set('speechIssues', all); return id; },
+  async listMySpeechIssues(pn) { return LS.get('speechIssues', []).filter((x) => x.pn === pn); },
+  async listAllSpeechIssues() { return LS.get('speechIssues', []); },
+  async updateSpeechIssue(pn, id, patch) { const all = LS.get('speechIssues', []); const i = all.findIndex((x) => x.id === id && x.pn === pn); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('speechIssues', all); } },
+  async deleteSpeechIssue(pn, id) { LS.set('speechIssues', LS.get('speechIssues', []).filter((x) => !(x.id === id && x.pn === pn))); },
   async getModel() { return LS.get('model', null); },
   async setModel(m) { LS.set('model', m); },
   // لوحة الشرف
@@ -572,6 +578,11 @@ async function makeCloud() {
     async listAllFeedback() { return (await getDocs(query(collectionGroup(db, 'feedback'), limit(2000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async updateFeedback(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'feedback', id), patch); },
     async deleteFeedback(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'feedback', id)); },
+    async addSpeechIssue(pn, f) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'speechIssues', id), { ...f, pn, createdAt: now() }); return id; },
+    async listMySpeechIssues(pn) { await ensureAnon(); return list(`roster/${pn}/speechIssues`); },
+    async listAllSpeechIssues() { return (await getDocs(query(collectionGroup(db, 'speechIssues'), limit(2000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
+    async updateSpeechIssue(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'speechIssues', id), patch); },
+    async deleteSpeechIssue(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'speechIssues', id)); },
     async studentSubmissions(pn) { await ensureAnon(); return list(`roster/${pn}/subs`); },
     async allSubmissions() { return (await getDocs(query(collectionGroup(db, 'subs'), limit(10000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     watchSubmissions(cb, onErr) {

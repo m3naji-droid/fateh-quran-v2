@@ -19,6 +19,7 @@ import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKe
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi } from './push.js';
+import { mountIssueTile, drawIssuesTeacher } from './speech-issues.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
@@ -1489,7 +1490,7 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'late' ? '⏰' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'speechFix' ? '🎙️' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'late' ? '⏰' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
         <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚|📿)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
@@ -1619,7 +1620,7 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>
+      <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div id="spTileW" class="sp-wrap"></div>' : ''}
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -1631,6 +1632,7 @@ function viewStudent(app) {
     $('#stBell', app).onclick = openBell;
     paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
+    if (tab === 'tasks') mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
@@ -2424,23 +2426,35 @@ function viewTeacher(app) {
   /* --- رأيك يهمنا --- */
   let FB = null;
   const fbF = { kind: 'all', status: 'all', cls: 'all' };
+  let SP = null, fbView = 'fb';
+  const spF = { status: 'open', type: 'all', dev: 'all' };
   async function loadFb() {
     try { FB = (await store.listAllFeedback()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch (e) { FB = FB || []; console.warn(e); }
+    try { SP = (await store.listAllSpeechIssues()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch (e) { SP = SP || []; console.warn('speech issues', e); }
     paintFbTab();
     if (tab === 'fb') drawBody();
   }
   function paintFbTab() {
     const el = $('#fbTabN', app); if (!el) return;
-    const n = (FB || []).filter((x) => !x.seen).length;
+    const n = (FB || []).filter((x) => !x.seen).length + (SP || []).filter((x) => (x.status || 'new') === 'new').length;
     el.textContent = n ? (n > 9 ? '+٩' : ar(n)) : '';
   }
   function drawFb(body) {
     if (!FB) { body.innerHTML = '<div class="loading">جارٍ تحميل الملاحظات…</div>'; return; }
+    const spNew = (SP || []).filter((x) => (x.status || 'new') === 'new').length, fbNew = FB.filter((x) => !x.seen).length;
+    const sw = `<div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" class="${fbView === 'fb' ? 'on' : ''}" data-fv="fb">💬 الملاحظات${fbNew ? ` <span class="tab-n">${ar(fbNew)}</span>` : ''}</button><button type="button" role="tab" class="${fbView === 'sp' ? 'on' : ''}" data-fv="sp">🎙️ شكاوى التعرف على الكلام${spNew ? ` <span class="tab-n">${ar(spNew)}</span>` : ''}</button></div>`;
+    const wireSw = () => $$('[data-fv]', body).forEach((b) => (b.onclick = () => { fbView = b.dataset.fv; drawFb(body); }));
+    if (fbView === 'sp') {
+      body.innerHTML = sw + '<div id="spT"></div>'; wireSw();
+      drawIssuesTeacher($('#spT', body), SP || [], { store, toast, confirmBox, openModal, onCount: paintFbTab,
+        notify: async (pn) => { const nid = await store.addStudentNotif(pn, { type: 'speechFix', title: '🎙️ حُلّت مشكلة التعرف على الكلام', body: 'جرّب التسميع الآن بإذن الله، وأخبرنا إن بقيت المشكلة.', link: './#/student', tag: 'sp-' + pn }); return sendPush(nid, pn); } }, spF);
+      return;
+    }
     const opt = (v, l, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`;
     const L = FB.filter((x) => (fbF.kind === 'all' || x.kind === fbF.kind) && (fbF.cls === 'all' || x.classId === fbF.cls)
       && (fbF.status === 'all' || (fbF.status === 'new' && !x.seen) || (fbF.status === 'open' && !x.reply) || (fbF.status === 'done' && x.reply)));
     const count = (k) => FB.filter((x) => x.kind === k).length;
-    body.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">ملاحظات الطلاب عن الموقع. يصلك تنبيه عند كل ملاحظة جديدة، ويصل ردّك إلى الطالب كتنبيه.</p></div><button class="btn sm" type="button" id="fbRe">⟳ تحديث</button></div>
+    body.innerHTML = sw + `<div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">ملاحظات الطلاب عن الموقع. يصلك تنبيه عند كل ملاحظة جديدة، ويصل ردّك إلى الطالب كتنبيه.</p></div><button class="btn sm" type="button" id="fbRe">⟳ تحديث</button></div>
       <div class="fb-stats">${Object.entries(FB_KINDS).map(([k, [i, l]]) => `<button type="button" class="kpi kpi-btn${fbF.kind === k ? ' on' : ''}" data-fk="${k}"><b>${i} ${ar(count(k))}</b><span>${l}</span></button>`).join('')}</div>
       <div class="row" style="margin:12px 0">
         <select id="fbK" style="flex:1 1 130px">${opt('all', 'كل الأنواع', fbF.kind)}${Object.entries(FB_KINDS).map(([k, [i, l]]) => opt(k, `${i} ${l}`, fbF.kind)).join('')}</select>
@@ -2456,6 +2470,7 @@ function viewTeacher(app) {
         <form class="fb-rf" hidden><textarea rows="3" maxlength="1000" required placeholder="اكتب ردّك على ${esc(x.name || 'الطالب')}…">${esc(x.reply || '')}</textarea><div class="row"><button class="btn primary sm" type="submit">إرسال الرد</button><button class="btn sm" type="button" data-cancel>إلغاء</button></div></form>
         <div class="row fb-acts"><button class="btn sm" type="button" data-reply>${x.reply ? '✎ تعديل الرد' : '↩ ردّ'}</button><button class="btn sm danger" type="button" data-del>حذف</button></div>
       </li>`).join('')}</ul>` : `<div class="empty">${FB.length ? 'لا توجد ملاحظات بهذه الاختيارات.' : 'لم تصل ملاحظات بعد. يجد الطلاب زر «رأيك يهمنا» أسفل صفحتهم.'}</div>`}`;
+    wireSw();
     $('#fbRe', body).onclick = () => { FB = null; drawFb(body); loadFb(); };
     $$('[data-fk]', body).forEach((b) => (b.onclick = () => { fbF.kind = fbF.kind === b.dataset.fk ? 'all' : b.dataset.fk; drawFb(body); }));
     $('#fbK', body).onchange = (e) => { fbF.kind = e.target.value; drawFb(body); };

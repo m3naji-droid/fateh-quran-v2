@@ -234,6 +234,20 @@ service cloud.firestore {
           || (isStudent(pn) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['replySeen']));
         allow delete: if isTeacher();
       }
+      // شكاوى التعرف على الكلام: الطالب يرسل شكواه مع نوع جهازه ونتيجة الفحص، والمعلم يتابعها
+      match /speechIssues/{iid} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create: if isStudent(pn)
+          && request.resource.data.keys().hasOnly(['pn', 'name', 'classId', 'className', 'type', 'where', 'dev', 'diag', 'text', 'status', 'createdAt'])
+          && request.resource.data.pn == pn
+          && request.resource.data.status == 'new'
+          && request.resource.data.type in ['perm', 'nowords', 'wrong', 'stops', 'slow', 'once', 'error', 'other']
+          && request.resource.data.text is string && request.resource.data.text.size() <= 400;
+        // الطالب يسجّل فقط أنه اطّلع على أن مشكلته حُلّت
+        allow update: if isTeacher()
+          || (isStudent(pn) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['solvedSeen']));
+        allow delete: if isTeacher();
+      }
       // تنبيهات خاصة بالطالب (مثل وصول درجته): لا يقرؤها غيره
       match /notifs/{nid} {
         allow read: if isTeacher() || isStudent(pn);
@@ -242,6 +256,9 @@ service cloud.firestore {
     }
     // استعلام المعلم عن كل الملاحظات
     match /{path=**}/feedback/{fid} {
+      allow read: if isTeacher();
+    }
+    match /{path=**}/speechIssues/{iid} {
       allow read: if isTeacher();
     }
     // استعلام المعلم عن كل التسليمات
