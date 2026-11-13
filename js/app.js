@@ -2271,9 +2271,11 @@ function viewTeacher(app) {
   /* --- الأقسام مربعات: التبويبات الطويلة تُعرض أقسامها مربعات في الأعلى، والنقر يفتح القسم وحده --- */
   const SECT_TABS = new Set(['iqra', 'settings', 'honor', 'reports']);
   let secObs = null;
+  let secGen = 0;
   function sectionize(body) {
     secObs?.disconnect(); secObs = null;
-    body.querySelector(':scope > .sec-bar')?.remove();
+    const gen = ++secGen; // كل استدعاء يُبطل ما قبله: مؤقت قديم معلّق كان يعيد إدراج شريطه فتتكرر الأشرطة
+    body.querySelectorAll('.sec-bar').forEach((x) => x.remove());
     if (!SECT_TABS.has(tab)) return;
     const myTab = tab, key = 'tSec_' + myTab;
     const bar = document.createElement('div'); bar.className = 'sec-bar';
@@ -2288,8 +2290,9 @@ function viewTeacher(app) {
     };
     const keyOf = (t) => t.replace(/[\d٠-٩]+/g, '').replace(/[^\p{L}\s]/gu, '').trim();
     const render = () => {
+      if (gen !== secGen) { bar.remove(); return; }
       if (tab !== myTab || !body.isConnected) return;
-      if (!bar.isConnected) { body.prepend(bar); last = ''; } // أعاد القسم رسم الصفحة كلها
+      if (!bar.isConnected) { body.querySelectorAll('.sec-bar').forEach((x) => x.remove()); body.prepend(bar); last = ''; } // أعاد القسم رسم الصفحة كلها
       const S = sections();
       if (S.length < 2) { bar.hidden = true; S.forEach((x) => (x.el.style.display = '')); return; }
       bar.hidden = false;
