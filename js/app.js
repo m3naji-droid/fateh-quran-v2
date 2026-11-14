@@ -76,6 +76,7 @@ function openModal(html, onMount) {
   onMount && onMount($('#modalBody'));
 }
 /** ينفّذ fn حين تكون النافذة المنبثقة مغلقة (لا تتراكب نافذتان) */
+let srNoticeShown = false; // نافذة إعلان التعرف: مرة لكل فتح للموقع
 function whenModalFree(fn) {
   const m = $('#modal');
   if (m.hidden) return fn();
@@ -948,7 +949,11 @@ function viewStudent(app) {
       <div class="srn-card ok"><span class="srn-e">🎯</span><div><b>التدريبات والتحديات</b><p>تمّ تعديل التعرّف على الصوت، فتظهر لك الكلمات الآن 👏🏻👏🏻</p></div></div>
       <div class="srn-card"><span class="srn-e">📝</span><div><b>التسميعات</b><p>لا يظهر التعرّف، لكن تسجيلك يصل إلى المعلم، وسوف يسمعه ويقيّمك 👏🏻👏🏻</p></div></div>
       <button class="btn primary srn-ok" type="button" id="srnOk">حسناً 👍</button>
-    </div>`, (m) => { m.querySelector('#srnOk').onclick = () => { pref.set('srNotice1_' + me.id, 1); closeModal(); }; });
+      <button class="btn ghost srn-never" type="button" id="srnNever">✓ فهمت، لا تظهرها مرة أخرى</button>
+    </div>`, (m) => {
+      m.querySelector('#srnOk').onclick = () => closeModal();
+      m.querySelector('#srnNever').onclick = () => { pref.set('srNotice2_' + me.id, 1); closeModal(); };
+    });
   }
   function celebrateStreak() {
     const st = streakOf(activeDays());
@@ -1689,10 +1694,10 @@ function viewStudent(app) {
       mountMonthCountdown($('#cdMonth', app), { onHonor: () => { tab = 'honor'; draw(); } });
     }
     startPrayerAlerts((m) => toast(m));
-    // إعلان مرة واحدة: تعديل التعرف على الصوت
-    if (!pref.get('srNotice1_' + me.id) && !showSrNotice.pending) {
-      showSrNotice.pending = true;
-      setTimeout(() => whenModalFree(() => { showSrNotice.pending = false; if ($('#stBody', app) && !pref.get('srNotice1_' + me.id)) showSrNotice(); }), 1200);
+    // إعلان تعديل التعرف على الصوت: يظهر عند كل فتح للموقع، حتى يضغط الطالب «فهمت، لا تظهرها مرة أخرى»
+    if (!pref.get('srNotice2_' + me.id) && !srNoticeShown) {
+      srNoticeShown = true;
+      setTimeout(() => whenModalFree(() => { if ($('#stBody', app) && !pref.get('srNotice2_' + me.id)) showSrNotice(); }), 1200);
     }
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
