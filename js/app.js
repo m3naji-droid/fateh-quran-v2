@@ -1,7 +1,7 @@
 import { loadQuran, getSurahs, surahName, ayahCount, ayahWords, rangeWords, toArabicDigits as ar } from './quran.js';
 import { align, score } from './align.js';
 import { analyzeAyah, wordHtml, summarize, RULES } from './tajweed.js';
-import { RecitationSession, AyahPlayer, RECITERS, hasRecognition, hasRecorder, inAppBrowser, isIOS, micErrorText } from './speech.js';
+import { RecitationSession, devCaps, AyahPlayer, RECITERS, hasRecognition, hasRecorder, inAppBrowser, isIOS, micErrorText } from './speech.js';
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
@@ -375,7 +375,13 @@ function mountRecite(root, opts) {
     $('#rcResult', root).innerHTML = '';
     wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed'));
     last = null;
+    // جهاز لا يجمع التسجيل والتعرف: في الواجبات يُسجَّل للمعلم فقط، وفي التدريب والتحديات تظهر الكلمات بلا تسجيل
+    const nd = devCaps.noDual || devCaps.tryNoDual;
+    const recOnly = devCaps.noDual && !!opts.onSubmit, srOnly = nd && !opts.onSubmit && hasRecognition;
+    $('#rcNotice', root).innerHTML = recOnly ? '<div class="notice">🎙️ جهازك لا يستطيع إظهار الكلمات أثناء التسجيل؛ لذلك يُسجَّل تسميعك فقط، ويسمعه معلمك ويقيّمه بنفسه.</div>'
+      : srOnly ? '<div class="notice">📝 على جهازك تظهر الكلمات أثناء القراءة، ولا يُحفظ تسجيل صوتي في التدريب والتحديات.</div>' : '';
     sess = new RecitationSession({
+      noSR: recOnly, noRec: srOnly,
       onTranscript,
       onLevel: (l) => $('#rcMic', root).style.setProperty('--lvl', l.toFixed(2)),
       onTick: (s) => { $('#rcTimer', root).textContent = fmtTime(s); },

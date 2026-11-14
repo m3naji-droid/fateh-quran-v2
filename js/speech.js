@@ -43,10 +43,26 @@ export async function openMic() {
 export const SILENT_MSG = () => (/Android/.test(navigator.userAgent)
   ? 'التعرف الفوري لا يلتقط كلامك على هذا الجهاز. لا تقلق: تسميعك يُسجَّل ويصل إلى معلمك فيسمعه ويقيّمه. ولتشغيله: الإعدادات ← التطبيقات ← التطبيقات الافتراضية ← «الإدخال الصوتي» أو «المساعد الرقمي» ← اختر Google، ثم حدّث تطبيق «خدمات الكلام من Google» من المتجر.'
   : 'التعرف الفوري لا يلتقط كلامك على هذا الجهاز. لا تقلق: تسميعك يُسجَّل ويصل إلى معلمك فيسمعه ويقيّمه.');
+/* ---------- أجهزة لا تجمع التسجيل والتعرف معاً ----------
+   بعض الأجهزة (مثل أجهزة أندرويد القديمة واللوحية الرخيصة) يعمل فيها التعرف على الكلام وحده، ويعمل التسجيل وحده،
+   لكن إذا فُتحا معاً لم يصل التعرفَ أي صوت. يكتشف الموقع ذلك ويحفظه في الجهاز:
+   noDual: الجهاز لا يجمعهما · srOk: التعرف وحده نجح هنا من قبل · tryNoDual: جرّب التعرف وحده في المرة القادمة لنعرف */
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+export const devCaps = {
+  get noDual() { return lsGet('fp_noDual') === '1'; },
+  get tryNoDual() { return lsGet('fp_tryNoDual') === '1'; },
+  get srOk() { return lsGet('fp_srOk') === '1'; },
+  setNoDual(v) { lsSet('fp_noDual', v ? '1' : null); lsSet('fp_tryNoDual', null); },
+  setTry(v) { lsSet('fp_tryNoDual', v ? '1' : null); },
+  setSrOk() { lsSet('fp_srOk', '1'); },
+};
+
 export class RecitationSession {
   // stream/ac: ميكروفون وسياق صوتي مشتركان يُعاد استعمالهما ولا يُغلقان هنا. noSR: بلا تعرف على الكلام
-  constructor({ onTranscript, onLevel, onError, onTick, maxSeconds = 300, stream = null, ac = null, noSR = false } = {}) {
-    this.extStream = stream; this.extAc = ac; this.noSR = noSR;
+  // noRec: تعرف على الكلام فقط بلا تسجيل ولا ميكروفون من الموقع (للأجهزة التي لا تجمعهما)
+  constructor({ onTranscript, onLevel, onError, onTick, maxSeconds = 300, stream = null, ac = null, noSR = false, noRec = false } = {}) {
+    this.extStream = stream; this.extAc = ac; this.noSR = noSR; this.noRec = noRec && !!SR;
     this.onTranscript = onTranscript || (() => {});
     this.onLevel = onLevel || (() => {});
     this.onError = onError || (() => {});
@@ -69,6 +85,7 @@ export class RecitationSession {
     this.active = true;
     this.cancelled = false;
     this.startedAt = Date.now();
+    if (this.noRec) return this._startNoRec();
     try {
       // صوت خام قدر الإمكان: كبت الضوضاء وإلغاء الصدى يشوّهان الغنة والمدود فيضعف حكم التحليل الآلي
       this.stream = this.extStream || await openMic();
@@ -124,11 +141,27 @@ export class RecitationSession {
 
     if (SR && !this.noSR) this._startRecognition();
   }
+  /** تعرف فقط: لا ميكروفون من الموقع ولا تسجيل، فتأخذ خدمة التعرف الميكروفون وحدها */
+  _startNoRec() {
+    this.diag.noRec = 1;
+    this.timer = setInterval(() => {
+      const s = Math.floor((Date.now() - this.startedAt) / 1000);
+      this.onTick(s);
+      // نبض بسيط لزر الميكروفون حين تصل كلمات
+      this.onLevel(this.diag.results && Date.now() - (this.lastRes || 0) < 600 ? 0.6 : 0.15);
+      // تجربة: ٢٠ ثانية بلا أي كلمة حتى والتعرف وحده يعمل → المشكلة في خدمة التعرف نفسها لا في جمعه مع التسجيل
+      if (devCaps.tryNoDual && !this.diag.results && s >= 20 && !this.silentWarned) { this.silentWarned = true; devCaps.setTry(false); this.diag.silent = true; this.onError(SILENT_MSG()); }
+      if (s >= this.maxSeconds) { this.reason = 'max'; this.stop(); this.onAutoStop && this.onAutoStop(); }
+    }, 250);
+    this._startRecognition();
+  }
   /** الطالب يتكلم بوضوح (٨ ثوانٍ من الصوت) والتعرف لم يُرجع شيئاً ولا خطأ: التعرف «صامت» على هذا الجهاز */
   _checkSilentSR() {
     if (this.silentWarned || !this.recog || this.srDead || this.diag.results > 0 || this.diag.voiced < 8000) return;
     this.silentWarned = true; this.diag.silent = true;
     try { localStorage.setItem('fp_srSilent', String(Date.now())); } catch {}
+    // إن كان التعرف وحده قد نجح هنا من قبل، فالجهاز لا يجمع التسجيل والتعرف؛ وإلا نجرّب التعرف وحده في المرة القادمة
+    if (devCaps.srOk) devCaps.setNoDual(true); else devCaps.setTry(true);
     this.onError(SILENT_MSG());
   }
   _release() {
@@ -145,7 +178,8 @@ export class RecitationSession {
     r.maxAlternatives = 1;
     ['audiostart', 'soundstart', 'speechstart', 'nomatch'].forEach((k) => (r['on' + k] = () => { if (this.diag.ev.length < 12 && !this.diag.ev.includes(k)) this.diag.ev.push(k); }));
     r.onresult = (e) => {
-      this.diag.results++;
+      this.diag.results++; this.lastRes = Date.now();
+      if (this.diag.results === 1) { if (this.noRec) { devCaps.setSrOk(); if (devCaps.tryNoDual) devCaps.setNoDual(true); } else if (this.stream) devCaps.setNoDual(false); }
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
@@ -159,7 +193,7 @@ export class RecitationSession {
       if (this.diag && this.diag.errs.length < 12) this.diag.errs.push(e.error);
       // أخطاء لا ينفع معها إعادة التشغيل: نتوقف عن المحاولة ويكمل التسجيل الصوتي وحده
       if (['not-allowed', 'service-not-allowed', 'language-not-supported'].includes(e.error)) this.srDead = true;
-      if (e.error === 'audio-capture') { this.srFails = (this.srFails || 0) + 1; if (this.srFails >= 3) this.srDead = true; this.onError('تعذّر على المتصفح الاستماع للتعرف على الكلام (الميكروفون مشغول). يستمر تسجيلك ويُقيَّم من الصوت.'); }
+      if (e.error === 'audio-capture') { this.srFails = (this.srFails || 0) + 1; if (this.srFails >= 3) { this.srDead = true; if (this.stream) { if (devCaps.srOk) devCaps.setNoDual(true); else devCaps.setTry(true); } } this.onError('تعذّر على المتصفح الاستماع للتعرف على الكلام (الميكروفون مشغول). يستمر تسجيلك ويُقيَّم من الصوت.'); }
       else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.onError(isIOS && standalone ? 'التعرف على الكلام لا يعمل في المقرأة المثبّتة على آيفون. يستمر تسجيلك ويُقيَّم من الصوت، وللمتابعة الحية افتح المقرأة في Safari.' : isIOS ? 'التعرف على الكلام مرفوض. فعّل «Siri والإملاء» من إعدادات آيفون (الإعدادات ← عام ← لوحة المفاتيح ← تفعيل الإملاء). يستمر تسجيلك ويُقيَّم من الصوت.' : 'التعرف على الكلام غير متاح في هذا المتصفح أو مرفوض. يستمر تسجيلك ويُقيَّم من الصوت.');
       else if (e.error === 'language-not-supported') this.onError('التعرف على العربية غير متاح في هذا المتصفح. يستمر تسجيلك ويُقيَّم من الصوت.');
       else if (e.error === 'network') this.onError('التعرف على الكلام يحتاج اتصالاً بالإنترنت. يستمر تسجيلك.');
@@ -194,7 +228,7 @@ export class RecitationSession {
   }
 
   stop() {
-    if (this.active && !this.stream) { this.cancelled = true; this.active = false; return Promise.resolve({ blob: null, duration: 0, transcript: '', diag: this.diag }); }
+    if (this.active && !this.stream && !this.noRec) { this.cancelled = true; this.active = false; return Promise.resolve({ blob: null, duration: 0, transcript: '', diag: this.diag }); }
     if (!this.active) return this._done;
     this.active = false;
     clearInterval(this.timer);

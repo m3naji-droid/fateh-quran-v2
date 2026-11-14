@@ -1,6 +1,6 @@
 // شكاوى التعرف على الكلام: الطالب يختار مشكلته بالضبط، ويُكتشف جهازه تلقائياً، ويُفحص الميكروفون والتعرف،
 // وتظهر له حلول فورية بحسب مشكلته وجهازه. والمعلم يرى الإحصاءات (أكثر المشكلات والأجهزة) ويتابع كل شكوى.
-import { openMic, isIOS, inAppBrowser } from './speech.js';
+import { openMic, isIOS, inAppBrowser, devCaps } from './speech.js';
 import { toArabicDigits as ar } from './quran.js';
 
 const AR = (s) => String(s).replace(/\d/g, (c) => '٠١٢٣٤٥٦٧٨٩'[c]);
@@ -114,6 +114,8 @@ export async function runDiag(onStep = () => {}, onLevel = () => {}) {
   } catch (e) { r.mic = e?.name || 'Error'; }
   stream?.getTracks().forEach((t) => t.stop());
   try { ac?.close(); } catch {}
+  // نحفظ ما عرفناه عن الجهاز: يستعمله التسميع والتدريب لاختيار الطريقة المناسبة
+  if (r.sr === 'ok') { devCaps.setSrOk(); if (r.sr2) devCaps.setNoDual(r.sr2 !== 'ok'); }
   onLevel(0); onStep('');
   return r;
 }
