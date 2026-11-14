@@ -596,7 +596,7 @@ function devInfo(diag) {
   const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /CrOS/.test(ua) ? 'ChromeOS' : 'other';
   const br = inAppBrowser ? 'InApp' : /SamsungBrowser/.test(ua) ? 'Samsung' : /EdgA?\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /CriOS|Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'other';
   const d = diag || {};
-  return { os, br, sr: !!d.sr, rs: d.restarts || 0, fin: d.finals || 0, dup: d.dups || 0, err: (d.errs || []).slice(0, 6) };
+  return { os, br, sr: !!d.sr, rs: d.restarts || 0, fin: d.finals || 0, dup: d.dups || 0, err: (d.errs || []).slice(0, 6), ...(d.silent ? { sil: 1 } : {}) };
 }
 
 /* الاحتفال (٨ من ١٠ فأعلى) والتحفيز لما دونها */

@@ -3,6 +3,7 @@
 import { openMic, isIOS, inAppBrowser } from './speech.js';
 import { toArabicDigits as ar } from './quran.js';
 
+const AR = (s) => String(s).replace(/\d/g, (c) => '٠١٢٣٤٥٦٧٨٩'[c]);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
 
@@ -60,12 +61,32 @@ export function devLabel(d) {
 export const devGroup = (d) => (d ? `${OS_AR[d.os] || d.os} · ${String(d.browser || '').replace(/ \(.*/, '')}${d.app ? ' · مثبّت' : ''}` : 'غير معروف');
 
 /* ---------------- الفحص التلقائي ---------------- */
-/** يفحص الميكروفون (إذن، مستوى صوت، تسجيل) ثم التعرف على الكلام. onStep يستقبل نصاً لعرضه */
+/** اختبار التعرف على الكلام لمدة ms: يعيد {sr, heard, errs, ev} */
+function srTest(ms) {
+  return new Promise((res) => {
+    const out = { sr: '', heard: '', errs: [], ev: [] };
+    let done = false; const fin = () => { if (done) return; done = true; try { s.abort(); } catch {} out.sr = out.heard ? 'ok' : out.errs.length ? 'error' : 'silent'; res(out); };
+    const s = new SR(); s.lang = 'ar-SA'; s.continuous = true; s.interimResults = true;
+    ['audiostart', 'soundstart', 'speechstart', 'nomatch'].forEach((k) => (s['on' + k] = () => { if (!out.ev.includes(k)) out.ev.push(k); }));
+    s.onresult = (e) => { let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + ' '; out.heard = t.trim().slice(0, 120); };
+    s.onerror = (e) => { out.errs.push(e.error); if (['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported', 'network'].includes(e.error)) fin(); };
+    s.onend = () => setTimeout(fin, 50);
+    try { s.start(); } catch (e) { out.errs.push('start:' + (e.name || 'err')); fin(); }
+    setTimeout(() => { try { s.stop(); } catch {} setTimeout(fin, 1200); }, ms);
+  });
+}
+
+/** فحص من ثلاث خطوات: التعرف وحده، ثم الميكروفون (إذن ومستوى وتسجيل)، ثم التعرف والميكروفون مفتوح معاً كما في التسميع */
 export async function runDiag(onStep = () => {}, onLevel = () => {}) {
-  const r = { at: new Date().toISOString(), perm: '', mic: '', peak: 0, bytes: 0, sr: '', heard: '', srErr: [] };
+  const r = { at: new Date().toISOString(), perm: '', mic: '', peak: 0, bytes: 0, sr: '', heard: '', srErr: [], ev: [], sr2: '', heard2: '', ev2: [] };
   try { r.perm = (await navigator.permissions?.query({ name: 'microphone' }))?.state || ''; } catch { r.perm = 'unknown'; }
-  // ١) الميكروفون: ٤ ثوانٍ تسجيل مع قياس أعلى مستوى صوت
-  onStep('١/٢ · فحص الميكروفون: تكلّم بأي كلام ٤ ثوانٍ…');
+  const steps = SR ? 3 : 1;
+  if (SR) {
+    onStep(`١/${AR(steps)} · التعرف على الكلام: قل «بسم الله الرحمن الرحيم»…`);
+    const t = await srTest(6000);
+    Object.assign(r, { sr: t.sr, heard: t.heard, srErr: t.errs, ev: t.ev });
+  } else r.sr = 'unsupported';
+  onStep(`${SR ? '٢' : '١'}/${AR(steps)} · الميكروفون: تكلّم بأي كلام…`);
   let stream = null, ac = null;
   try {
     stream = await openMic();
@@ -76,38 +97,24 @@ export async function runDiag(onStep = () => {}, onLevel = () => {}) {
     const buf = new Uint8Array(an.fftSize);
     let rec = null; const chunks = [];
     try { rec = new MediaRecorder(stream); rec.ondataavailable = (e) => e.data?.size && chunks.push(e.data); rec.start(500); } catch (e) { r.recErr = e.name || 'err'; }
-    const t0 = Date.now();
-    await new Promise((res) => {
-      const tick = () => {
-        an.getByteTimeDomainData(buf); let pk = 0; for (const v of buf) pk = Math.max(pk, Math.abs(v - 128) / 128);
-        r.peak = Math.max(r.peak, pk); onLevel(pk);
-        if (Date.now() - t0 < 4000) requestAnimationFrame(tick); else res();
-      };
-      tick();
-    });
+    let measuring = true;
+    const tick = () => { if (!measuring) return; an.getByteTimeDomainData(buf); let pk = 0; for (const v of buf) pk = Math.max(pk, Math.abs(v - 128) / 128); r.peak = Math.max(r.peak, pk); onLevel(pk); requestAnimationFrame(tick); };
+    tick();
+    await new Promise((res) => setTimeout(res, 4000));
+    // ٣) التعرف والميكروفون مفتوح (هكذا يعمل التسميع): بعض أجهزة أندرويد لا تعطي التعرف صوتاً حينها
+    if (SR && r.sr === 'ok') {
+      onStep(`٣/${AR(steps)} · كما في التسميع: قل «الحمد لله رب العالمين»…`);
+      const t2 = await srTest(6000);
+      Object.assign(r, { sr2: t2.sr, heard2: t2.heard, ev2: t2.ev, srErr2: t2.errs });
+    }
+    measuring = false;
     if (rec && rec.state !== 'inactive') await new Promise((res) => { rec.onstop = res; rec.stop(); setTimeout(res, 1500); });
     r.bytes = chunks.reduce((n, c) => n + c.size, 0);
     r.peak = Math.round(r.peak * 100) / 100;
   } catch (e) { r.mic = e?.name || 'Error'; }
   stream?.getTracks().forEach((t) => t.stop());
   try { ac?.close(); } catch {}
-  onLevel(0);
-  // ٢) التعرف على الكلام: ٦ ثوانٍ
-  if (!SR) r.sr = 'unsupported';
-  else {
-    onStep('٢/٢ · فحص التعرف على الكلام: قل «بسم الله الرحمن الرحيم»…');
-    await new Promise((res) => {
-      let done = false; const fin = () => { if (done) return; done = true; try { s.abort(); } catch {} res(); };
-      const s = new SR(); s.lang = 'ar-SA'; s.continuous = true; s.interimResults = true;
-      s.onresult = (e) => { let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + ' '; r.heard = t.trim().slice(0, 120); };
-      s.onerror = (e) => { r.srErr.push(e.error); if (['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(e.error)) fin(); };
-      s.onend = () => setTimeout(fin, 50);
-      try { s.start(); } catch (e) { r.srErr.push('start:' + (e.name || 'err')); fin(); }
-      setTimeout(() => { try { s.stop(); } catch {} setTimeout(fin, 1200); }, 6000);
-    });
-    r.sr = r.heard ? 'ok' : r.srErr.length ? 'error' : 'silent';
-  }
-  onStep('');
+  onLevel(0); onStep('');
   return r;
 }
 /** نتيجة الفحص بكلام مفهوم: [{ok, t}] */
@@ -122,7 +129,10 @@ export function diagLines(r) {
   if (r.sr === 'ok') L.push({ ok: true, t: `التعرف على الكلام يعمل ✓ وسمع: «${r.heard}»` });
   else if (r.sr === 'unsupported') L.push({ ok: false, t: 'هذا المتصفح لا يدعم التعرف على الكلام' });
   else if (r.sr === 'silent') L.push({ ok: false, t: 'التعرف على الكلام لم يلتقط أي كلمة' });
-  else L.push({ ok: false, t: 'التعرف على الكلام لا يعمل (' + r.srErr.join('، ') + ')' });
+  else L.push({ ok: false, t: 'التعرف على الكلام لا يعمل (' + (r.srErr || []).join('، ') + ')' });
+  if (r.sr === 'silent' && !(r.ev || []).includes('soundstart')) L.push({ ok: false, t: 'خدمة التعرف لم تسمع أي صوت؛ غالباً خدمة الإدخال الصوتي في الجهاز ليست Google' });
+  if (r.sr2 === 'ok') L.push({ ok: true, t: 'يعمل التعرف والتسجيل معاً ✓' });
+  else if (r.sr2) L.push({ ok: false, t: 'التعرف يتوقف حين يكون التسجيل مفتوحاً (هذا ما يحدث في التسميع)' });
   return L;
 }
 
@@ -139,10 +149,12 @@ export function tipsFor(type, d) {
   if (type === 'nowords') {
     if (ios && app) T.push('في التطبيق المثبّت على آيفون لا تظهر الكلمات أثناء القراءة؛ هذا من آيفون نفسه. للمتابعة الحية افتح الموقع من Safari.');
     else if (ios) T.push('فعّل الإملاء: الإعدادات ← عام ← لوحة المفاتيح ← «تفعيل الإملاء»، وتأكد أن «Siri» مفعّل.');
-    if (and) T.push('استعمل Chrome، وحدّث تطبيق «Google» من المتجر؛ فهو الذي يتعرف على الكلام.', 'تأكد أن العربية مضافة في: الإعدادات ← النظام ← اللغات ← الكتابة الصوتية من Google.');
+    if (and) T.push('اجعل Google خدمة الإدخال الصوتي: الإعدادات ← التطبيقات ← التطبيقات الافتراضية ← «المساعد الرقمي والإدخال الصوتي» ← اختر Google. (في أجهزة تكنو وفيفو وأوبو يكون الافتراضي خدمة الشركة فلا يعمل التعرف).', 'حدّث تطبيقَي «Google» و«خدمات الكلام من Google» من متجر Play.', 'أضف العربية: الإعدادات ← النظام ← اللغات ← الكتابة الصوتية من Google ← اللغات ← العربية.');
     T.push('التعرف على الكلام يحتاج إنترنت؛ تأكد من الاتصال.');
   }
   if (type === 'wrong') T.push('اقرأ في مكان هادئ، وقرّب الجوال من فمك نحو شبر.', 'اقرأ بوضوح وبسرعة متوسطة، وقف قليلاً بين الآيات.', 'الأخطاء التي يظهرها النظام تقديرية؛ ومعلمك يسمع تسجيلك ويصحح الدرجة.');
+  if (type === 'stops' && and) T.push('اجعل Chrome «بلا قيود» في البطارية: الإعدادات ← التطبيقات ← Chrome ← البطارية ← بلا قيود (أجهزة تكنو وشاومي توقف الميكروفون لتوفير الطاقة).');
+  if ((type === 'once' || type === 'stops' || type === 'nowords') && and && d?.app) T.push('جرّب فتح الموقع من Chrome مباشرة بدل التطبيق المثبّت، وأخبرنا هل يختلف.');
   if (type === 'stops') T.push('لا تقفل الشاشة ولا تنتقل لتطبيق آخر أثناء التسجيل.', 'أوقف «توفير الطاقة» مؤقتاً؛ فهو يوقف الميكروفون في الخلفية.', 'تأكد من الإنترنت إن كانت الكلمات تتوقف.');
   if (type === 'slow') T.push('الإنترنت الضعيف يؤخر ظهور الكلمات؛ جرّب شبكة واي فاي.', 'أغلق التطبيقات المفتوحة الأخرى لتخفيف الجهاز.');
   if (type === 'once') T.push(ios ? 'أغلق التطبيق تماماً (اسحبه من قائمة التطبيقات المفتوحة) ثم افتحه.' : 'حدّث الصفحة ثم جرّب مرة أخرى.', 'تأكد من تحديث الموقع لآخر نسخة (زر التحديث ↻ أعلى الصفحة).');
@@ -162,7 +174,7 @@ export function techReport(L) {
   L.slice(0, 40).forEach((x) => {
     const g = x.diag;
     lines.push(`- ${(x.createdAt || '').slice(0, 10)} | ${x.type} | ${x.where || '—'} | ${STATUS[x.status || 'new']?.[1]} | ${devLabel(x.dev)} | sr=${x.dev?.sr ? 1 : 0} rec=${x.dev?.rec ? 1 : 0} mime=${x.dev?.mime || '—'}`
-      + (g ? ` | diag: perm=${g.perm} mic=${g.mic} peak=${g.peak} bytes=${g.bytes} sr=${g.sr}${g.srErr?.length ? ' err=' + g.srErr.join(',') : ''}` : ' | بلا فحص')
+      + (g ? ` | diag: perm=${g.perm} mic=${g.mic} peak=${g.peak} bytes=${g.bytes} sr=${g.sr}${g.ev?.length ? ' ev=' + g.ev.join(',') : ''}${g.srErr?.length ? ' err=' + g.srErr.join(',') : ''}${g.sr2 ? ' sr+mic=' + g.sr2 + (g.ev2?.length ? ' ev2=' + g.ev2.join(',') : '') : ''}` : ' | بلا فحص')
       + (x.text ? ` | «${String(x.text).replace(/\s+/g, ' ').slice(0, 160)}»` : '') + (x.dev?.ua ? `\n  UA: ${x.dev.ua}` : ''));
   });
   return lines.join('\n');
@@ -193,7 +205,7 @@ export function mountIssueTile(host, ctx) {
 
   async function openForm() {
     const dev = await detectDevice();
-    let type = '', where = '', diag = null, testing = false;
+    let type = '', where = '', diag = null, testing = false, nudged = false;
     ctx.openModal(`<div class="stack sp-modal">
       <h2>🎙️ مشكلة في التعرف على الكلام</h2>
       <p class="sp-calm">${esc(REASSURE)}</p>
@@ -203,7 +215,7 @@ export function mountIssueTile(host, ctx) {
       <div><b>٢. أين حدثت؟</b><div class="sp-chips" role="radiogroup" id="spW">${Object.entries(WHERE).map(([k, t]) => `<button type="button" class="sp-chip" role="radio" aria-checked="false" data-w="${k}">${esc(t)}</button>`).join('')}</div></div>
       <div class="sp-box"><b>٣. جهازك</b> <span class="small muted">(عُرف تلقائياً)</span><p style="margin:6px 0">📱 ${esc(devLabel(dev))}</p>
         <label class="small"><input type="checkbox" id="spOk" checked> أوافق على إرسال نوع جهازي ومتصفحي؛ لنعرف أكثر الأجهزة التي تظهر فيها المشكلة ونحلّها.</label></div>
-      <div class="sp-box"><b>٤. فحص سريع</b> <span class="small muted">(١٠ ثوانٍ، يساعدنا كثيراً)</span>
+      <div class="sp-box"><b>٤. فحص سريع</b> <span class="small muted">(نحو ١٦ ثانية، يساعدنا كثيراً)</span>
         <p class="small" style="margin:6px 0">يفحص الميكروفون ثم التعرف على الكلام. اتبع ما يظهر لك.</p>
         <div class="row"><button class="btn" type="button" id="spDiag">🔍 ابدأ الفحص</button><span class="small" id="spStep"></span></div>
         <div class="iq-level" id="spLvW" hidden><i id="spLv"></i></div>
@@ -236,6 +248,7 @@ export function mountIssueTile(host, ctx) {
         if (!where) { err.hidden = false; err.textContent = 'اختر أين حدثت المشكلة.'; return; }
         if (type === 'other' && text.length < 3) { err.hidden = false; err.textContent = 'اكتب المشكلة باختصار.'; return; }
         if (testing) { err.hidden = false; err.textContent = 'انتظر حتى ينتهي الفحص.'; return; }
+        if (!diag && !nudged) { nudged = true; err.hidden = false; err.textContent = '🔍 الفحص السريع يساعدنا كثيراً في معرفة السبب. اضغط «ابدأ الفحص» أولاً، أو اضغط «إرسال» مرة أخرى للإرسال بدونه.'; $('#spDiag').scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
         const btn = $('#spSend'); btn.disabled = true;
         const f = { name: ctx.me.name || '', classId: ctx.me.classId || '', className: ctx.cls?.name || '', type, where, text, status: 'new',
           dev: $('#spOk').checked ? dev : null, diag: diag || null };

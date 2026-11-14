@@ -39,6 +39,10 @@ export async function openMic() {
   const err = new Error(micErrorText(last)); err.code = last?.name || 'mic'; throw err;
 }
 
+/** رسالة حين لا يلتقط التعرف الفوري أي كلام (يسجّل الصوت لكن لا تظهر الكلمات) */
+export const SILENT_MSG = () => (/Android/.test(navigator.userAgent)
+  ? 'التعرف الفوري لا يلتقط كلامك على هذا الجهاز. لا تقلق: تسميعك يُسجَّل ويصل إلى معلمك فيسمعه ويقيّمه. ولتشغيله: الإعدادات ← التطبيقات ← التطبيقات الافتراضية ← «الإدخال الصوتي» أو «المساعد الرقمي» ← اختر Google، ثم حدّث تطبيق «خدمات الكلام من Google» من المتجر.'
+  : 'التعرف الفوري لا يلتقط كلامك على هذا الجهاز. لا تقلق: تسميعك يُسجَّل ويصل إلى معلمك فيسمعه ويقيّمه.');
 export class RecitationSession {
   // stream/ac: ميكروفون وسياق صوتي مشتركان يُعاد استعمالهما ولا يُغلقان هنا. noSR: بلا تعرف على الكلام
   constructor({ onTranscript, onLevel, onError, onTick, maxSeconds = 300, stream = null, ac = null, noSR = false } = {}) {
@@ -60,7 +64,7 @@ export class RecitationSession {
     this.finalText = '';
     this.interim = '';
     this.lastFinal = '';
-    this.diag = { sr: !!SR, restarts: 0, errs: [], finals: 0, dups: 0 };
+    this.diag = { sr: !!SR, restarts: 0, errs: [], finals: 0, dups: 0, results: 0, voiced: 0, ev: [] };
     this.chunks = [];
     this.active = true;
     this.cancelled = false;
@@ -96,12 +100,17 @@ export class RecitationSession {
       an.fftSize = 512;
       src.connect(an);
       const data = new Uint8Array(an.fftSize);
+      let lastT = performance.now();
       const loop = () => {
         if (!this.active) return;
         an.getByteTimeDomainData(data);
         let sum = 0;
         for (const v of data) sum += (v - 128) * (v - 128);
-        this.onLevel(Math.min(1, Math.sqrt(sum / data.length) / 40));
+        const lvl = Math.min(1, Math.sqrt(sum / data.length) / 40);
+        this.onLevel(lvl);
+        const now = performance.now(), dt = Math.min(200, now - lastT); lastT = now;
+        if (lvl > 0.18) this.diag.voiced += dt;
+        this._checkSilentSR();
         this.raf = requestAnimationFrame(loop);
       };
       loop();
@@ -115,6 +124,13 @@ export class RecitationSession {
 
     if (SR && !this.noSR) this._startRecognition();
   }
+  /** الطالب يتكلم بوضوح (٨ ثوانٍ من الصوت) والتعرف لم يُرجع شيئاً ولا خطأ: التعرف «صامت» على هذا الجهاز */
+  _checkSilentSR() {
+    if (this.silentWarned || !this.recog || this.srDead || this.diag.results > 0 || this.diag.voiced < 8000) return;
+    this.silentWarned = true; this.diag.silent = true;
+    try { localStorage.setItem('fp_srSilent', String(Date.now())); } catch {}
+    this.onError(SILENT_MSG());
+  }
   _release() {
     if (!this.extStream) this.stream?.getTracks().forEach((t) => t.stop());
     try { this.src?.disconnect(); } catch {}
@@ -127,7 +143,9 @@ export class RecitationSession {
     r.continuous = true;
     r.interimResults = true;
     r.maxAlternatives = 1;
+    ['audiostart', 'soundstart', 'speechstart', 'nomatch'].forEach((k) => (r['on' + k] = () => { if (this.diag.ev.length < 12 && !this.diag.ev.includes(k)) this.diag.ev.push(k); }));
     r.onresult = (e) => {
+      this.diag.results++;
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
