@@ -454,7 +454,9 @@ function mountRecite(root, opts) {
         <h3>${hasRecognition ? 'لم نسمع تلاوة واضحة' : 'تم التسجيل'}</h3>
         <p class="muted small" style="margin:0">${oneShot && !counts ? 'التسجيل قصير جداً أو صامت، فلم يُحسب محاولة. تأكد من السماح للميكروفون ثم أعد المحاولة.' : hasRecognition ? 'تأكد من السماح للميكروفون، واقرأ بصوت أعلى قليلاً في مكان هادئ.' : 'لا يدعم متصفحك التصحيح الآلي؛ يمكنك إرسال التسجيل ليقيّمه المعلم.'}</p>
         ${audioUrl ? `<audio controls src="${audioUrl}" style="width:100%"></audio>` : ''}
-        <div class="row">${lastBlob && opts.onSubmit ? submitBtn : ''}${retryBtn}</div></div>`;
+        ${opts.onNoTranscript && lastBlob && lastDuration >= 5 ? '<p class="small" style="margin:0">قرأت لكن الجهاز لم يتعرف على كلامك؟ أرسل تسجيلك فيسمعه معلمك ويضع نتيجتك بنفسه.</p>' : ''}
+        <div class="row">${opts.onNoTranscript && lastBlob && lastDuration >= 5 ? '<button class="btn primary" id="rcToT" type="button">📤 أرسل تسجيلي ليقيّمه المعلم</button>' : ''}${lastBlob && opts.onSubmit ? submitBtn : ''}${retryBtn}</div></div>`;
+      const tt = $('#rcToT', box); if (tt) tt.onclick = () => { tt.disabled = true; opts.onNoTranscript(buildSubmission(), lastBlob, lastDuration); };
     } else {
       const sc = score(last, lastDuration);
       const mist = [];
@@ -1131,6 +1133,19 @@ function viewStudent(app) {
   }
   async function submitMatch(m, side, sub, blob, dur, body) {
     comp?.destroy(); comp = null;
+    // قرأ لكن الجهاز لم يتعرف على كلامه: لا يُعطى صفراً، بل يذهب تسجيله إلى المعلم ليضع النتيجة
+    if (sub.percent == null && blob && dur >= 5) {
+      body.innerHTML = '<div class="loading">جارٍ إرسال تسجيلك إلى المعلم…</div>';
+      try {
+        if (m.live) store.setLive(heroT.id, m.id, side, { done: 1, total: 1, ok: 0, on: false, fin: true }).catch(() => {});
+        await store.saveMatchAudio(heroT.id, `${m.id}_${side}_${m.tb || 0}`, blob);
+        const r = { pend: 1, p: null, s: null, wpm: 0, dur: Math.round(dur || 0), at: new Date().toISOString() };
+        await store.updateMatch(heroT.id, m.id, { [side === 'a' ? 'ra' : 'rb']: r });
+        toast('لم يتعرف جهازك على كلامك، فأُرسل تسجيلك إلى المعلم ليقيّمه بنفسه.');
+        watchMatch(m.id, r);
+      } catch (e) { body.innerHTML = `<div class="notice">تعذر الإرسال: ${esc(e.code || e.message)}</div>`; }
+      return;
+    }
     const p = sub.percent == null ? 0 : sub.percent;
     let ai = null, pen = 0;
     if (m.live) {
@@ -1172,8 +1187,8 @@ function viewStudent(app) {
       const w = m.done ? m.winner : null;
       const lane = (p, r, side) => { const L = live[side] || {}; const pct = r ? 100 : L.total ? Math.round((L.done / L.total) * 100) : 0; const acc = r ? r.s : L.done ? Math.round((L.ok / Math.max(1, L.done)) * 100) : 0;
         return `<div class="race-lane${w === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)}${p.pn === me.id ? ' (أنت)' : ''} ${L.on && !r ? '<span class="rl-on">🎙️ يقرأ الآن</span>' : ''}</div>
-          <div class="rl-track"><i style="width:${pct}%"></i><span>${r ? `النتيجة ${ar(r.s)}٪${r.pen ? ` (دقة ${ar(r.p)}٪ − تجويد ${ar(r.pen)})` : ''}` : L.total ? `${ar(pct)}٪ من المقطع · دقة ${ar(acc)}٪` : 'لم يبدأ بعد'}</span></div>
-          ${r && m.live ? `<button class="btn sm" type="button" data-aud="${esc(`${m.id}_${side}_${m.tb || 0}`)}">🔊 استمع لتلاوته</button>` : ''}</div>`; };
+          <div class="rl-track"><i style="width:${pct}%"></i><span>${r?.pend ? '⏳ بانتظار تقييم المعلم لتسجيله' : r ? `النتيجة ${ar(r.s)}٪${r.pen ? ` (دقة ${ar(r.p)}٪ − تجويد ${ar(r.pen)})` : ''}` : L.total ? `${ar(pct)}٪ من المقطع · دقة ${ar(acc)}٪` : 'لم يبدأ بعد'}</span></div>
+          ${r && (m.live || r.pend) ? `<button class="btn sm" type="button" data-aud="${esc(`${m.id}_${side}_${m.tb || 0}`)}">🔊 استمع لتلاوته</button>` : ''}</div>`; };
       $('#hwBody', app).innerHTML = `<div class="race">${lane(m.a, m.ra, 'a')}${m.b ? lane(m.b, m.rb, 'b') : ''}</div>
         ${w ? `<div class="hero-res">🏆 الفائز: <b>${esc(w === m.a.pn ? m.a.name : m.b.name)}</b>${m.draw ? ' (بالقرعة لغياب الطرفين)' : ''}</div>` : (m.ra || m.rb) ? '<div class="small muted">بانتظار الطرف الآخر…</div>' : ''}
         ${(m.hist || []).length ? `<details><summary class="small">الجولات السابقة (تعادل)</summary>${m.hist.map((h) => `<div class="small">${esc(hRange(h))}: ${ar(h.ra?.s ?? 0)}٪ مقابل ${ar(h.rb?.s ?? 0)}٪</div>`).join('')}</details>` : ''}
@@ -1271,6 +1286,7 @@ function viewStudent(app) {
       const cancelBtn = st === 'open' && !pending && (!v.incoming || strict || v.mine) ? ` <button class="btn sm ghost" type="button" data-chx="${esc(c.id)}">${strict ? `إلغاء (−${ar(CH_PTS.cancel)})` : 'إلغاء مجاني'}</button>` : '';
       const res = st === 'open' ? (pending ? `<button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">اطّلع واقبل</button> <button class="btn sm ghost" type="button" data-chno="${esc(c.id)}">اعتذار</button>`
         : v.mine ? `<span class="pill mute">سمّعت (${ar(v.mine.p)}٪) · بانتظار ${esc(v.other.name)}</span>${cancelBtn}` : `<button class="btn sm gold" type="button" data-chgo="${esc(c.id)}">ابدأ</button>${v.incoming && !strict ? ` <button class="btn sm ghost" type="button" data-chno="${esc(c.id)}">اعتذار</button>` : cancelBtn}`)
+        : st === 'review' ? '<span class="pill warn">⏳ عند المعلم</span>'
         : st === 'declined' ? '<span class="pill mute">اعتذر</span>'
         : st === 'cancelled' ? (w === me.id ? '<span class="pill ok">🏆 فزت (ألغاه زميلك)</span>' : `<span class="pill mute">أُلغي${!c.cancel.free && c.cancel.by === me.id ? ` (−${ar(CH_PTS.cancel)})` : ''}</span>`)
         : w === me.id ? '<span class="pill ok">🏆 فزت</span>' : w === 'tie' ? '<span class="pill warn">🤝 تعادل</span>' : w ? '<span class="pill mute">خسرت</span>' : '<span class="pill mute">انتهى الوقت</span>';
@@ -1369,6 +1385,19 @@ function viewStudent(app) {
     comp = mountRecite($('#chRc', body), {
       surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true,
       onActivity: (sec) => logAct('practice', sec),
+      // الجهاز لم يتعرف على الكلام: يُرسل التسجيل ليقيّمه المعلم
+      onNoTranscript: (sub, blob, dur) => setTimeout(async () => {
+        comp?.destroy(); comp = null;
+        body.innerHTML = '<div class="loading">جارٍ إرسال تسجيلك…</div>';
+        try {
+          if (!(await store.saveChAudio(c.id, v.side, blob))) throw new Error('التسجيل طويل جداً');
+          const r = { pend: 1, p: null, wpm: 0, dur: Math.round(dur || 0), at: new Date().toISOString() };
+          await store.updateChallenge(c.id, { [v.side]: r });
+          c[v.side] = r;
+        } catch (x) { body.innerHTML = `<div class="notice">تعذر الإرسال: ${esc(x.code || x.message)}</div>`; return; }
+        showChResult(body, c, true);
+        paintChBar();
+      }),
       onResult: (sub) => setTimeout(async () => {
         const r = { p: sub.percent, wpm: sub.wpm || 0, dur: Math.round(sub.duration || 0), at: new Date().toISOString() };
         comp?.destroy(); comp = null;
@@ -1386,8 +1415,9 @@ function viewStudent(app) {
   }
   function showChResult(body, c, fresh = false) {
     const v = chView(c, me.id), st = chStatus(c), w = chWinner(c);
-    const tile = (who, r) => `<div class="ch-tile${w === who.pn ? ' win' : ''}"><span>${esc(who.name)}</span><b>${r ? ar(r.p) + '٪' : '—'}</b><small>${r ? `${ar(r.wpm)} كلمة/دقيقة` : st === 'open' ? 'لم يسمّع بعد' : 'لم يشارك'}</small>${w === who.pn ? '<i>🏆</i>' : ''}</div>`;
-    const head = st === 'open' ? `سمّعت بدقة ${ar(v.mine.p)}٪، والآن ننتظر ${esc(v.other.name)} (${esc(ar(timeLeft(c)))}).`
+    const tile = (who, r) => `<div class="ch-tile${w === who.pn ? ' win' : ''}"><span>${esc(who.name)}</span><b>${r?.pend ? '⏳' : r ? ar(r.p) + '٪' : '—'}</b><small>${r ? `${ar(r.wpm)} كلمة/دقيقة` : st === 'open' ? 'لم يسمّع بعد' : 'لم يشارك'}</small>${w === who.pn ? '<i>🏆</i>' : ''}</div>`;
+    const head = st === 'review' ? `⏳ وصل تسجيل ${v.mine?.pend ? 'ك' : esc(v.other.name)} إلى المعلم ليقيّمه بنفسه، وتظهر النتيجة بعد تقييمه.`
+      : st === 'open' ? `سمّعت بدقة ${ar(v.mine.p)}٪، والآن ننتظر ${esc(v.other.name)} (${esc(ar(timeLeft(c)))}).`
       : st === 'declined' ? 'اعتذر عن التحدي.'
       : st === 'cancelled' ? (w === me.id ? `🏆 ألغى ${esc(v.other.name)} التحدي بعد تسميعك، فالفوز لك! +${ar(CH_PTS.win)} نقاط.` : c.cancel.by === me.id ? `أُلغي التحدي${c.cancel.free ? ' مجاناً' : ` (−${ar(CH_PTS.cancel)})`}.` : `ألغى ${esc(v.other.name)} التحدي.`)
       : w === 'tie' ? `🤝 تعادل! +${ar(CH_PTS.tie)} نقطة لكلٍّ منكما.` : w === me.id ? `🏆 فزت بالتحدي! +${ar(CH_PTS.win)} نقاط في لوحة الشرف.` : w ? `انتهى التحدي لصالح ${esc(v.other.name)}. ${v.mine ? `+${ar(CH_PTS.lose)} نقطة على مشاركتك.` : ''}` : 'انتهى الوقت ولم يسمّع أحد.';
@@ -3917,7 +3947,7 @@ function viewTeacher(app) {
     const { board } = computeBoard(boardSubs(), D.students, D.classes);
     const months = [...new Set(D.subs.map((x) => (x.createdAt || '').slice(0, 7)).filter(Boolean))].sort().reverse();
     const cur = new Date().toISOString().slice(0, 7);
-    body.innerHTML = `<div class="card stack month-card" style="gap:10px;margin-bottom:16px">
+    body.innerHTML = `<div class="card stack" style="gap:10px;margin-bottom:16px" id="revT"></div><div class="card stack month-card" style="gap:10px;margin-bottom:16px">
         <div class="row" style="justify-content:space-between"><h3>📅 نتائج الشهر والشهادات</h3><span class="small muted" id="mStat"></span></div>
         <p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>
         <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}</div>
@@ -3928,6 +3958,7 @@ function viewTeacher(app) {
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="ssAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
       <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="lsT" class="lists-wrap" style="margin-bottom:16px"></div><div id="hbBoard"></div>`;
+    drawRevT($('#revT', body));
     drawKhAdmin($('#khAdm', body));
     drawHeroAdmin($('#hrAdm', body));
     drawSeasonAdmin($('#ssAdm', body));
@@ -4288,7 +4319,7 @@ function viewTeacher(app) {
       if (m && !offL) { offL = () => {}; offL = store.watchLive(tid, m.id, (d) => { live = d || {}; if (offL) setTimeout(paint, 0); }); }
       view = view || (ms.some((y) => y.stage === 'inter') ? 'inter' : x.classIds[0]);
       const lane = (p, r, side) => { const L = live[side] || {}, pct = r ? 100 : L.total ? Math.round((L.done / L.total) * 100) : 0;
-        return `<div class="race-lane big${m.done && m.winner === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)} <small>${esc(className(p.classId))}</small> ${L.on && !r ? '<span class="rl-on">🎙️</span>' : ''}</div><div class="rl-track"><i style="width:${pct}%"></i><span>${r ? `${ar(r.s)}٪` : L.total ? `${ar(pct)}٪ · دقة ${ar(Math.round((L.ok / Math.max(1, L.done)) * 100))}٪` : 'ينتظر…'}</span></div></div>`; };
+        return `<div class="race-lane big${m.done && m.winner === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)} <small>${esc(className(p.classId))}</small> ${L.on && !r ? '<span class="rl-on">🎙️</span>' : ''}</div><div class="rl-track"><i style="width:${pct}%"></i><span>${r?.pend ? '⏳' : r ? `${ar(r.s)}٪` : L.total ? `${ar(pct)}٪ · دقة ${ar(Math.round((L.ok / Math.max(1, L.done)) * 100))}٪` : 'ينتظر…'}</span></div></div>`; };
       const left = m?.startAt ? Math.max(0, Math.round((new Date(m.startAt).getTime() + LIVE_MIN * 60e3 - Date.now()) / 1000)) : 0;
       pb.innerHTML = `<button class="hp-x" type="button" aria-label="إغلاق">✕</button><h1>🏆 ${esc(x.name)}</h1><div class="hp-st">${esc(stageLabel(x, ms))}</div>
         ${x.champion ? `<div class="hero-champ big"><div class="hc-cup">🏆</div><div><span>بطل الأبطال</span><b>${esc(x.champion.name)}</b><span>${esc(className(x.champion.classId))}</span></div></div>` : ''}
@@ -4333,7 +4364,51 @@ function viewTeacher(app) {
   }
 
   /* --- إدارة التحديات الودّية --- */
-  const chResult = (c) => { const w = chWinner(c), st = chStatus(c); return st === 'open' ? (isStrict(c) && !c.acceptedAt ? 'بانتظار القبول' : 'جارٍ') : st === 'declined' ? 'اعتذار' : st === 'cancelled' ? `أُلغي من ${c.cancel.by === c.a.pn ? c.a.name : c.b.name}${c.cancel.free ? ' (مجاناً)' : ` (−${CH_PTS.cancel})`}${w ? ` · 🏆 ${w === c.a.pn ? c.a.name : c.b.name}` : ''}` : w === 'tie' ? 'تعادل' : w ? '🏆 ' + (w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'; };
+  const chResult = (c) => { const w = chWinner(c), st = chStatus(c); return st === 'review' ? '⏳ بانتظار تقييمك' : st === 'open' ? (isStrict(c) && !c.acceptedAt ? 'بانتظار القبول' : 'جارٍ') : st === 'declined' ? 'اعتذار' : st === 'cancelled' ? `أُلغي من ${c.cancel.by === c.a.pn ? c.a.name : c.b.name}${c.cancel.free ? ' (مجاناً)' : ` (−${CH_PTS.cancel})`}${w ? ` · 🏆 ${w === c.a.pn ? c.a.name : c.b.name}` : ''}` : w === 'tie' ? 'تعادل' : w ? '🏆 ' + (w === c.a.pn ? c.a.name : c.b.name) : 'انتهى الوقت'; };
+  /* تسجيلات لم يتعرف الجهاز على كلامها في التحديات والمباريات: يسمعها المعلم ويضع النتيجة */
+  function pendingReviews() {
+    const L = [];
+    const rng = (x) => `«سورة ${surahName(x.surah)}» ${x.from === x.to ? `الآية ${ar(x.from)}` : `${ar(x.from)}–${ar(x.to)}`}`;
+    (D.challenges || []).filter((c) => !c.cancel && !c.declined).forEach((c) => ['ra', 'rb'].forEach((k) => { if (c[k]?.pend) L.push({ kind: 'ch', id: c.id, k, who: k === 'ra' ? c.a : c.b, vs: k === 'ra' ? c.b : c.a, r: c[k], range: rng(c), c }); }));
+    (D.tourneys || []).filter((t) => t.status === 'running').forEach((t) => (D.hMatches?.[t.id] || []).filter((m) => !m.done).forEach((m) => ['ra', 'rb'].forEach((k) => { if (m[k]?.pend) L.push({ kind: 'm', id: m.id, tid: t.id, k, who: k === 'ra' ? m.a : m.b, vs: k === 'ra' ? m.b : m.a, r: m[k], range: rng(m), m, t }); })));
+    return L;
+  }
+  function drawRevT(host) {
+    if (!host) return;
+    const L = pendingReviews();
+    host.hidden = !L.length;
+    if (!L.length) { host.innerHTML = ''; return; }
+    host.innerHTML = `<h3>🎧 تسجيلات بانتظار تقييمك <span class="pill">${ar(L.length)}</span></h3>
+      <p class="small muted" style="margin:0">هؤلاء قرؤوا في تحدٍّ أو مباراة لكن أجهزتهم لم تتعرف على كلامهم، فأرسلوا تسجيلاتهم إليك. استمع وضع نسبة الدقة (٠–١٠٠)، فتُحسب النتيجة كأنها آلية.</p>
+      <ul class="rev-list">${L.map((x, i) => `<li><div><b>${esc(x.who.name)}</b> <span class="small muted">${x.kind === 'ch' ? '⚔️ تحدٍّ' : '🏆 مباراة'} مع ${esc(x.vs?.name || '—')} · ${esc(x.range)}${x.r.dur ? ` · ${ar(Math.round(x.r.dur))} ث` : ''}</span></div>
+        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-rvp="${i}">🔊 استمع</button><input type="number" min="0" max="100" inputmode="numeric" placeholder="٪" data-rvv="${i}" style="width:80px" aria-label="نسبة الدقة"><button class="btn sm primary" type="button" data-rvs="${i}">حفظ</button></div></li>`).join('')}</ul>`;
+    host.querySelectorAll('[data-rvp]').forEach((b) => (b.onclick = async () => {
+      const x = L[+b.dataset.rvp]; b.disabled = true;
+      try {
+        const d = x.kind === 'ch' ? await store.getChAudio(x.id, x.k) : await store.getMatchAudio(x.tid, `${x.id}_${x.k === 'ra' ? 'a' : 'b'}_${x.m.tb || 0}`);
+        if (!d) { toast('التسجيل غير متاح.'); b.disabled = false; return; }
+        const a = new Audio(`data:${d.mime};base64,${d.b64}`); a.play(); b.textContent = '▶ يُشغَّل…'; a.onended = () => { b.disabled = false; b.textContent = '🔊 استمع'; };
+      } catch (e) { b.disabled = false; toast('تعذر التشغيل: ' + (e.code || e.message)); }
+    }));
+    host.querySelectorAll('[data-rvs]').forEach((b) => (b.onclick = async () => {
+      const i = +b.dataset.rvs, x = L[i], v = Number(host.querySelector(`[data-rvv="${i}"]`).value);
+      if (!Number.isFinite(v) || v < 0 || v > 100 || host.querySelector(`[data-rvv="${i}"]`).value === '') return toast('اكتب نسبة بين ٠ و١٠٠.');
+      b.disabled = true;
+      const r = { p: Math.round(v), wpm: 0, dur: x.r.dur || 0, at: x.r.at || new Date().toISOString(), byT: 1 };
+      try {
+        if (x.kind === 'ch') {
+          await store.updateChallenge(x.id, { [x.k]: r }); x.c[x.k] = r;
+          if (chStatus(x.c) === 'done') notifyChallenge(x.id, 'done').catch(() => {});
+        } else {
+          const rr = { ...r, s: r.p };
+          await store.updateMatch(x.tid, x.id, { [x.k]: rr }); x.m[x.k] = rr;
+          heroTick(x.t);
+        }
+        toast(`حُفظت نتيجة ${x.who.name}: ${ar(r.p)}٪`);
+        schedulePublish(); drawRevT(host);
+      } catch (e) { b.disabled = false; toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    }));
+  }
   async function drawChAdmin(host) {
     const L = D.challenges || [];
     const ym = new Date().toISOString().slice(0, 7);

@@ -119,6 +119,13 @@ service cloud.firestore {
           && isStudent(request.resource.data.cancel.by)
           && request.resource.data.cancel.free == (resource.data.get('v', 0) < 2));
       allow delete: if isTeacher();
+      // تسجيل من لم يتعرف جهازه على كلامه: يرفعه أحد الطرفين، ويسمعه المعلم ليضع النتيجة
+      match /audio/{k} {
+        allow read: if signedIn();
+        allow create: if (isStudent(get(/databases/$(database)/documents/challenges/$(cid)).data.a.pn) || isStudent(get(/databases/$(database)/documents/challenges/$(cid)).data.b.pn))
+          && request.resource.data.b64 is string && request.resource.data.b64.size() < 1000000;
+        allow delete: if isTeacher();
+      }
     }
     // صور الإعلانات (مصغّرة، صورة واحدة لكل إعلان، أقل من ٧٠٠ KB): يكتبها المعلم ويقرؤها الطلاب
     match /annImages/{aid} {

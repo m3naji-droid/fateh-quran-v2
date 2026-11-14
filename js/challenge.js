@@ -13,8 +13,9 @@ export function setChPts(p) {
   Object.assign(CH_PTS, { win: n(p?.win, CH_DEFAULT_PTS.win), lose: n(p?.lose, CH_DEFAULT_PTS.lose), tie: n(p?.tie, CH_DEFAULT_PTS.tie), cancel: n(p?.cancel, CH_DEFAULT_PTS.cancel) });
 }
 
+// review: أحدهما لم يتعرف جهازه على كلامه، فأرسل تسجيله ليقيّمه المعلم
 export const chStatus = (c, now = Date.now()) =>
-  c.cancel ? 'cancelled' : c.declined ? 'declined' : c.ra && c.rb ? 'done' : now > new Date(c.expiresAt).getTime() ? 'expired' : 'open';
+  c.cancel ? 'cancelled' : c.declined ? 'declined' : c.ra?.pend || c.rb?.pend ? 'review' : c.ra && c.rb ? 'done' : now > new Date(c.expiresAt).getTime() ? 'expired' : 'open';
 
 /** الفائز: رقم الطالب، أو 'tie'، أو null (لم يُحسم/لا أحد) */
 export function chWinner(c, now = Date.now()) {

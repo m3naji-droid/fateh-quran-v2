@@ -60,6 +60,7 @@ export function matchWinner(m, now = Date.now()) {
   if (m.winner) return m.winner;
   if (m.bye || !m.b) return m.a.pn;
   const { ra, rb } = m;
+  if (ra?.pend || rb?.pend) return null; // تسجيل لم يتعرف عليه الجهاز: ينتظر تقييم المعلم
   if (ra && rb) return Math.abs(ra.s - rb.s) < TIE_GAP ? 'tie' : ra.s > rb.s ? m.a.pn : m.b.pn;
   const end = m.live ? (m.startAt ? new Date(m.startAt).getTime() + (LIVE_MIN + 2) * 60e3 : Infinity) : new Date(m.deadline || 0).getTime();
   if (now > end) { if (ra && !rb) return m.a.pn; if (rb && !ra) return m.b.pn; }

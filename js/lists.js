@@ -67,7 +67,7 @@ export function computeLists(challenges, himma, students, now = new Date()) {
     (challenges || []).forEach((c) => {
       if (period === 'm' && ymOf(c.createdAt) !== ym) return;
       const s0 = chStatus(c);
-      if (s0 === 'open' || s0 === 'declined') return;
+      if (s0 === 'open' || s0 === 'declined' || s0 === 'review') return;
       if (c.cancel?.free) return;
       const w = chWinner(c);
       [c.a, c.b].forEach((p) => {
