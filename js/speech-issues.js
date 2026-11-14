@@ -174,7 +174,7 @@ export function techReport(L) {
   L.slice(0, 40).forEach((x) => {
     const g = x.diag;
     lines.push(`- ${(x.createdAt || '').slice(0, 10)} | ${x.type} | ${x.where || '—'} | ${STATUS[x.status || 'new']?.[1]} | ${devLabel(x.dev)} | sr=${x.dev?.sr ? 1 : 0} rec=${x.dev?.rec ? 1 : 0} mime=${x.dev?.mime || '—'}`
-      + (g ? ` | diag: perm=${g.perm} mic=${g.mic} peak=${g.peak} bytes=${g.bytes} sr=${g.sr}${g.ev?.length ? ' ev=' + g.ev.join(',') : ''}${g.srErr?.length ? ' err=' + g.srErr.join(',') : ''}${g.sr2 ? ' sr+mic=' + g.sr2 + (g.ev2?.length ? ' ev2=' + g.ev2.join(',') : '') : ''}` : ' | بلا فحص')
+      + (g ? ` | diag: perm=${g.perm} mic=${g.mic} peak=${g.peak} bytes=${g.bytes} sr=${g.sr}${g.ev?.length ? ' ev=' + g.ev.join(',') : ''}${g.srErr?.length ? ' err=' + g.srErr.join(',') : ''}${g.sr2 ? ' sr+mic=' + g.sr2 + (g.ev2?.length ? ' ev2=' + g.ev2.join(',') : '') + (g.srErr2?.length ? ' err2=' + g.srErr2.join(',') : '') : ''}` : ' | بلا فحص')
       + (x.text ? ` | «${String(x.text).replace(/\s+/g, ' ').slice(0, 160)}»` : '') + (x.dev?.ua ? `\n  UA: ${x.dev.ua}` : ''));
   });
   return lines.join('\n');
