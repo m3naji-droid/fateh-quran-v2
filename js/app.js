@@ -2237,7 +2237,9 @@ function viewTeacher(app) {
       D = { ...D, classes: sortClasses(classes), students, tasks };
     } catch (e) {
       console.error(e);
-      app.innerHTML = `<div class="empty">تعذر تحميل البيانات (${esc(e.code || e.message)}). تأكد من صلاحيات المعلم في قاعدة البيانات.<br><br><button class="btn" id="tOut2">تسجيل الخروج</button></div>`;
+      app.innerHTML = e.code === 'permission-denied' || e.code === 'unauthenticated'
+        ? `<div class="empty"><div style="font-size:40px">🔐</div><b>انتهت جلسة المعلم على هذا الجهاز</b><br>يحدث هذا غالباً إذا دخلت بحساب طالب على الجهاز نفسه، فيحلّ محلّ دخول المعلم.<br>سجّل دخول المعلم من جديد وتعود لوحتك كما هي.<br><br><button class="btn primary" id="tOut2">دخول المعلم من جديد</button></div>`
+        : `<div class="empty">تعذر تحميل البيانات (${esc(e.code || e.message)}). تحقق من الاتصال ثم أعد المحاولة.<br><br><button class="btn" id="tOut2">تسجيل الخروج</button></div>`;
       $('#tOut2', app).onclick = async () => { await store.signOut(); session.set(null); render(); };
       return;
     }
