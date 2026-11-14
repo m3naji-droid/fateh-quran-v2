@@ -228,6 +228,7 @@ function mountRecite(root, opts) {
     </div>
     <aside class="side">
       <div class="card mic-panel" id="rcMicCard">
+        <div id="rcGo"></div>
         ${opts.oneShot ? `<div class="one-shot"><b>محاولة واحدة</b><span>${ONE_SHOT_NOTE}</span>${opts.onPractice ? '<button class="btn sm" type="button" id="rcPractice">تدرّب على المقطع أولاً</button>' : ''}</div>` : ''}
         <div id="rcNotice"></div>
         <button class="mic" id="rcMic" type="button" aria-label="ابدأ التسميع">${MIC_SVG}</button>
@@ -372,7 +373,7 @@ function mountRecite(root, opts) {
   async function startRec() {
     player.stop();
     pop?.remove();
-    $('#rcResult', root).innerHTML = ''; $('#rcLive', root).innerHTML = '';
+    $('#rcResult', root).innerHTML = ''; $('#rcLive', root).innerHTML = ''; $('#rcGo', root).innerHTML = '';
     wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed'));
     last = null;
     // جهاز لا يجمع التسجيل والتعرف: في الواجبات يُسجَّل للمعلم فقط، وفي التدريب والتحديات تظهر الكلمات بلا تسجيل
@@ -410,7 +411,7 @@ function mountRecite(root, opts) {
     $('#rcStatus', root).textContent = hasRecognition ? 'أستمع إليك… اقرأ بصوت واضح.' : 'جارٍ التسجيل…';
   }
   let finishing = false;
-  function goOn() { const el = $('#rcLive', root); if (el && !el.querySelector('.rc-go')) el.innerHTML = '<div class="rc-go">واصِل.. 🎙️<br>تسجيلك سوف يصل إلى المعلم ويقيّمه، ثم تأتيك الدرجة</div>'; }
+  function goOn() { const el = $('#rcGo', root); if (el && !el.querySelector('.rc-go')) el.innerHTML = '<div class="rc-go">واصِل.. 🎙️<br>تسجيلك سوف يصل إلى المعلم ويقيّمه، ثم تأتيك الدرجة</div>'; }
   async function finishRec() {
     if (finishing || !sess) return;
     finishing = true;
@@ -418,6 +419,7 @@ function mountRecite(root, opts) {
     mic.disabled = true;
     $('#rcStatus', root).textContent = 'جارٍ التحليل…';
     const { blob, duration, transcript, diag } = await sess.stop();
+    $('#rcGo', root).innerHTML = '';
     lastDiag = diag || null;
     mic.disabled = false; mic.classList.remove('rec'); mic.innerHTML = MIC_SVG; mic.style.removeProperty('--lvl');
     finishing = false;

@@ -1188,7 +1188,7 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .srn-card p { margin: 4px 0 0; line-height: 1.8; font-size: 15.5px; }
 .srn-e { font-size: 30px; line-height: 1; }
 .srn-ok { justify-self: center; min-width: 180px; font-size: 17px; padding: 12px 28px; }
-.rc-go { margin-top: 6px; padding: 14px 12px; border-radius: 14px; background: var(--green-2); border: 2px solid var(--green); color: var(--green);
+.rc-go { margin: 0 0 12px; padding: 14px 12px; border-radius: 14px; background: var(--green-2); border: 2px solid var(--green); color: var(--green);
   font-size: 19px; font-weight: 800; line-height: 1.8; text-align: center; animation: rcGo 2.4s ease-in-out infinite; }
 @keyframes rcGo { 50% { box-shadow: 0 0 0 6px rgba(15, 92, 70, .12); } }
 @media (prefers-reduced-motion: reduce) { .rc-go { animation: none; } }
