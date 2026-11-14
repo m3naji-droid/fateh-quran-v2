@@ -372,7 +372,7 @@ function mountRecite(root, opts) {
   async function startRec() {
     player.stop();
     pop?.remove();
-    $('#rcResult', root).innerHTML = '';
+    $('#rcResult', root).innerHTML = ''; $('#rcLive', root).innerHTML = '';
     wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed'));
     last = null;
     // جهاز لا يجمع التسجيل والتعرف: في الواجبات يُسجَّل للمعلم فقط، وفي التدريب والتحديات تظهر الكلمات بلا تسجيل
@@ -385,7 +385,7 @@ function mountRecite(root, opts) {
       onTranscript,
       onLevel: (l) => $('#rcMic', root).style.setProperty('--lvl', l.toFixed(2)),
       onTick: (s) => { $('#rcTimer', root).textContent = fmtTime(s); },
-      onError: (m) => { $('#rcNotice', root).innerHTML = `<div class="notice">${esc(m)}</div>`; },
+      onError: (m) => { $('#rcNotice', root).innerHTML = `<div class="notice">${esc(m)}</div>`; if (opts.onSubmit && sess?.diag?.silent) goOn(); },
       maxSeconds: opts.maxSeconds || 300,
     });
     sess.onAutoStop = () => { if (sess?.reason === 'max') toast('انتهى الحد الأقصى لمدة التسجيل.'); finishRec(); };
@@ -394,7 +394,9 @@ function mountRecite(root, opts) {
     $('#rcStatus', root).textContent = 'جارٍ فتح الميكروفون…';
     try {
       await sess.start();
-      $('#rcNotice', root).innerHTML = hasRecognition ? '' : $('#rcNotice', root).innerHTML;
+      $('#rcNotice', root).innerHTML = hasRecognition && !recOnly ? '' : $('#rcNotice', root).innerHTML;
+      // التسميع على جهاز لا تظهر فيه الكلمات: رسالة واضحة تطمئن الطالب أن يواصل
+      if (opts.onSubmit && (recOnly || !hasRecognition || isIOS && !!(window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone))) goOn();
       showSheet(); text.scrollTo({ top: 0 });
     } catch (e) {
       micB.disabled = false; sess = null;
@@ -408,6 +410,7 @@ function mountRecite(root, opts) {
     $('#rcStatus', root).textContent = hasRecognition ? 'أستمع إليك… اقرأ بصوت واضح.' : 'جارٍ التسجيل…';
   }
   let finishing = false;
+  function goOn() { const el = $('#rcLive', root); if (el && !el.querySelector('.rc-go')) el.innerHTML = '<div class="rc-go">واصِل.. 🎙️<br>تسجيلك سوف يصل إلى المعلم ويقيّمه، ثم تأتيك الدرجة</div>'; }
   async function finishRec() {
     if (finishing || !sess) return;
     finishing = true;
@@ -937,6 +940,14 @@ function viewStudent(app) {
     if (st.days > before && before > 0 && !celebrateStreak()) toast(`🔥 سلسلتك الآن ${ar(st.days)} أيام متتالية. أحسنت!`);
   }
   /** احتفال عند ٧ و١٤ و٣٠ يوماً (مرة لكل سلسلة) */
+  function showSrNotice() {
+    openModal(`<div class="srn">
+      <div class="srn-hd"><span class="srn-ic">🎙️</span><span class="srn-tag">مهم</span><h2>لمن لا يتعرّف جواله على الصوت</h2></div>
+      <div class="srn-card ok"><span class="srn-e">🎯</span><div><b>التدريبات والتحديات</b><p>تمّ تعديل التعرّف على الصوت، فتظهر لك الكلمات الآن 👏🏻👏🏻</p></div></div>
+      <div class="srn-card"><span class="srn-e">📝</span><div><b>التسميعات</b><p>لا يظهر التعرّف، لكن تسجيلك يصل إلى المعلم، وسوف يسمعه ويقيّمك 👏🏻👏🏻</p></div></div>
+      <button class="btn primary srn-ok" type="button" id="srnOk">حسناً 👍</button>
+    </div>`, (m) => { m.querySelector('#srnOk').onclick = () => { pref.set('srNotice1_' + me.id, 1); closeModal(); }; });
+  }
   function celebrateStreak() {
     const st = streakOf(activeDays());
     const m = STREAK_MILESTONES.find(([n]) => st.days >= n);
@@ -1676,6 +1687,11 @@ function viewStudent(app) {
       mountMonthCountdown($('#cdMonth', app), { onHonor: () => { tab = 'honor'; draw(); } });
     }
     startPrayerAlerts((m) => toast(m));
+    // إعلان مرة واحدة: تعديل التعرف على الصوت
+    if (!pref.get('srNotice1_' + me.id) && !showSrNotice.pending) {
+      showSrNotice.pending = true;
+      setTimeout(() => whenModalFree(() => { showSrNotice.pending = false; if ($('#stBody', app) && !pref.get('srNotice1_' + me.id)) showSrNotice(); }), 1200);
+    }
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
