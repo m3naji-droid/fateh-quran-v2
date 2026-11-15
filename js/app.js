@@ -29,6 +29,25 @@ import { dayTimes } from './prayer.js';
 const FX = { kind: '' };
 function confetti(...a) { confetti0(...a); if (FX.kind) setTimeout(() => playFx(FX.kind), 250); }
 /** خريطة الزينة من مستند looks (مفاتيحه معرّفات الحسابات وفي كل قيمة رقم الطالب) */
+const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+/** أسبوع الدراسة (الأحد إلى السبت) بتوقيت البحرين: k=0 هذا الأسبوع، ١ الماضي… */
+function weekRange(k) {
+  const TZ = 3 * 3600e3, now = new Date(Date.now() + TZ);
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - now.getUTCDay() - 7 * k) - TZ;
+  const end = start + 7 * 864e5;
+  const a = new Date(start + TZ), z = new Date(end - 1 + TZ);
+  const label = a.getUTCMonth() === z.getUTCMonth() ? `${ar(a.getUTCDate())}–${ar(z.getUTCDate())} ${MONTHS_AR[z.getUTCMonth()]}` : `${ar(a.getUTCDate())} ${MONTHS_AR[a.getUTCMonth()]} – ${ar(z.getUTCDate())} ${MONTHS_AR[z.getUTCMonth()]}`;
+  return { from: new Date(start).toISOString(), to: new Date(end).toISOString(), label, name: k === 0 ? 'هذا الأسبوع' : k === 1 ? 'الأسبوع الماضي' : k === 2 ? 'قبل أسبوعين' : `قبل ${ar(k)} أسابيع` };
+}
+/** أسبوع صوت الأسبوع (بداية الأحد ISO). الأصوات القديمة بلا wk: من نص أسبوعها، وإلا من تاريخ اختيارها */
+function voiceWk(v) {
+  if (!v) return '';
+  if (v.wk) return v.wk;
+  for (let k = 0; k < 26; k++) { const r = weekRange(k); if (v.week && v.week === r.label) return r.from; }
+  const t = Date.parse(v.at || ''); if (!t) return '';
+  for (let k = 0; k < 26; k++) { const r = weekRange(k); if (t >= Date.parse(r.from) && t < Date.parse(r.to)) return r.from; }
+  return '';
+}
 const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
@@ -1115,13 +1134,14 @@ function viewStudent(app) {
     try { voiceCache = voiceCache || (await store.getVoice()); } catch {}
     try { voicesCache = voicesCache || (await store.listVoices()); } catch { voicesCache = []; }
     if (!host.isConnected) return;
-    const TZ = 3 * 3600e3, nw = new Date(Date.now() + TZ);
-    const ws = (k) => new Date(Date.UTC(nw.getUTCFullYear(), nw.getUTCMonth(), nw.getUTCDate() - nw.getUTCDay() - 7 * k) - TZ).toISOString();
-    const W0 = ws(0), W1 = ws(1), recent = (v) => v?.wk === W0 || v?.wk === W1;
+    const W0 = weekRange(0).from, W1 = weekRange(1).from, recent = (v) => voiceWk(v) === W0 || voiceWk(v) === W1;
     const cur = voiceCache && (recent(voiceCache) || Date.now() - Date.parse(voiceCache.at) <= 8 * 864e5) ? voiceCache : null;
-    const L = [...(cur ? [cur] : []), ...(voicesCache || []).filter((v) => v.id !== cur?.id && recent(v)).sort((a, b) => b.wk.localeCompare(a.wk) || (b.at || '').localeCompare(a.at || ''))].slice(0, 3);
+    // صوت لكل أسبوع (الأحدث اختياراً)، والحالي أولاً
+    const seen = new Set(cur ? [voiceWk(cur)] : []);
+    const others = (voicesCache || []).filter((v) => v.id !== cur?.id && recent(v)).sort((a, b) => voiceWk(b).localeCompare(voiceWk(a)) || (b.at || '').localeCompare(a.at || '')).filter((v) => { const w = voiceWk(v); if (seen.has(w)) return false; seen.add(w); return true; });
+    const L = [...(cur ? [cur] : []), ...others].slice(0, 2).sort((a, b) => voiceWk(b).localeCompare(voiceWk(a))); // هذا الأسبوع أولاً
     if (!L.length) { host.innerHTML = ''; return; }
-    const tag = (v) => (v.wk === W0 ? 'صوت هذا الأسبوع' : v.wk === W1 ? 'صوت الأسبوع الماضي' : 'صوت الأسبوع');
+    const tag = (v) => (voiceWk(v) === W0 ? 'صوت هذا الأسبوع' : voiceWk(v) === W1 ? 'صوت الأسبوع الماضي' : 'صوت الأسبوع');
     const card = (v, i) => {
       const live = v.id === cur?.id, mine = v.pn === me.id, n = Object.keys(v.likes || {}).length, liked = pref.get('vLiked_' + v.id, false);
       return `<div class="voice-card${mine ? ' mine' : ''}${i ? ' sm' : ''}"><div class="vc-ic">🎙️</div><div class="vc-tx"><span class="vc-tag">${tag(v)}</span>
@@ -4728,6 +4748,10 @@ function viewTeacher(app) {
     store.ensureLooks?.().catch(() => {});
     let [sh, lk, vs, v] = await Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({})), store.listVoices().catch(() => []), store.getVoice().catch(() => null)]);
     D.shop = sh || { items: {} }; D.voices = vs || []; D.voice = v;
+    // الأصوات القديمة بلا تاريخ أسبوعها: يُحفظ لها مرة واحدة ليعرضها الطلاب في أسبوعها
+    const fixWk = (x) => (x && !x.wk && voiceWk(x) ? { ...x, wk: voiceWk(x) } : null);
+    D.voices = D.voices.map((x) => { const f = fixWk(x); if (f) store.archiveVoice(f).catch(() => {}); return f || x; });
+    const fv = fixWk(D.voice); if (fv) { D.voice = fv; store.setVoice(fv).catch(() => {}); }
     // زينة اختارها طالب قبل إنشاء مستند الزينة المشترك: يضيفها المعلم من سجل الطالب
     const miss = {};
     D.students.forEach((x) => { if (x.look && x.uid && !lk?.[x.uid]) miss[x.uid] = { ...x.look, pn: x.id }; });
@@ -4822,16 +4846,6 @@ function viewTeacher(app) {
 
   /* صوت الأسبوع: تختار الأسبوع، فيقترح الموقع أفضل تسميعاته، وتسمع وتختار؛ ومعه أرشيف الأصوات السابقة */
   let voiceWeek = 0, voiceAu = null;
-  const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-  /** أسبوع الدراسة (الأحد إلى السبت) بتوقيت البحرين: k=0 هذا الأسبوع، ١ الماضي… */
-  function weekRange(k) {
-    const TZ = 3 * 3600e3, now = new Date(Date.now() + TZ);
-    const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - now.getUTCDay() - 7 * k) - TZ;
-    const end = start + 7 * 864e5;
-    const a = new Date(start + TZ), z = new Date(end - 1 + TZ);
-    const label = a.getUTCMonth() === z.getUTCMonth() ? `${ar(a.getUTCDate())}–${ar(z.getUTCDate())} ${MONTHS_AR[z.getUTCMonth()]}` : `${ar(a.getUTCDate())} ${MONTHS_AR[a.getUTCMonth()]} – ${ar(z.getUTCDate())} ${MONTHS_AR[z.getUTCMonth()]}`;
-    return { from: new Date(start).toISOString(), to: new Date(end).toISOString(), label, name: k === 0 ? 'هذا الأسبوع' : k === 1 ? 'الأسبوع الماضي' : k === 2 ? 'قبل أسبوعين' : `قبل ${ar(k)} أسابيع` };
-  }
   const playAudio = (getter) => async (e) => {
     const b = e.currentTarget, label = b.textContent;
     if (voiceAu && !voiceAu.paused && voiceAu._b === b) { voiceAu.pause(); b.textContent = label.replace('⏸ إيقاف', '🔊 استمع'); return; }
@@ -4849,8 +4863,10 @@ function viewTeacher(app) {
     // معرّف تسليم الواجب واحد لكل الطلاب (t_رقم الواجب)، فالمفتاح رقم الطالب مع المعرّف
     const vk = (pn, sid) => `${pn}|${sid}`;
     const chosen = new Set((D.voices || []).filter((v) => v.sid).map((v) => vk(v.pn, v.sid)));
-    const forWeek = (r) => (D.voices || []).filter((v) => (v.wk ? v.wk === r.from : v.week === r.label));
-    const wkOf = (v) => v?.wk || v?.at || '';
+    const forWeek = (r) => (D.voices || []).filter((v) => voiceWk(v) === r.from);
+    const wkOf = (v) => voiceWk(v) || v?.at || '';
+    // ما يراه الطلاب الآن: صوت هذا الأسبوع وصوت الأسبوع الماضي
+    const R0 = weekRange(0).from, R1 = weekRange(1).from;
     const weekVoices = forWeek(W);
     // كل تسميعات الأسبوع، المقيَّمة وغير المقيَّمة
     const inWeek = (D.subs || []).filter((x) => x.createdAt >= W.from && x.createdAt < W.to);
@@ -4861,17 +4877,19 @@ function viewTeacher(app) {
       : `في ${W.name} ${ar(withAu.length)} تسجيلاً، لكن لم تبلغ دقة أيٍّ منها ٨٥٪.`;
     const stu = (pn) => D.students.find((x) => x.id === pn);
     const v = D.voice, vLikes = v ? Object.keys(v.likes || {}).length : 0;
+    const shown = new Set([v?.id, ...[R0, R1].filter((w) => w !== voiceWk(v)).map((w) => (D.voices || []).filter((x) => voiceWk(x) === w).sort((a, b) => (b.at || '').localeCompare(a.at || ''))[0]?.id)].filter(Boolean));
     const past = (D.voices || []).filter((x) => x.id !== v?.id).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
     host.innerHTML = `<h3>🎙️ صوت الأسبوع</h3>
-      ${v ? `<div class="voice-cur"><span class="small muted">الصوت الحالي · اختير ${esc((v.at || '').slice(0, 10))}${v.week ? ` لـ${esc(v.week)}` : ''}</span><div><b data-lk="${esc(v.pn)}">${esc(v.name)}</b> · ${esc(v.className || '')} · ${esc(v.range || '')}</div>
-        <div class="row" style="gap:8px"><span class="small">❤️ ${ar(vLikes)} «ما شاء الله»</span><button class="btn sm" type="button" id="vCurP">🔊 استمع</button></div></div>` : '<p class="small muted" style="margin:0">لم تختر صوتاً بعد.</p>'}
+      ${v ? `<div class="voice-cur"><span class="small muted">يظهر للطلاب الآن · ${v.week ? `صوت ${esc(v.week)}` : `اختير ${esc((v.at || '').slice(0, 10))}`}</span><div><b data-lk="${esc(v.pn)}">${esc(v.name)}</b> · ${esc(v.className || '')} · ${esc(v.range || '')}</div>
+        <div class="row" style="gap:8px"><span class="small">❤️ ${ar(vLikes)} «ما شاء الله»</span><button class="btn sm" type="button" id="vCurP">🔊 استمع</button></div>
+        ${(D.voices || []).filter((x) => shown.has(x.id) && x.id !== v.id).map((x) => `<div class="small">ويظهر معه تحته: <b data-lk="${esc(x.pn)}">${esc(x.name)}</b> · صوت ${esc(x.week || '')}</div>`).join('')}</div>` : '<p class="small muted" style="margin:0">لم تختر صوتاً بعد.</p>'}
       <ol class="vw-steps small"><li>اختر الأسبوع.</li><li>استمع لأفضل تسميعاته (بتسجيل ودقة ٨٥٪ فأكثر).</li><li>حدّد النقاط والمكافآت، ثم اضغط «⭐ اختره».</li></ol>
       <div class="row">
         <label class="field" style="flex:2 1 200px">الأسبوع<select id="vWeek">${Array.from({ length: 8 }, (_, k) => { const r = weekRange(k), n = forWeek(r).length; return `<option value="${k}" ${k === voiceWeek ? 'selected' : ''}>${n ? '🎙️ ' : ''}${r.name} · ${r.label}${n ? ' · اخترت له' : ''}</option>`; }).join('')}</select></label>
         <label class="field" style="flex:1 1 110px">نقاط لوحة الشرف<input type="number" id="vPts" min="0" max="50" value="5"></label>
         <label class="field" style="flex:1 1 110px">مكافآت 🪙<input type="number" id="vCoins" min="0" max="500" value="20"></label>
       </div>
-      ${weekVoices.length ? `<div class="small">🎙️ صوت ${esc(W.name)}: ${weekVoices.map((p) => `<b data-lk="${esc(p.pn)}">${esc(p.name)}</b>${p.id === v?.id ? ' <span class="pill ok">يظهر للطلاب الآن</span>' : ''}`).join('، ')}</div>` : ''}
+      ${weekVoices.length ? `<div class="small">🎙️ صوت ${esc(W.name)}: ${weekVoices.map((p) => `<b data-lk="${esc(p.pn)}">${esc(p.name)}</b>${shown.has(p.id) ? ' <span class="pill ok">يظهر للطلاب الآن</span>' : ''}`).join('، ')}</div>` : ''}
       ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li${chosen.has(vk(x.pn, x.id)) ? ' class="vw-done"' : ''}><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''} · ${esc((x.createdAt || '').slice(0, 10))}</span>${chosen.has(vk(x.pn, x.id)) ? ' <span class="pill ok">اختير من قبل</span>' : ''}</div>
         <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button>${chosen.has(vk(x.pn, x.id)) ? '' : `<button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button>`}</div></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">${esc(why)}</p>`}
       <details class="sp-box"${past.length ? '' : ' hidden'}><summary><b>📼 الأصوات السابقة (${ar(past.length)})</b></summary>
