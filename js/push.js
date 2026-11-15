@@ -165,6 +165,18 @@ export async function notifyLate(pn, taskId) {
   return res.json();
 }
 
+/** دخل الطالب الموقع: الخادم يحسب واجباته الناقصة، وينبّه المعلم مرة في اليوم إن وُجد منها شيء */
+export async function notifyOnline(pn) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/online', {
+    method: 'POST', keepalive: true,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ student: pn }),
+  });
+  return res.ok ? res.json() : null;
+}
+
 /** تحدٍّ ودّي: يُبلغ خادم الإشعارات بتحدٍّ جديد أو بانتهائه (الخادم يتحقق ويقرأ التفاصيل من قاعدة البيانات) */
 export async function notifyChallenge(id, event) {
   if (!PUSH.url || store.mode !== 'cloud') return null;

@@ -174,6 +174,19 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isTeacher();
     }
+    // متصل الآن: كل طالب يكتب مستنده فقط (الصفحة ونوع الجهاز ووقت آخر نبضة)، ويقرؤه المسجّلون لعدّ «من يراجع الآن»
+    match /presence/{pn} {
+      allow read: if signedIn();
+      allow create, update: if isStudent(pn) && request.resource.data.pn == pn
+        && request.resource.data.keys().hasOnly(['pn', 'cls', 'pg', 'dev', 'since', 't', 'off']);
+      allow delete: if isTeacher();
+    }
+    // دقائق الاستخدام في كل ساعة: يزيدها الطالب لنفسه، ولا يقرؤها إلا المعلم
+    match /usage2/{pn} {
+      allow read, delete: if isTeacher();
+      allow create, update: if isStudent(pn) && request.resource.data.pn == pn
+        && request.resource.data.keys().hasOnly(['pn', 'cls', 'd']);
+    }
     match /roster/{pn} {
       allow get: if isTeacher() || (signedIn() && resource.data.get('uid', '') == request.auth.uid);
       allow list, create, delete: if isTeacher();

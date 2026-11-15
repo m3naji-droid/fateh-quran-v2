@@ -18,7 +18,7 @@ import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, season
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview, notifyOnline } from './push.js';
 import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js';
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
@@ -1127,6 +1127,45 @@ function viewStudent(app) {
     } catch (e) { console.warn('ach', e); } finally { achBusy = false; }
   }
   /* صوت الأسبوع في صفحة الطالب: اسمعه، وقل «ما شاء الله» */
+  /* --- الحضور: نبضة كل دقيقة ما دامت الصفحة ظاهرة، ودقائق الاستخدام في كل ساعة --- */
+  const HB = { pg: '', since: Date.now(), acc: {}, n: 0, hid: 0 };
+  const UA = navigator.userAgent, hbDev = /iPad|Tablet/i.test(UA) ? 't' : /Mobi|Android|iPhone/i.test(UA) ? 'm' : 'd';
+  const hbAlive = () => me && /^#\/student/.test(location.hash || '#/student') && $('#stBody', app);
+  function hbBeat(minute) {
+    if (document.hidden || !hbAlive()) return;
+    store.beat(me.id, { cls: me.classId || '', pg: HB.pg || tab, dev: hbDev, since: HB.since }).catch(() => {});
+    if (!minute) return;
+    const d = new Date(Date.now() + 3 * 3600e3), day = d.toISOString().slice(0, 10), h = String(d.getUTCHours()).padStart(2, '0');
+    (HB.acc[day] = HB.acc[day] || {})[h] = (HB.acc[day][h] || 0) + 1;
+    if (++HB.n >= 5) hbFlush();
+  }
+  function hbFlush() { if (!HB.n || !me) return; const a = HB.acc; HB.acc = {}; HB.n = 0; store.addUsage(me.id, me.classId || '', a).catch(() => {}); }
+  function hbStart() {
+    clearInterval(window.__hbT); clearInterval(window.__onT);
+    HB.since = Date.now(); HB.pg = tab; setTimeout(() => hbBeat(true), 1200); // بعد رسم الصفحة
+    window.__hbT = setInterval(() => hbBeat(true), 60e3);
+    window.__onT = setInterval(paintOnline, 120e3); setTimeout(paintOnline, 2500);
+    if (window.__hbVis) document.removeEventListener('visibilitychange', window.__hbVis);
+    window.__hbVis = () => {
+      if (document.hidden) { HB.hid = Date.now(); hbFlush(); if (me) store.beatOff(me.id).catch(() => {}); }
+      else { if (Date.now() - HB.hid > 180e3) HB.since = Date.now(); hbBeat(false); paintOnline(); }
+    };
+    document.addEventListener('visibilitychange', window.__hbVis);
+    addEventListener('pagehide', hbFlush);
+    // تنبيه المعلم مرة في اليوم إن كان على الطالب واجبات ناقصة (الخادم يتحقق ويحسب)
+    const k = 'onl_' + me.id, today = riyadhDay();
+    if (pref.get(k, '') !== today) { pref.set(k, today); notifyOnline(me.id).catch(() => {}); }
+  }
+  /** «٥ من زملائك يراجعون الآن 🔥» */
+  async function paintOnline() {
+    const el = $('#onStu', app); if (!el || document.hidden) return;
+    try {
+      if (!HB.oc || Date.now() - HB.oc.at > 60e3) HB.oc = { at: Date.now(), n: Math.max(0, (await store.onlineCount()) - 1) };
+      const n = HB.oc.n;
+      el.hidden = !n;
+      if (n) el.innerHTML = `<span class="on-dot"></span> ${n === 1 ? 'زميل واحد يراجع' : n === 2 ? 'زميلان يراجعان' : `${ar(n)} ${n <= 10 ? 'من زملائك يراجعون' : 'من زملائك يراجعون'}`} معك الآن 🔥`;
+    } catch (e) { console.warn('online', e); }
+  }
   let voiceCache = null, voicesCache = null;
   /** صوت هذا الأسبوع وصوت الأسبوع الماضي معاً (الإعجاب للصوت الحالي فقط) */
   async function mountVoiceStu(host) {
@@ -1864,6 +1903,7 @@ function viewStudent(app) {
       return;
     }
     RW = { wallet: { spent: 0, bonus: 0 }, owned: [], ach: {}, look: null, ...(me.rankInfo?._rw || {}) };
+    hbStart();
     FX.kind = RW.look?.x || '';
     if (RW.look) setLook(me.id, RW.look);
     draw();
@@ -1942,6 +1982,7 @@ function viewStudent(app) {
   function draw() {
     comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null;
     if (tab === 'iqra' && !iqraOn) tab = 'tasks';
+    if (tab !== HB.pg) { HB.pg = tab; hbBeat(false); }
     const cls = data.classes.find((c) => c.id === me.classId);
     const graded = data.subs.filter((x) => x.percent != null);
     const avg = graded.length ? Math.round(graded.reduce((n, x) => n + x.percent, 0) / graded.length) : null;
@@ -1963,7 +2004,7 @@ function viewStudent(app) {
       ${RW ? (() => { const nAch = Object.values(RW.ach || {}).filter(Boolean).length, nOwn = (RW.owned || []).length; return `<button type="button" class="rw-kpi${tab === 'rewards' ? ' on' : ''}" id="rwKpi">
         <span class="rw-kpi-ic" aria-hidden="true">🏅</span><span class="rw-kpi-tx"><b>خزانتي</b><small>${nAch ? `${ar(nAch)} ${nAch === 1 ? 'وسام' : 'أوسمة'}` : 'لا أوسمة بعد'} · ${nOwn ? `${ar(nOwn)} من المتجر` : 'المتجر بانتظارك 🛍️'}</small></span>
         <span class="rw-kpi-c">🪙 ${ar(myCoins())}</span><span class="rw-kpi-go" aria-hidden="true">←</span></button>`; })() : ''}
-      ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="voiceStu"></div>' : ''}
+      ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="onStu" class="on-stu" hidden></div><div id="voiceStu"></div>' : ''}
       <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
@@ -1980,7 +2021,7 @@ function viewStudent(app) {
       mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
       mountPrayerTile($('#prTileW', app));
       mountMonthCountdown($('#cdMonth', app), { onHonor: () => { tab = 'honor'; draw(); } });
-      mountVoiceStu($('#voiceStu', app));
+      mountVoiceStu($('#voiceStu', app)); paintOnline();
     }
     startPrayerAlerts((m) => toast(m));
     // إعلان تعديل التعرف على الصوت: يظهر عند كل فتح للموقع، حتى يضغط الطالب «فهمت، لا تظهرها مرة أخرى»
@@ -2411,6 +2452,7 @@ function viewTeacher(app) {
   if (/^#\/teacher\/review/.test(location.hash)) { tab = 'honor'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/redo/.test(location.hash)) { tab = 'subs'; history.replaceState(null, '', '#/teacher'); }
+  if (/^#\/teacher\/watch/.test(location.hash)) { tab = 'watch'; history.replaceState(null, '', '#/teacher'); }
   let lateReqs = [];
   /* تحليل التجويد الإلزامي: ما لم يكتمل على جهاز الطالب (فشل أو أغلق الصفحة) يحلّله جهاز المعلم فوراً، واحداً بعد الآخر */
   let aiQT = null, aiQBusy = false, aiQForce = false;
@@ -2544,6 +2586,7 @@ function viewTeacher(app) {
     loadIqraT();
     loadRewardsT().catch((e) => console.warn('rewards', e));
     unsub?.();
+    watchPresenceT();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); setTimeout(migrateGrades, 1500); } setTimeout(replaceRetaken, 800); if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
   }
@@ -2566,7 +2609,7 @@ function viewTeacher(app) {
       <div class="kpis" id="tKpis"></div>
       <div id="cdMonthT" style="margin-top:12px"></div>
       <div id="attn"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['iqra', 'اقرأ وارتقِ'], ['fb', 'رأيك يهمنا'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'fb' ? '<span class="tab-n" id="fbTabN"></span>' : k === 'iqra' ? '<span class="tab-n" id="iqTabN"></span>' : ''}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['watch', '👀 المتابعة'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['iqra', 'اقرأ وارتقِ'], ['fb', 'رأيك يهمنا'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'watch' ? '<span class="tab-n on-n" id="wTabN"></span>' : k === 'fb' ? '<span class="tab-n" id="fbTabN"></span>' : k === 'iqra' ? '<span class="tab-n" id="iqTabN"></span>' : ''}</button>`).join('')}</div>
       <div id="tBody" style="margin-top:16px"></div>`;
     mountMonthCountdown($('#cdMonthT', app), { teacher: true, onHonor: () => { tab = 'honor'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'honor')); drawBody(); } });
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
@@ -2629,12 +2672,12 @@ function viewTeacher(app) {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
     offIqraT?.(); offIqraT = null;
-    ({ subs: drawSubs, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+    ({ subs: drawSubs, watch: drawWatch, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
     sectionize(body);
   }
 
   /* --- الأقسام مربعات: التبويبات الطويلة تُعرض أقسامها مربعات في الأعلى، والنقر يفتح القسم وحده --- */
-  const SECT_TABS = new Set(['iqra', 'settings', 'honor', 'reports']);
+  const SECT_TABS = new Set(['iqra', 'settings', 'honor', 'reports', 'watch']);
   let secObs = null;
   let secGen = 0;
   function sectionize(body) {
@@ -4742,6 +4785,157 @@ function viewTeacher(app) {
         schedulePublish(); drawRevT(host);
       } catch (e) { b.disabled = false; toast('تعذر الحفظ: ' + (e.code || e.message)); }
     }));
+  }
+  /* ================= المتابعة: من لم يسمّع، ومتصل الآن، وتحليل الاستخدام ================= */
+  const PGL = { tasks: 'الرئيسية والواجبات', practice: 'التدريب الحر', mushaf: 'المصحف', honor: 'لوحة الشرف', heroes: 'الأبطال', iqra: 'اقرأ وارتقِ', rewards: 'خزانتي', history: 'سجل التسميع', notebook: 'دفتر الأخطاء' };
+  const DEVL = { m: '📱 جوال', t: '📱 لوحي', d: '💻 حاسوب' };
+  const ONLINE_MS = 150e3;
+  const isOnline = (p) => p && !p.off && Date.now() - (p.t || 0) < ONLINE_MS;
+  let wUse = null, wRange = 7, wCls = 'all';
+  /** من الآن: «منذ ١٢ دقيقة» */
+  const agoTxt = (ms) => { const m = Math.max(1, Math.round((Date.now() - ms) / 60e3)); if (m < 60) return `منذ ${nWord(m, 'دقيقة', 'دقيقتين', 'دقائق', 'دقيقة')}`; const h = Math.round(m / 60); if (h < 24) return `منذ ${nWord(h, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}`; const d = Math.round(h / 24); return d === 1 ? 'أمس' : `منذ ${nWord(d, 'يوم', 'يومين', 'أيام', 'يوماً')}`; };
+  /** «٤–٥ مساءً» */
+  const hourLbl = (h) => { const a = h % 12 || 12, b = (h + 1) % 12 || 12, p = h < 5 ? 'ليلاً' : h < 12 ? 'صباحاً' : h < 15 ? 'ظهراً' : h < 18 ? 'عصراً' : 'مساءً'; return `${ar(a)}–${ar(b)} ${p}`; };
+  /** واجبات الطالب الناقصة: المفتوحة، والتي انتهت هذا الشهر (بتوقيت البحرين) */
+  function missingOf(s, doneBy) {
+    const ym = riyadhDay().slice(0, 7), done = doneBy[s.id] || new Set(), joined = s.accountAt || s.createdAt || '';
+    return D.tasks.filter((t) => taskFor(t, s) && taskStarted(t) && !done.has(t.id) && (t.createdAt || '') >= joined
+      && (!taskClosed(t) || riyadhDay(new Date(taskEnd(t))).slice(0, 7) === ym))
+      .sort((a, b) => (taskEnd(a) || '9').localeCompare(taskEnd(b) || '9'));
+  }
+  const doneMap = () => { const m = {}; D.subs.forEach((x) => { if (x.taskId) (m[x.pn] = m[x.pn] || new Set()).add(x.taskId); }); return m; };
+  /** تنبيه داخل الصفحة حين يدخل طالب عليه واجبات ناقصة (والخادم يرسل إشعاراً خارج التطبيق) */
+  function watchPresenceT() {
+    if (D._offPres) return;
+    const was = {};
+    let first = true;
+    D._offPres = store.watchPresence((L) => {
+      D.presence = {}; L.forEach((p) => p.pn && (D.presence[p.pn] = p));
+      const dm = doneMap();
+      L.forEach((p) => {
+        const on = isOnline(p);
+        if (on && !was[p.pn] && !first) {
+          const s = D.students.find((x) => x.id === p.pn), miss = s ? missingOf(s, dm) : [];
+          if (miss.length) toast(`📲 ${s.name} دخل الآن، وعليه ${nWord(miss.length, 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')} لم يسمّعها. افتح «👀 المتابعة» لتذكيره.`, 7000);
+        }
+        was[p.pn] = on;
+      });
+      first = false;
+      const n = L.filter(isOnline).length, b = $('#wTabN', app); if (b) b.textContent = n ? ar(n) : '';
+      if (tab === 'watch') paintOnlineT();
+    });
+    setInterval(() => { if (tab === 'watch') paintOnlineT(); }, 30e3); // يتجدد «منذ…» ويخرج من انقطعت نبضته
+  }
+  function drawWatch(body) {
+    body.innerHTML = `<div class="stack" style="gap:16px">
+      <div class="card stack" id="wMiss"></div>
+      <div class="card stack" id="wOnline"></div>
+      <div class="card stack" id="wUse"><h3>📊 تحليل الاستخدام</h3><div class="loading">جارٍ التحميل…</div></div></div>`;
+    paintMissing(); paintOnlineT(); paintUsage();
+  }
+  function paintMissing() {
+    const host = $('#wMiss', app); if (!host) return;
+    const dm = doneMap();
+    const rows = D.classes.map((c) => ({ c, L: D.students.filter((s) => s.classId === c.id).map((s) => ({ s, miss: missingOf(s, dm) })).filter((x) => x.miss.length).sort((a, b) => b.miss.length - a.miss.length || a.s.name.localeCompare(b.s.name, 'ar')) })).filter((x) => x.L.length);
+    const total = rows.reduce((n, r) => n + r.L.length, 0);
+    const chip = (t) => `<span class="wm-t${taskClosed(t) ? ' closed' : ''}" title="${esc(rangeLabel(t.surah, t.from, t.to))}">${esc(t.title)} <small>${taskClosed(t) ? 'انتهى' : taskEnd(t) ? 'ينتهي ' + esc(fmtDT(taskEnd(t)).replace(/،.*$/, '')) : 'مفتوح'}</small></span>`;
+    host.innerHTML = `<h3>📋 لم يسمّعوا <span class="pill warn">${ar(total)}</span></h3>
+      <p class="small muted" style="margin:0">الواجبات المفتوحة، والتي انتهى موعدها هذا الشهر. 🟢 = متصل الآن.</p>
+      ${rows.length ? rows.map(({ c, L }) => `<details class="wm-c" open><summary><b>${esc(c.name)}</b> <span class="small muted">${nWord(L.length, 'طالب واحد', 'طالبان', 'طلاب', 'طالباً')}</span>
+          <button class="btn sm ghost" type="button" data-wrc="${esc(c.id)}">🔔 ذكّرهم كلهم</button></summary>
+        <ul class="wm-l">${L.map(({ s, miss }) => `<li><div class="wm-n"><span class="on-dot" title="متصل الآن" data-wn="${esc(s.id)}"${isOnline(D.presence?.[s.id]) ? '' : ' hidden'}></span><b data-lk="${esc(s.id)}" data-lk-no-title>${esc(s.name)}</b> <span class="pill warn">${ar(miss.length)}</span></div>
+          <div class="wm-ts">${miss.map(chip).join('')}</div><button class="btn sm" type="button" data-wr="${esc(s.id)}">🔔 ذكّره</button></li>`).join('')}</ul></details>`).join('')
+        : '<p class="muted" style="margin:0">ما شاء الله، سمّع الجميع كل واجباتهم.</p>'}`;
+    const remind = async (list) => {
+      const items = [];
+      for (const { s, miss } of list) {
+        const open = miss.filter((t) => !taskClosed(t)), names = miss.slice(0, 3).map((t) => `«${t.title}»`).join('، ') + (miss.length > 3 ? ` و${ar(miss.length - 3)} غيرها` : '');
+        const nid = await store.addStudentNotif(s.id, { type: 'remind', title: '📋 تذكير من معلمك', body: `بقي عليك ${nWord(miss.length, 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')}: ${names}.${open.length === miss.length ? ` سمّع${miss.length > 1 ? 'ها' : 'ه'} قبل انتهاء الموعد.` : open.length ? ' سمّع المفتوح منها قبل انتهاء موعده، واطلب السماح بتسليم ما فات موعده.' : ' فات موعدها، فاطلب من معلمك السماح بالتسليم.'}`, link: './#/student', tag: 'remind-' + s.id + '-' + riyadhDay() }).catch(() => null);
+        if (nid) items.push({ notif: nid, student: s.id });
+      }
+      let sent = 0; try { for (let i = 0; i < items.length; i += 200) sent += (await sendPushBatch(items.slice(i, i + 200)))?.sent || 0; } catch {}
+      return { n: items.length, sent };
+    };
+    $$('[data-wr]', host).forEach((b) => (b.onclick = async () => {
+      const s = D.students.find((x) => x.id === b.dataset.wr); b.disabled = true;
+      const r = await remind([{ s, miss: missingOf(s, doneMap()) }]);
+      b.textContent = '✓ ذُكّر'; toast(r.n ? `وصل التذكير إلى ${s.name}${r.sent ? ' (إشعار على جواله)' : ' (يراه عند فتح الموقع)'}.` : 'تعذر الإرسال.');
+    }));
+    $$('[data-wrc]', host).forEach((b) => (b.onclick = async (e) => {
+      e.preventDefault(); const row = rows.find((r) => r.c.id === b.dataset.wrc); if (!row) return;
+      if (!(await confirmBox(`إرسال تذكير إلى ${nWord(row.L.length, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')} في ${row.c.name} بواجباتهم الناقصة؟`, 'أرسل'))) return;
+      b.disabled = true; const r = await remind(row.L); b.textContent = '✓ ذُكّروا';
+      toast(`أُرسل التذكير إلى ${nWord(r.n, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}${r.sent ? `، ووصل إشعار إلى ${ar(r.sent)} جهازاً` : ''}.`);
+    }));
+  }
+  function paintOnlineT() {
+    const host = $('#wOnline', app); if (!host) return;
+    const P = D.presence || {}, stu = (pn) => D.students.find((x) => x.id === pn);
+    $$('[data-wn]', app).forEach((d) => (d.hidden = !isOnline(P[d.dataset.wn])));
+    const on = Object.values(P).filter(isOnline).filter((p) => stu(p.pn)).sort((a, b) => (a.since || 0) - (b.since || 0));
+    const off = D.students.filter((s) => !isOnline(P[s.id])).map((s) => ({ s, p: P[s.id] })).sort((a, b) => (b.p?.t || 0) - (a.p?.t || 0));
+    const seen = (p) => (p ? agoTxt(Math.min(p.t || 0, p.off || Infinity)) : 'لم يظهر منذ تفعيل الميزة');
+    const dm = doneMap();
+    host.innerHTML = `<h3>🟢 متصل الآن <span class="pill ok">${ar(on.length)}</span></h3>
+      ${on.length ? `<ul class="wo-l">${on.map((p) => { const s = stu(p.pn), miss = missingOf(s, dm).length; return `<li><span class="on-dot"></span><div><b data-lk="${esc(s.id)}" data-lk-no-title>${esc(s.name)}</b> <span class="small muted">${esc(className(s.classId))}</span>${miss ? ` <span class="pill warn" title="واجبات لم يسمّعها">📋 ${ar(miss)}</span>` : ''}
+          <div class="small">📍 ${esc(PGL[p.pg] || p.pg || '—')} · ⏱️ ${esc(agoTxt(p.since || p.t))} · ${DEVL[p.dev] || ''}</div></div></li>`; }).join('')}</ul>`
+        : '<p class="muted" style="margin:0">لا أحد متصل الآن.</p>'}
+      <details class="sp-box"><summary><b>🕒 آخر ظهور لبقية الطلاب (${ar(off.length)})</b></summary>
+        <ul class="wo-off">${off.map(({ s, p }) => `<li><span>${esc(s.name)} <small class="muted">${esc(className(s.classId))}</small></span><small class="${p ? '' : 'muted'}">${esc(seen(p))}${p?.dev ? ' · ' + DEVL[p.dev] : ''}</small></li>`).join('')}</ul></details>`;
+  }
+  /** ملخّص أسبوع: الدقائق، وأكثر الساعات، وأنشط الطلاب، ومن لم يدخل */
+  function usageStats(U, days, cls) {
+    const today = riyadhDay(), from = addDays(today, -(days - 1));
+    const grid = Array.from({ length: 7 }, () => new Array(24).fill(0)), perStu = {}, perCls = {};
+    U.forEach((u) => {
+      const s = D.students.find((x) => x.id === u.pn); if (!s || (cls !== 'all' && s.classId !== cls)) return;
+      Object.entries(u.d || {}).forEach(([day, hs]) => {
+        if (day < from || day > today) return;
+        const wd = new Date(day + 'T12:00:00Z').getUTCDay();
+        Object.entries(hs || {}).forEach(([h, n]) => {
+          n = +n || 0; grid[wd][+h] += n; perStu[s.id] = (perStu[s.id] || 0) + n;
+          const c = (perCls[s.classId] = perCls[s.classId] || { min: 0, hours: new Array(24).fill(0), act: new Set() });
+          c.min += n; c.hours[+h] += n; c.act.add(s.id);
+        });
+      });
+    });
+    const hours = new Array(24).fill(0); grid.forEach((r) => r.forEach((n, h) => (hours[h] += n)));
+    const top = hours.map((n, h) => ({ h, n })).filter((x) => x.n).sort((a, b) => b.n - a.n).slice(0, 3);
+    const total = hours.reduce((a, b) => a + b, 0);
+    const pool = D.students.filter((s) => cls === 'all' || s.classId === cls);
+    const ranked = pool.map((s) => ({ s, m: perStu[s.id] || 0 })).sort((a, b) => b.m - a.m);
+    return { grid, hours, top, total, perCls, ranked, zero: ranked.filter((x) => !x.m), pool };
+  }
+  const minTxt = (m) => (m < 60 ? nWord(m, 'دقيقة', 'دقيقتين', 'دقائق', 'دقيقة') : `${ar(Math.floor(m / 60))} س${m % 60 ? ` و${ar(m % 60)} د` : ''}`);
+  async function paintUsage(force) {
+    const host = $('#wUse', app); if (!host) return;
+    if (!wUse || force || Date.now() - wUse.at > 300e3) {
+      try { wUse = { at: Date.now(), L: await store.listUsage() }; } catch (e) { host.innerHTML = `<h3>📊 تحليل الاستخدام</h3><p class="bad small">تعذر التحميل: ${esc(e.code || e.message)}${/permission/i.test(e.code || e.message) ? ' — انشر قواعد Firestore الجديدة.' : ''}</p>`; return; }
+      if (!$('#wUse', app)) return;
+    }
+    const S = usageStats(wUse.L, wRange, wCls), max = Math.max(1, ...S.grid.flat());
+    const DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const shown = [...Array(24).keys()].filter((h) => S.hours[h] || (h >= 6 && h <= 23)); // ساعات الليل تظهر إن استُخدمت فقط
+    const clsRows = D.classes.map((c) => { const x = S.perCls[c.id], n = D.students.filter((s) => s.classId === c.id).length; if (!n) return null; const pk = x ? x.hours.indexOf(Math.max(...x.hours)) : -1; return { c, min: x?.min || 0, avg: x ? Math.round(x.min / n) : 0, act: x?.act.size || 0, n, pk: x?.min ? pk : -1 }; }).filter(Boolean).sort((a, b) => b.avg - a.avg);
+    const cmax = Math.max(1, ...clsRows.map((r) => r.avg));
+    host.innerHTML = `<h3>📊 تحليل الاستخدام</h3>
+      <div class="row">
+        <label class="field" style="flex:1 1 140px">المدة<select id="wRange"><option value="7" ${wRange === 7 ? 'selected' : ''}>آخر ٧ أيام</option><option value="14" ${wRange === 14 ? 'selected' : ''}>آخر أسبوعين</option><option value="28" ${wRange === 28 ? 'selected' : ''}>آخر ٤ أسابيع</option></select></label>
+        <label class="field" style="flex:1 1 160px">الصف<select id="wCls"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}" ${wCls === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <button class="btn sm ghost" type="button" id="wRef" style="align-self:end">↻ تحديث</button></div>
+      ${!S.total ? '<p class="muted" style="margin:0">لا بيانات بعد. تُجمع الدقائق من لحظة تحديث الطلاب للتطبيق، فارجع بعد يوم أو يومين.</p>' : `
+      <div class="wu-kpi"><div><b>${esc(minTxt(S.total))}</b><span>مجموع الاستخدام</span></div><div><b>${ar(S.ranked.filter((x) => x.m).length)} / ${ar(S.pool.length)}</b><span>طالباً دخلوا</span></div><div><b>${esc(minTxt(Math.round(S.total / Math.max(1, S.pool.length))))}</b><span>متوسط الطالب</span></div></div>
+      <div class="wu-top"><b>⏰ أكثر الأوقات ازدحاماً:</b> ${S.top.map((x, i) => `<span class="wu-h${i ? '' : ' first'}">${['🥇', '🥈', '🥉'][i]} ${esc(hourLbl(x.h))} <small>${esc(minTxt(x.n))}</small></span>`).join('')}</div>
+      <div class="wu-heat-wrap"><table class="wu-heat"><thead><tr><th></th>${shown.map((h) => `<th>${ar(h % 12 || 12)}<small>${h < 12 ? 'ص' : 'م'}</small></th>`).join('')}</tr></thead>
+        <tbody>${S.grid.map((r, d) => `<tr><th>${DAYS[d]}</th>${shown.map((h) => { const n = r[h], a = n ? 0.12 + 0.88 * (n / max) : 0; return `<td style="--a:${a.toFixed(2)}" title="${DAYS[d]} ${esc(hourLbl(h))}: ${esc(minTxt(n))}">${n ? '' : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="small muted" style="margin:0">كلما اشتد اللون زاد عدد دقائق الطلاب في تلك الساعة.</p>
+      ${wCls === 'all' && clsRows.length > 1 ? `<h4 style="margin:6px 0 0">🏫 مقارنة الصفوف (متوسط الطالب)</h4><ul class="wu-cls">${clsRows.map((r) => `<li><span class="wu-cn">${esc(r.c.name)}</span><span class="wu-bar"><i style="width:${Math.round((r.avg / cmax) * 100)}%"></i></span><span class="small">${esc(minTxt(r.avg))} · دخل ${ar(r.act)}/${ar(r.n)}${r.pk >= 0 ? ` · ذروته ${esc(hourLbl(r.pk))}` : ''}</span></li>`).join('')}</ul>` : ''}
+      <div class="wu-two"><div><h4 style="margin:6px 0">🌟 الأنشط</h4><ol class="small">${S.ranked.filter((x) => x.m).slice(0, 5).map((x) => `<li>${esc(x.s.name)} <span class="muted">${esc(minTxt(x.m))}</span></li>`).join('')}</ol></div>
+        <div><h4 style="margin:6px 0">💤 لم يدخلوا (${ar(S.zero.length)})</h4><p class="small" style="margin:0">${S.zero.slice(0, 12).map((x) => esc(x.s.name)).join('، ') || '—'}${S.zero.length > 12 ? ` و${ar(S.zero.length - 12)} غيرهم` : ''}</p></div></div>
+      <p class="small muted" style="margin:0">📩 يصلك كل سبت مساءً ملخّص أسبوعي بهذه الأرقام.</p>`}`;
+    $('#wRange', host).onchange = (e) => { wRange = +e.target.value; paintUsage(); };
+    $('#wCls', host).onchange = (e) => { wCls = e.target.value; paintUsage(); };
+    $('#wRef', host).onclick = () => paintUsage(true);
   }
   /* ================= المكافآت (المعلم): المتجر، والمنح، وصوت الأسبوع ================= */
   async function loadRewardsT() {

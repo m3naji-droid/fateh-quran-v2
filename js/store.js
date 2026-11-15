@@ -288,6 +288,13 @@ const local = {
   async likeVoice(pn) { const v = LS.get('voice', null); if (v) { v.likes = { ...(v.likes || {}), ['u' + pn]: true }; LS.set('voice', v); } },
   async saveVoiceAudio(id, blob) { const m = LS.get('vaudio', {}); m[id] = { b64: await blobToB64(blob), mime: blob.type }; try { LS.set('vaudio', m); } catch {} return true; },
   async getVoiceAudio(id) { return LS.get('vaudio', {})[id] || null; },
+  // الحضور (متصل الآن) ودقائق الاستخدام في كل ساعة
+  async beat(pn, x) { const m = LS.get('presence', {}); m[pn] = { ...(m[pn] || {}), ...x, pn, t: Date.now(), off: 0 }; LS.set('presence', m); },
+  async beatOff(pn) { const m = LS.get('presence', {}); if (m[pn]) { m[pn].t = Date.now() - 6e5; m[pn].off = Date.now(); LS.set('presence', m); } },
+  watchPresence(cb) { const f = () => cb(Object.values(LS.get('presence', {}))); f(); const id = setInterval(f, 15000); const h = (e) => { if (e.key === 'fp_presence') f(); }; addEventListener('storage', h); return () => { clearInterval(id); removeEventListener('storage', h); }; },
+  async onlineCount() { const t = Date.now() - 150e3; return Object.values(LS.get('presence', {})).filter((x) => x.t > t).length; },
+  async addUsage(pn, cls, add) { const m = LS.get('usage', {}); const u = (m[pn] = m[pn] || { pn, cls, d: {} }); u.cls = cls; Object.entries(add).forEach(([day, hs]) => { u.d[day] = u.d[day] || {}; Object.entries(hs).forEach(([h, n]) => (u.d[day][h] = (u.d[day][h] || 0) + n)); }); LS.set('usage', m); },
+  async listUsage() { return Object.values(LS.get('usage', {})); },
 };
 
 /** معرّف ثابت لمستند الجهاز من رمز الإشعار (الرمز طويل وفيه رموز لا تصلح معرّفاً) */
@@ -727,6 +734,14 @@ async function makeCloud() {
     async likeVoice() { await updateDoc(doc(db, 'leaderboard', 'voice'), { ['likes.' + auth.currentUser.uid]: true }); },
     async saveVoiceAudio(id, blob) { const b64 = await blobToB64(blob), P = 900000, n = Math.ceil(b64.length / P); if (n > 12) return false; for (let k = 1; k < n; k++) await setDoc(doc(db, 'voices', id, 'audio', 'p' + k), { b64: b64.slice(k * P, (k + 1) * P) }); await setDoc(doc(db, 'voices', id, 'audio', 'main'), { b64: b64.slice(0, P), mime: blob.type, parts: n }); return true; },
     async getVoiceAudio(id) { await ensureAnon(); const d = await getDoc(doc(db, 'voices', id, 'audio', 'main')); if (!d.exists()) return null; const m = d.data(); let b64 = m.b64; for (let k = 1; k < (m.parts || 1); k++) { const p = await getDoc(doc(db, 'voices', id, 'audio', 'p' + k)); b64 += p.exists() ? p.data().b64 : ''; } return { ...m, b64 }; },
+    // الحضور: مستند لكل طالب يحدّثه كل دقيقة ما دامت الصفحة مفتوحة (t = آخر نبضة بالملّي ثانية)
+    async beat(pn, x) { await setDoc(doc(db, 'presence', pn), { ...x, pn, t: Date.now(), off: 0 }, { merge: true }); },
+    async beatOff(pn) { await setDoc(doc(db, 'presence', pn), { pn, t: Date.now() - 6e5, off: Date.now() }, { merge: true }); },
+    watchPresence(cb) { return onSnapshot(collection(db, 'presence'), (s) => cb(s.docs.map((d) => d.data())), (e) => console.warn('presence', e)); },
+    async onlineCount() { await ensureAnon(); const s = await fs.getCountFromServer(query(collection(db, 'presence'), where('t', '>', Date.now() - 150e3))); return s.data().count; },
+    // دقائق الاستخدام: d.{اليوم}.{الساعة} تزداد، ولا يقرؤها إلا المعلم
+    async addUsage(pn, cls, add) { const d = {}; Object.entries(add).forEach(([day, hs]) => { d[day] = {}; Object.entries(hs).forEach(([h, n]) => (d[day][h] = increment(n))); }); await setDoc(doc(db, 'usage2', pn), { pn, cls, d }, { merge: true }); },
+    async listUsage() { return (await getDocs(collection(db, 'usage2'))).docs.map((x) => x.data()); },
     // ترحيل بيانات النسخة القديمة (مقرأة الفاتح) إلى البنية الجديدة
     async migrateLegacy() {
       const oldStudents = await list('students').catch(() => []);

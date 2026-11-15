@@ -549,6 +549,10 @@ class LateReq(BaseModel):
     task: str
 
 
+class OnlineReq(BaseModel):
+    student: str
+
+
 FB_KINDS = {"comment": "💬 تعليق", "complaint": "⚠️ شكوى", "suggest": "💡 اقتراح", "note": "📝 ملاحظة"}
 
 
@@ -975,6 +979,130 @@ def announce(req: AnnReq, authorization: str | None = Header(None)):
     return publish_announcement(req.ann)
 
 
+# ---------------- المتابعة: طالب عليه واجبات دخل الآن، وملخّص الاستخدام الأسبوعي ----------------
+def ar_num(n: int) -> str:
+    return str(n).translate(AR_DIGITS)
+
+
+def n_word(n: int, one: str, two: str, few: str, many: str) -> str:
+    return one if n == 1 else two if n == 2 else f"{ar_num(n)} {few}" if 3 <= n % 100 <= 10 else f"{ar_num(n)} {many}"
+
+
+def hour_label(h: int) -> str:
+    a, b = h % 12 or 12, (h + 1) % 12 or 12
+    p = "ليلاً" if h < 5 else "صباحاً" if h < 12 else "ظهراً" if h < 15 else "عصراً" if h < 18 else "مساءً"
+    return f"{ar_num(a)}–{ar_num(b)} {p}"
+
+
+def task_end(t: dict) -> str | None:
+    return t.get("endAt") or (f"{t['due']}T23:59:59+03:00" if t.get("due") else None)
+
+
+def in_task(t: dict, pn: str, cls: str) -> bool:
+    if pn in (t.get("exStudents") or []):
+        return False
+    cid = t.get("classId") or "all"
+    if cid == "custom" and pn in (t.get("studentIds") or []):
+        return True
+    if cls in (t.get("exClasses") or []):
+        return False
+    classes = ["all"] if cid == "all" else (t.get("classIds") or []) if cid == "custom" else [cid]
+    return "all" in classes or cls in classes
+
+
+def missing_tasks(pn: str, r: dict) -> list[dict]:
+    """الواجبات التي لم يسمّعها: المفتوحة، والمنتهية هذا الشهر (كما في صفحة المتابعة)."""
+    now = dt.datetime.now(dt.timezone.utc)
+    ym = dt.datetime.now(TZ).strftime("%Y-%m")
+    joined = r.get("accountAt") or r.get("createdAt") or ""
+    done = {(x.to_dict() or {}).get("taskId") for x in db.collection("roster").document(pn).collection("subs").stream()}
+    out = []
+    for d in db.collection("tasks").stream():
+        t = d.to_dict() or {}
+        if d.id in done or not in_task(t, pn, r.get("classId") or "") or (t.get("createdAt") or "") < joined:
+            continue
+        if t.get("startAt") and dt.datetime.fromisoformat(t["startAt"].replace("Z", "+00:00")) > now:
+            continue
+        e = task_end(t)
+        if e:
+            end = dt.datetime.fromisoformat(e.replace("Z", "+00:00"))
+            if end < now and end.astimezone(TZ).strftime("%Y-%m") != ym:
+                continue
+        out.append({"id": d.id, "title": t.get("title") or "واجب"})
+    return out
+
+
+@app.post("/online")
+def online(req: OnlineReq, authorization: str | None = Header(None)):
+    """دخل الطالب الموقع: إن كان عليه واجبات ناقصة نبّه المعلم، مرة واحدة في اليوم لكل طالب."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    snap = db.collection("roster").document(req.student).get()
+    r = snap.to_dict() if snap.exists else None
+    if not r or r.get("uid") != uid:
+        raise HTTPException(403, "غير مسموح.")
+    local = dt.datetime.now(TZ)
+    if quiet(local):
+        return {"sent": 0, "quiet": True}
+    today = local.strftime("%Y-%m-%d")
+    st_ref = db.collection("settings").document("onlineAlerts")
+    st = st_ref.get()
+    st = st.to_dict() if st.exists else {}
+    if st.get(req.student) == today:
+        return {"sent": 0, "already": True}
+    miss = missing_tasks(req.student, r)
+    st_ref.set({req.student: today}, merge=True)
+    if not miss:
+        return {"sent": 0, "missing": 0}
+    names = "، ".join(f"«{m['title']}»" for m in miss[:3]) + (f" و{ar_num(len(miss) - 3)} غيرها" if len(miss) > 3 else "")
+    who = r.get("name") or "طالب"
+    out = to_teachers(f"📲 {who} دخل الموقع الآن",
+                      f"عليه {n_word(len(miss), 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')} لم يسمّعها: {names}. افتح «👀 المتابعة» لتذكيره.",
+                      "online-" + req.student, "./#/teacher/watch")
+    return {**out, "missing": len(miss)}
+
+
+def run_week_usage(local: dt.datetime) -> dict | None:
+    """كل سبت بعد الثامنة مساءً، مرة واحدة: ملخّص استخدام الأسبوع للمعلم."""
+    if local.weekday() != 5 or local.hour < 20 or quiet(local):
+        return None
+    st_ref = db.collection("settings").document("usageWeek")
+    st = st_ref.get()
+    today = local.strftime("%Y-%m-%d")
+    if st.exists and (st.to_dict() or {}).get("last") == today:
+        return None
+    days = {(local.date() - dt.timedelta(days=i)).isoformat() for i in range(7)}
+    names = {d.id: (d.to_dict() or {}).get("name") or d.id for d in db.collection("roster").stream()}
+    hours, per = [0] * 24, {}
+    for u in db.collection("usage2").stream():
+        x = u.to_dict() or {}
+        for day, hs in (x.get("d") or {}).items():
+            if day not in days:
+                continue
+            for h, n in (hs or {}).items():
+                try:
+                    hours[int(h)] += int(n)
+                except Exception:
+                    continue
+                per[u.id] = per.get(u.id, 0) + int(n)
+    total = sum(hours)
+    st_ref.set({"last": today, "total": total})
+    if not total:
+        return {"total": 0}
+    peak = max(range(24), key=lambda h: hours[h])
+    top = [names.get(pn, pn) for pn, _ in sorted(per.items(), key=lambda kv: -kv[1])[:3] if pn in names]
+    active = len([pn for pn in per if pn in names])
+    zero = len(names) - active
+    mins = f"{ar_num(total // 60)} ساعة و{ar_num(total % 60)} دقيقة" if total >= 60 else f"{ar_num(total)} دقيقة"
+    body = (f"دخل {ar_num(active)} من {ar_num(len(names))} طالباً · مجموع {mins} · أكثر وقت: {hour_label(peak)}"
+            + (f" · الأنشط: {'، '.join(top)}" if top else "") + (f" · لم يدخل {ar_num(zero)}" if zero else ""))
+    return to_teachers("📊 ملخّص استخدام الأسبوع", body, "usage-week-" + today, "./#/teacher/watch")
+
+
 @app.post("/cron")
 def cron(x_cron_secret: str | None = Header(None)):
     if not CRON_SECRET or not x_cron_secret or not hmac.compare_digest(x_cron_secret, CRON_SECRET):
@@ -1012,8 +1140,12 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         teacher = {"error": str(e)[:200]}
     try:
+        week = run_week_usage(local)
+    except Exception as e:
+        week = {"error": str(e)[:200]}
+    try:
         aiq = run_ai_queue()
     except Exception as e:
         aiq = [{"error": str(e)[:200]}]
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders), "aiQueue": len(aiq)})
-    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "deferredSent": flushed}
+    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "deferredSent": flushed}
