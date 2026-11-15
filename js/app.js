@@ -1108,32 +1108,47 @@ function viewStudent(app) {
     } catch (e) { console.warn('ach', e); } finally { achBusy = false; }
   }
   /* صوت الأسبوع في صفحة الطالب: اسمعه، وقل «ما شاء الله» */
-  let voiceCache = null;
+  let voiceCache = null, voicesCache = null;
+  /** صوت هذا الأسبوع وصوت الأسبوع الماضي معاً (الإعجاب للصوت الحالي فقط) */
   async function mountVoiceStu(host) {
     if (!host) return;
-    try { voiceCache = voiceCache || (await store.getVoice()); } catch { return; }
-    const v = voiceCache;
-    if (!v || !host.isConnected || Date.now() - Date.parse(v.at) > 8 * 864e5) return;
-    const k = 'vLiked_' + v.id, mine = v.pn === me.id;
-    const paint = () => {
-      const n = Object.keys(v.likes || {}).length, liked = pref.get(k, false);
-      host.innerHTML = `<div class="voice-card${mine ? ' mine' : ''}"><div class="vc-ic">🎙️</div><div class="vc-tx"><span class="vc-tag">صوت الأسبوع</span>
+    try { voiceCache = voiceCache || (await store.getVoice()); } catch {}
+    try { voicesCache = voicesCache || (await store.listVoices()); } catch { voicesCache = []; }
+    if (!host.isConnected) return;
+    const TZ = 3 * 3600e3, nw = new Date(Date.now() + TZ);
+    const ws = (k) => new Date(Date.UTC(nw.getUTCFullYear(), nw.getUTCMonth(), nw.getUTCDate() - nw.getUTCDay() - 7 * k) - TZ).toISOString();
+    const W0 = ws(0), W1 = ws(1), recent = (v) => v?.wk === W0 || v?.wk === W1;
+    const cur = voiceCache && (recent(voiceCache) || Date.now() - Date.parse(voiceCache.at) <= 8 * 864e5) ? voiceCache : null;
+    const L = [...(cur ? [cur] : []), ...(voicesCache || []).filter((v) => v.id !== cur?.id && recent(v)).sort((a, b) => b.wk.localeCompare(a.wk) || (b.at || '').localeCompare(a.at || ''))].slice(0, 3);
+    if (!L.length) { host.innerHTML = ''; return; }
+    const tag = (v) => (v.wk === W0 ? 'صوت هذا الأسبوع' : v.wk === W1 ? 'صوت الأسبوع الماضي' : 'صوت الأسبوع');
+    const card = (v, i) => {
+      const live = v.id === cur?.id, mine = v.pn === me.id, n = Object.keys(v.likes || {}).length, liked = pref.get('vLiked_' + v.id, false);
+      return `<div class="voice-card${mine ? ' mine' : ''}${i ? ' sm' : ''}"><div class="vc-ic">🎙️</div><div class="vc-tx"><span class="vc-tag">${tag(v)}</span>
         <b data-lk="${esc(v.pn)}">${esc(v.name)}</b><small>${esc(v.className || '')} · ${esc(v.range || '')}${v.week ? ` · ${esc(v.week)}` : ''}</small></div>
-        <div class="vc-act"><button class="btn sm primary" type="button" id="vcPlay">▶ استمع</button>
-        <button class="btn sm vc-like${liked ? ' on' : ''}" type="button" id="vcLike" ${liked || mine ? 'disabled' : ''}>❤️ ما شاء الله${n ? ` · ${ar(n)}` : ''}</button></div></div>`;
-      let au = null;
-      $('#vcPlay', host).onclick = async (e) => {
-        const b = e.currentTarget;
-        if (au && !au.paused) { au.pause(); b.textContent = '▶ استمع'; return; }
+        <div class="vc-act"><button class="btn sm primary" type="button" data-vcp="${i}">▶ استمع</button>
+        ${live ? `<button class="btn sm vc-like${liked ? ' on' : ''}" type="button" data-vcl="${i}" ${liked || mine ? 'disabled' : ''}>❤️ ما شاء الله${n ? ` · ${ar(n)}` : ''}</button>` : n ? `<span class="vc-n">❤️ ${ar(n)}</span>` : ''}</div></div>`;
+    };
+    const au = [];
+    const paint = () => {
+      host.innerHTML = L.map(card).join('');
+      $$('[data-vcp]', host).forEach((b) => (b.onclick = async () => {
+        const i = +b.dataset.vcp, v = L[i];
+        au.forEach((a, k) => { if (a && k !== i && !a.paused) { a.pause(); const o = host.querySelector(`[data-vcp="${k}"]`); if (o) o.textContent = '▶ استمع'; } });
+        if (au[i] && !au[i].paused) { au[i].pause(); b.textContent = '▶ استمع'; return; }
         b.disabled = true; b.textContent = '…';
-        try { const d = au ? null : await store.getVoiceAudio(v.id); if (!au) { if (!d) throw new Error('غير متاح'); au = new Audio(`data:${d.mime};base64,${d.b64}`); au.onended = () => { b.textContent = '▶ استمع'; }; } await au.play(); b.textContent = '⏸ إيقاف'; }
-        catch (x) { toast('تعذر التشغيل: ' + x.message); b.textContent = '▶ استمع'; }
+        try {
+          if (!au[i]) { const d = await store.getVoiceAudio(v.id); if (!d) throw new Error('غير متاح'); au[i] = new Audio(`data:${d.mime};base64,${d.b64}`); au[i].onended = () => { b.textContent = '▶ استمع'; }; }
+          await au[i].play(); b.textContent = '⏸ إيقاف';
+        } catch (x) { toast('تعذر التشغيل: ' + x.message); b.textContent = '▶ استمع'; }
         b.disabled = false;
-      };
-      $('#vcLike', host).onclick = async () => {
-        pref.set(k, true); v.likes = { ...(v.likes || {}), ['me' + me.id]: true }; paint();
+      }));
+      $$('[data-vcl]', host).forEach((b) => (b.onclick = () => {
+        const v = L[+b.dataset.vcl];
+        pref.set('vLiked_' + v.id, true); v.likes = { ...(v.likes || {}), ['me' + me.id]: true };
+        au.forEach((a) => a?.pause()); au.length = 0; paint();
         store.likeVoice(me.id).catch((e) => console.warn('like', e));
-      };
+      }));
     };
     paint();
   }
