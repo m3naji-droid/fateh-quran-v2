@@ -78,6 +78,12 @@ service cloud.firestore {
         allow read: if isTeacher();
         allow create: if isStudent(pn);
       }
+      // استطلاع الإعلان: كل طالب يختار خياراً واحداً (ويستطيع تغييره)، ولا يرى أصوات غيره
+      match /votes/{pn} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create, update: if isStudent(pn) && request.resource.data.keys().hasOnly(['o', 'at'])
+          && request.resource.data.o is int && request.resource.data.o >= 0 && request.resource.data.o < 6;
+      }
     }
     // بطولة «الأبطال»: يديرها البرنامج من لوحة المعلم، والطالب يكتب نتيجته فقط (مرة واحدة)، أو يعيد المباراة عند التعادل
     match /tourneys/{tid} {

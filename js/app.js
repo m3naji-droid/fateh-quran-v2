@@ -17,7 +17,8 @@ import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents, t
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
-import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
+import { compressImage, blobToB64, b64ToBlob, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
+import { openImageEditor, openDesigner } from './imgedit.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview, notifyOnline } from './push.js';
 import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js';
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
@@ -47,6 +48,49 @@ function voiceWk(v) {
   const t = Date.parse(v.at || ''); if (!t) return '';
   for (let k = 0; k < 26; k++) { const r = weekRange(k); if (t >= Date.parse(r.from) && t < Date.parse(r.to)) return r.from; }
   return '';
+}
+/* ---- إعلانات غنية: ألبوم صور، ورسالة صوتية، وزر ينقل الطالب ---- */
+const ANN_MAX_IMGS = 4;
+const ANN_ACTS = [
+  { k: 'tasks', label: 'سمّع واجباتك', btn: '📋 سمّع واجباتك' }, { k: 'practice', label: 'التدريب الحر', btn: '🎯 تدرّب الآن' },
+  { k: 'honor', label: 'لوحة الشرف', btn: '🏆 لوحة الشرف' }, { k: 'rewards', label: 'خزانتي', btn: '🏅 افتح خزانتي' },
+  { k: 'iqra', label: 'اقرأ وارتقِ', btn: '📖 اقرأ وارتقِ' }, { k: 'heroes', label: 'الأبطال', btn: '⚔️ الأبطال' },
+  { k: 'url', label: 'رابط خارجي', btn: '🔗 افتح الرابط' },
+];
+const annKey = (aid, i) => (i ? `${aid}__${i}` : aid);
+/** ألبوم صور الإعلان: تمرير أفقي، والضغط يكبّر */
+function mountAlbum(host, aid, n) {
+  if (!host) return;
+  host.innerHTML = `<div class="alb-track">${Array.from({ length: n }, (_, i) => `<button type="button" class="alb-it" data-i="${i}"><div class="loading">…</div></button>`).join('')}</div>${n > 1 ? `<div class="alb-dots">${Array.from({ length: n }, (_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}`;
+  const tr = host.querySelector('.alb-track');
+  tr.onscroll = () => { const i = Math.round(Math.abs(tr.scrollLeft) / Math.max(1, tr.clientWidth)); host.querySelectorAll('.alb-dots i').forEach((d, k) => d.classList.toggle('on', k === i)); };
+  host.querySelectorAll('.alb-it').forEach(async (b) => {
+    const i = +b.dataset.i;
+    try {
+      const blob = await annImage(annKey(aid, i), (k) => store.getAnnImage(k));
+      if (!blob) { b.innerHTML = `<small class="muted">انتهت مدة عرض الصورة (${ar(IMG_DAYS)} يوماً).</small>`; return; }
+      b.innerHTML = `<img alt="صورة ${ar(i + 1)}" src="${URL.createObjectURL(blob)}"><span class="ann-zoom">🔍 ${n > 1 ? `${ar(i + 1)}/${ar(n)}` : 'اضغط للتكبير'}</span>`;
+      b.onclick = () => openLightbox(blob, 'صورة الإعلان');
+    } catch { b.innerHTML = '<small class="muted">تعذر تحميل الصورة.</small>'; }
+  });
+}
+/** مشغّل رسالة المعلم الصوتية */
+async function mountAnnVoice(host, aid, sec) {
+  if (!host) return;
+  host.innerHTML = `<div class="ann-vo"><span>🎙️ رسالة صوتية من معلمك${sec ? ` · ${ar(sec)} ث` : ''}</span><div class="loading small">جارٍ التحميل…</div></div>`;
+  try {
+    const d = await store.getAnnImage(`${aid}__voice`);
+    if (!d?.b64) { host.querySelector('.loading').textContent = `انتهت مدة الرسالة الصوتية (${ar(IMG_DAYS)} يوماً).`; return; }
+    host.querySelector('.loading').outerHTML = `<audio controls preload="auto" src="${URL.createObjectURL(b64ToBlob(d.b64, d.type || 'audio/webm'))}"></audio>`;
+  } catch { host.querySelector('.loading').textContent = 'تعذر تحميل الرسالة الصوتية.'; }
+}
+let annAu = null;
+async function playAnnVoice(b, aid) {
+  if (annAu && !annAu.paused) { annAu.pause(); b.textContent = b.textContent.replace('⏸', '🎙️'); return; }
+  b.disabled = true;
+  try { const d = await store.getAnnImage(`${aid}__voice`); if (!d?.b64) throw new Error('انتهت مدته'); annAu = new Audio(URL.createObjectURL(b64ToBlob(d.b64, d.type || 'audio/webm'))); annAu.onended = () => (b.textContent = b.textContent.replace('⏸', '🎙️')); await annAu.play(); b.textContent = b.textContent.replace('🎙️', '⏸'); }
+  catch (e) { toast('تعذر التشغيل: ' + e.message); }
+  b.disabled = false;
 }
 const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
@@ -1335,9 +1379,26 @@ function viewStudent(app) {
     const L = anns().filter((n) => !acked.has(n.annId));
     host.innerHTML = L.slice(0, 3).map((n) => `<div class="ann-bar" role="status"><span class="ann-ico">📢</span>
       <div class="ann-tx"><b>${esc((n.title || '').replace(/^📢\s*/, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></div>
-      ${n.hasImage ? `<button class="btn sm gold" type="button" data-annopen="${esc(n.annId)}">📷 الصورة</button>` : ''}<button class="btn sm primary" type="button" data-ack="${esc(n.annId)}">فهمت</button></div>`).join('');
+      ${n.hasImage || n.hasVoice || n.poll || n.act ? `<button class="btn sm gold" type="button" data-annopen="${esc(n.annId)}">${n.hasImage ? '📷 ' : ''}${n.hasVoice ? '🎙️ ' : ''}${n.poll ? '📊 ' : ''}افتح</button>` : ''}<button class="btn sm primary" type="button" data-ack="${esc(n.annId)}">فهمت</button></div>`).join('');
     $$('[data-ack]', host).forEach((b) => (b.onclick = () => ackAnn(b.dataset.ack)));
     $$('[data-annopen]', host).forEach((b) => (b.onclick = () => openAnn(b.dataset.annopen)));
+  }
+  /** استطلاع الإعلان: يختار الطالب خياراً (ويستطيع تغييره) */
+  async function mountPoll(host, n) {
+    if (!host) return;
+    const k = 'vote_' + n.annId; let mine = pref.get(k, null);
+    const paint = () => {
+      host.innerHTML = `<b>📊 ${esc(n.poll.q)}</b><div class="poll-opts">${n.poll.opts.map((o, i) => `<button type="button" class="btn${mine === i ? ' primary' : ''}" data-vo="${i}">${mine === i ? '✓ ' : ''}${esc(o)}</button>`).join('')}</div>
+        <small class="muted">${mine == null ? 'اختر إجابتك، ويراها معلمك.' : 'وصل اختيارك إلى معلمك. يمكنك تغييره.'}</small>`;
+      $$('[data-vo]', host).forEach((b) => (b.onclick = async () => {
+        const i = +b.dataset.vo; if (i === mine) return;
+        $$('[data-vo]', host).forEach((x) => (x.disabled = true));
+        try { await store.voteAnn(n.annId, me.id, i); mine = i; pref.set(k, i); toast('✓ وصل اختيارك.'); } catch (e) { toast('تعذر الإرسال: ' + (e.code || e.message)); }
+        paint();
+      }));
+    };
+    paint();
+    if (mine == null) { const v = await store.getMyVote(n.annId, me.id).catch(() => null); if (v != null) { mine = v; pref.set(k, v); paint(); } }
   }
   /** إعلان «صفحة منبثقة» لم يقرأه: يظهر في وسط الشاشة فور الفتح (الأقدم أولاً) */
   function checkPopAnn() {
@@ -1351,8 +1412,18 @@ function viewStudent(app) {
     const n = anns().find((x) => x.annId === aid);
     if (!n) return toast('هذا الإعلان لم يعد موجوداً.');
     openModal(`<div class="stack${pop || n.popup ? ' ann-pop' : ''}">${pop || n.popup ? '<div class="ann-pop-ic">📢</div><span class="ann-pop-tag">إعلان من معلمك</span>' : ''}<h2>${pop || n.popup ? '' : '📢 '}${esc((n.title || '').replace(/^📢\s*/, ''))}</h2><p style="margin:0;white-space:pre-wrap;line-height:2">${esc(n.body || '')}</p>
-      ${n.hasImage ? '<div class="ann-img" id="annImg"><div class="loading">جارٍ تحميل الصورة…</div></div>' : ''}
-      <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row"><button class="btn primary" type="button" data-close>فهمت</button></div></div>`, (m) => {
+      ${n.hasImage && (n.imgN || 1) > 1 ? '<div class="ann-album" id="annAlb"></div>' : n.hasImage ? '<div class="ann-img" id="annImg"><div class="loading">جارٍ تحميل الصورة…</div></div>' : ''}
+      ${n.hasVoice ? '<div id="annVo"></div>' : ''}${n.poll ? '<div class="ann-poll" id="annPoll"></div>' : ''}
+      <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row">${n.act ? `<button class="btn gold" type="button" id="annAct">${esc(n.act.label)}</button>` : ''}<button class="btn primary" type="button" data-close>فهمت</button></div></div>`, (m) => {
+      if (n.hasVoice) mountAnnVoice($('#annVo', m), aid, n.voiceSec);
+      if (n.poll) mountPoll($('#annPoll', m), n);
+      const ab = $('#annAct', m); if (ab) ab.onclick = () => {
+        closeModal();
+        if (n.act.k === 'url') { if (/^https:\/\//.test(n.act.url || '')) window.open(n.act.url, '_blank', 'noopener'); return; }
+        if (n.act.k === 'iqra' && !iqraOn) return toast('«اقرأ وارتقِ» غير مفعّل لك.');
+        tab = n.act.k; draw(); scrollTo(0, 0);
+      };
+      if (n.hasImage && (n.imgN || 1) > 1) { mountAlbum($('#annAlb', m), aid, n.imgN); return; }
       if (!n.hasImage) return;
       annImage(aid, (id) => store.getAnnImage(id)).then((blob) => {
         const box = $('#annImg', m); if (!box) return;
@@ -3260,10 +3331,29 @@ function viewTeacher(app) {
         <label class="field">العنوان (اختياري)<input type="text" id="anTitle" maxlength="80" placeholder="مثال: تنبيه مهم"></label>
         <label class="field">نص الإعلان<textarea id="anBody" maxlength="500" required placeholder="مثال: لا تسميع غداً بسبب الاختبارات، ونكمل يوم الأحد بإذن الله."></textarea></label>
         <div class="ann-pic" id="anPic">
-          <label class="btn" id="anPickL"><input type="file" id="anFile" accept="image/*" hidden> 📷 إرفاق صورة (اختياري)</label>
-          <div class="ann-pic-prev" id="anPrev" hidden><img alt="معاينة الصورة"><div class="small"><b id="anPicInfo"></b><br><span class="muted">تُحذف تلقائياً بعد ${ar(IMG_DAYS)} يوماً.</span></div><button class="btn sm danger" type="button" id="anPicX">إزالة</button></div>
+          <div class="ann-thumbs" id="anThumbs"></div>
+          <div class="row" style="gap:6px">
+            <label class="btn" id="anPickL"><input type="file" id="anFile" accept="image/*" multiple hidden> 📷 أضف صوراً</label>
+            <button class="btn" type="button" id="anDesign">🎨 صمّم من النص</button>
+            <button class="btn" type="button" id="anRec">🎙️ رسالة صوتية</button>
+          </div>
+          <div class="ann-voice" id="anVoice" hidden></div>
           <div class="small muted" id="anPicQuota"></div>
+          <div class="small muted">حتى ${ar(ANN_MAX_IMGS)} صور في الإعلان، ولكل صورة زر ✏️ للتعديل (قص، نص، إزالة خلفية، تمويه…). تُحذف الصور والصوت بعد ${ar(IMG_DAYS)} يوماً.</div>
         </div>
+        <details class="ann-more" id="anMore"><summary>📊 استطلاع سريع · 🔗 زر في الإعلان</summary>
+          <label class="ie-check"><input type="checkbox" id="anPollOn"> أضف استطلاعاً</label>
+          <div id="anPoll" class="stack" style="gap:6px" hidden>
+            <label class="field">السؤال<input type="text" id="anPollQ" maxlength="100" placeholder="مثال: هل يناسبكم الاختبار يوم الخميس؟"></label>
+            <div id="anPollOpts" class="stack" style="gap:4px"></div>
+            <button class="btn sm ghost" type="button" id="anPollAdd">＋ خيار</button>
+          </div>
+          <label class="field">زر في الإعلان<select id="anAct"><option value="">بلا زر</option>${ANN_ACTS.map((a) => `<option value="${a.k}">${a.label}</option>`).join('')}</select></label>
+          <div id="anActX" class="row" hidden>
+            <label class="field" style="flex:1 1 140px">نص الزر<input type="text" id="anActL" maxlength="30"></label>
+            <label class="field" style="flex:2 1 200px" id="anActUW" hidden>الرابط<input type="url" id="anActU" placeholder="https://"></label>
+          </div>
+        </details>
         <fieldset class="seg-field"><legend>لمن؟</legend>
           <label><input type="radio" name="anT" value="all" checked> كل الصفوف</label>
           <label><input type="radio" name="anT" value="classes"> صفوف محددة</label>
@@ -3308,23 +3398,94 @@ function viewTeacher(app) {
     const fillStu = () => { const c = $('#anStuC', body).value; $('#anStuS', body).innerHTML = D.students.filter((x) => x.classId === c).sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(''); };
     if (first) { $('#anStuC', body).value = first; fillStu(); }
     $('#anStuC', body).onchange = fillStu;
-    // الصورة المرفقة: تُصغَّر فوراً وتُعرض معاينتها
-    let pic = null;
+    // الصور (ألبوم حتى ٤)، والتصميم من النص، والرسالة الصوتية، والاستطلاع، والزر
+    const pics = []; let voice = null;
     const todayKey = new Date().toDateString();
-    const imgsToday = (L) => L.filter((a) => a.hasImage && new Date(a.createdAt).toDateString() === todayKey).length;
-    const paintQuota = (L) => { const q = $('#anPicQuota', body); if (!q) return; const n = imgsToday(L); q.textContent = `صور اليوم: ${ar(n)} من ${ar(IMG_DAILY_LIMIT)}`; const full = n >= IMG_DAILY_LIMIT; $('#anFile', body).disabled = full; $('#anPickL', body).classList.toggle('disabled', full); if (full) q.textContent += ' · وصلت إلى الحد اليومي، ويمكنك إرسال إعلانات نصية.'; };
-    $('#anFile', body).onchange = async (e) => {
-      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-      const info = $('#anPicInfo', body); $('#anPrev', body).hidden = false; info.textContent = 'جارٍ تجهيز الصورة…';
-      try {
-        const c = await compressImage(f);
-        pic = c;
-        const img = $('#anPrev img', body); if (img.src) URL.revokeObjectURL(img.src); img.src = URL.createObjectURL(c.blob);
-        info.textContent = `${fmtKB(c.blob.size)} · ${ar(c.w)}×${ar(c.h)}${f.size > c.blob.size * 1.5 ? ` (كانت ${fmtKB(f.size)})` : ''}`;
-        $('#anPickL', body).hidden = true;
-      } catch (x) { pic = null; $('#anPrev', body).hidden = true; toast(x.message); }
+    const imgsToday = (L) => L.filter((a) => a.hasImage && new Date(a.createdAt).toDateString() === todayKey).reduce((n, a) => n + (a.imgN || 1), 0);
+    let quotaL = [];
+    const paintQuota = (L) => { if (L) quotaL = L; const q = $('#anPicQuota', body); if (!q) return; const n = imgsToday(quotaL), left = IMG_DAILY_LIMIT - n - pics.length; q.textContent = `صور اليوم: ${ar(n + pics.length)} من ${ar(IMG_DAILY_LIMIT)}`; const full = left <= 0 || pics.length >= ANN_MAX_IMGS; $('#anFile', body).disabled = full; $('#anPickL', body).classList.toggle('disabled', full); $('#anDesign', body).disabled = full; if (left <= 0) q.textContent += ' · وصلت إلى الحد اليومي.'; };
+    const paintThumbs = () => {
+      const h = $('#anThumbs', body); if (!h) return;
+      h.innerHTML = pics.map((p, i) => `<div class="ann-th"><img alt="صورة ${ar(i + 1)}" src="${p.url}"><small>${esc(fmtKB(p.blob.size))}</small>
+        <div class="ann-th-b"><button type="button" class="btn sm" data-pe="${i}" title="تعديل">✏️</button>${i ? `<button type="button" class="btn sm" data-pu="${i}" title="قدّمها">→</button>` : ''}<button type="button" class="btn sm danger" data-px="${i}" title="إزالة">✕</button></div></div>`).join('');
+      $$('[data-px]', h).forEach((b) => (b.onclick = () => { const [p] = pics.splice(+b.dataset.px, 1); URL.revokeObjectURL(p.url); paintThumbs(); }));
+      $$('[data-pu]', h).forEach((b) => (b.onclick = () => { const i = +b.dataset.pu; [pics[i - 1], pics[i]] = [pics[i], pics[i - 1]]; paintThumbs(); }));
+      $$('[data-pe]', h).forEach((b) => (b.onclick = async () => {
+        const p = pics[+b.dataset.pe]; b.disabled = true;
+        try { const nb = await openImageEditor(p.src); if (nb) { const c = await compressImage(nb); URL.revokeObjectURL(p.url); Object.assign(p, { src: nb, ...c, url: URL.createObjectURL(c.blob) }); paintThumbs(); } }
+        catch (x) { toast('تعذر فتح المحرر: ' + x.message); } b.disabled = false;
+      }));
+      paintQuota();
     };
-    $('#anPicX', body).onclick = () => { pic = null; $('#anPrev', body).hidden = true; $('#anPickL', body).hidden = false; };
+    const addPic = async (src) => { const c = await compressImage(src); pics.push({ src, ...c, url: URL.createObjectURL(c.blob) }); paintThumbs(); };
+    $('#anFile', body).onchange = async (e) => {
+      const fs = [...e.target.files], room = ANN_MAX_IMGS - pics.length; e.target.value = '';
+      for (const f of fs.slice(0, room)) { try { await addPic(f); } catch (x) { toast(x.message); } }
+      if (fs.length > room) toast(`الحد ${ar(ANN_MAX_IMGS)} صور في الإعلان الواحد، فأُضيف أولها فقط.`);
+    };
+    $('#anDesign', body).onclick = async () => {
+      const t = $('#anTitle', body).value.trim(), b = $('#anBody', body).value.trim();
+      if (!t && !b) { toast('اكتب العنوان أو نص الإعلان أولاً، ثم صمّم منه.'); $('#anBody', body).focus(); return; }
+      try { const out = await openDesigner({ title: t, body: b }); if (out) await addPic(out); } catch (x) { toast('تعذر التصميم: ' + x.message); }
+    };
+    // الرسالة الصوتية (حتى ٩٠ ثانية)
+    let rec = null;
+    const paintVoice = () => {
+      const v = $('#anVoice', body), btn = $('#anRec', body); if (!v) return;
+      if (rec) { v.hidden = false; v.innerHTML = `<span class="rec-dot"></span> جارٍ التسجيل… <b id="anRecT">٠:٠٠</b> <button type="button" class="btn sm primary" id="anRecStop">⏹ إيقاف</button>`; $('#anRecStop', body).onclick = () => rec?.stop(); btn.disabled = true; return; }
+      btn.disabled = false; v.hidden = !voice;
+      if (voice) { v.innerHTML = `<audio controls src="${voice.url}"></audio><span class="small">${ar(voice.sec)} ث · ${esc(fmtKB(voice.blob.size))}</span><button type="button" class="btn sm danger" id="anVoX">✕ احذف</button>`; $('#anVoX', body).onclick = () => { URL.revokeObjectURL(voice.url); voice = null; paintVoice(); }; }
+      btn.textContent = voice ? '🎙️ أعد التسجيل' : '🎙️ رسالة صوتية';
+    };
+    $('#anRec', body).onclick = async () => {
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); } catch { return toast('لم يُسمح باستخدام المايك. اسمح به من إعدادات المتصفح.'); }
+      const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((m) => window.MediaRecorder?.isTypeSupported?.(m)) || '';
+      const mr = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 32000 }), parts = [], t0 = Date.now();
+      rec = mr; paintVoice();
+      const tick = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000), el = $('#anRecT', body); if (el) el.textContent = `${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}`; if (s >= 90) mr.stop(); }, 250);
+      mr.ondataavailable = (e) => e.data.size && parts.push(e.data);
+      mr.onstop = () => {
+        clearInterval(tick); stream.getTracks().forEach((t) => t.stop()); rec = null;
+        const blob = new Blob(parts, { type: (mr.mimeType || mime || 'audio/webm').split(';')[0] }), sec = Math.max(1, Math.round((Date.now() - t0) / 1000));
+        if (blob.size > 500 * 1024) { toast('التسجيل كبير جداً. سجّل رسالة أقصر.'); paintVoice(); return; }
+        if (voice) URL.revokeObjectURL(voice.url);
+        voice = { blob, sec, url: URL.createObjectURL(blob) }; paintVoice();
+      };
+      mr.start(1000);
+    };
+    // الاستطلاع
+    const pollOpts = ['نعم', 'لا'];
+    const paintPoll = () => {
+      const h = $('#anPollOpts', body);
+      h.innerHTML = pollOpts.map((o, i) => `<div class="row" style="gap:4px"><input type="text" data-po="${i}" maxlength="40" value="${esc(o)}" placeholder="الخيار ${ar(i + 1)}" style="flex:1">${pollOpts.length > 2 ? `<button type="button" class="btn sm ghost" data-pox="${i}">✕</button>` : ''}</div>`).join('');
+      $$('[data-po]', h).forEach((i) => (i.oninput = () => (pollOpts[+i.dataset.po] = i.value)));
+      $$('[data-pox]', h).forEach((b) => (b.onclick = () => { pollOpts.splice(+b.dataset.pox, 1); paintPoll(); }));
+      $('#anPollAdd', body).hidden = pollOpts.length >= 4;
+    };
+    $('#anPollOn', body).onchange = (e) => { $('#anPoll', body).hidden = !e.target.checked; };
+    $('#anPollAdd', body).onclick = () => { if (pollOpts.length < 4) { pollOpts.push(''); paintPoll(); } };
+    paintPoll();
+    // الزر
+    $('#anAct', body).onchange = (e) => { const a = ANN_ACTS.find((x) => x.k === e.target.value); $('#anActX', body).hidden = !a; $('#anActUW', body).hidden = a?.k !== 'url'; if (a) $('#anActL', body).value = a.btn; };
+    /** حقول الاستطلاع والزر للحفظ، أو رسالة خطأ */
+    const annExtras = () => {
+      const fields = {};
+      if ($('#anPollOn', body).checked) {
+        const q = $('#anPollQ', body).value.trim(), opts = pollOpts.map((o) => o.trim()).filter(Boolean);
+        if (!q) return { err: 'اكتب سؤال الاستطلاع.' };
+        if (opts.length < 2) return { err: 'اكتب خيارين على الأقل في الاستطلاع.' };
+        fields.poll = { q, opts };
+      }
+      const k = $('#anAct', body).value;
+      if (k) {
+        const label = $('#anActL', body).value.trim() || ANN_ACTS.find((x) => x.k === k).btn;
+        let url = '';
+        if (k === 'url') { url = $('#anActU', body).value.trim(); if (!/^https:\/\/[^\s]+\.[^\s]+/.test(url)) return { err: 'اكتب رابطاً صحيحاً يبدأ بـ https://' }; }
+        fields.act = { k, label, ...(url ? { url } : {}) };
+      }
+      return { fields };
+    };
     $$('[name=anT]', body).forEach((r) => (r.onchange = () => { const v = $('[name=anT]:checked', body).value; $('#anCls', body).hidden = v !== 'classes'; $('#anStu', body).hidden = v !== 'student'; }));
     $$('[name=anM]', body).forEach((r) => (r.onchange = () => { $('#anMNote', body).hidden = $('[name=anM]:checked', body).value !== 'popup'; }));
     $$('[name=anW]', body).forEach((r) => (r.onchange = () => { $('#anLater', body).hidden = $('[name=anW]:checked', body).value !== 'later'; }));
@@ -3356,15 +3517,18 @@ function viewTeacher(app) {
       }
       btn.disabled = true;
       try {
-        if (pic && imgsToday(await store.listAnnouncements()) >= IMG_DAILY_LIMIT) { btn.disabled = false; return toast(`وصلت إلى حد ${ar(IMG_DAILY_LIMIT)} صور اليوم. أزل الصورة أو أرسلها غداً.`); }
-        const fields = { title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length, popup: $('[name=anM]:checked', body).value === 'popup' };
+        if (pics.length && imgsToday(await store.listAnnouncements()) + pics.length > IMG_DAILY_LIMIT) { btn.disabled = false; return toast(`تتجاوز حد ${ar(IMG_DAILY_LIMIT)} صور اليوم. قلّل الصور أو أرسلها غداً.`); }
+        const extra = annExtras(); if (extra.err) { btn.disabled = false; return toast(extra.err); }
+        const fields = { title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length, popup: $('[name=anM]:checked', body).value === 'popup', ...extra.fields };
         // الحالة «مسودة» حتى تُرفع الصورة، فلا يُنشر إعلان مجدول قبل اكتمال صورته
-        const id = await store.saveAnnouncement(pic ? { ...fields, status: 'draft', hasImage: true, imageBytes: Math.ceil(pic.blob.size * 4 / 3) } : fields);
-        if (pic) {
+        const media = pics.length || voice;
+        const id = await store.saveAnnouncement(media ? { ...fields, status: 'draft', hasImage: !!pics.length, imgN: pics.length, imageBytes: pics.reduce((n, p) => n + Math.ceil(p.blob.size * 4 / 3), 0), hasVoice: !!voice, voiceSec: voice?.sec || 0 } : fields);
+        if (media) {
           try {
             const exp = new Date(Math.max(Date.now(), sendAt ? new Date(sendAt).getTime() : 0) + IMG_DAYS * 864e5).toISOString();
-            await store.saveAnnImage(id, { b64: await blobToB64(pic.blob), type: 'image/jpeg', w: pic.w, h: pic.h, bytes: pic.blob.size, exp });
-          } catch (x) { await store.deleteAnnouncement({ id }).catch(() => {}); throw x; }
+            for (let i = 0; i < pics.length; i++) { const p = pics[i]; btn.textContent = `جارٍ رفع الصور ${ar(i + 1)}/${ar(pics.length)}…`; await store.saveAnnImage(i ? `${id}__${i}` : id, { b64: await blobToB64(p.blob), type: 'image/jpeg', w: p.w, h: p.h, bytes: p.blob.size, exp }); }
+            if (voice) await store.saveAnnImage(`${id}__voice`, { b64: await blobToB64(voice.blob), type: voice.blob.type || 'audio/webm', sec: voice.sec, bytes: voice.blob.size, exp });
+          } catch (x) { await store.deleteAnnouncement({ id, hasImage: !!pics.length, imgN: pics.length, hasVoice: !!voice }).catch(() => {}); btn.textContent = 'أرسل الإعلان'; throw x; }
           await store.saveAnnouncement({ id, status: fields.status });
         }
         if (later) toast(`جُدول الإعلان ليُرسل ${whenText(sendAt)}.`);
@@ -3392,7 +3556,8 @@ function viewTeacher(app) {
       <div class="row" style="justify-content:space-between;align-items:flex-start"><div><b>${esc(a.title || 'إعلان من معلمك')}</b><div class="small muted">إلى: ${esc(annTargetLabel(a.target))}</div></div>
         ${a.status === 'scheduled' ? `<span class="pill warn">مجدول · ${esc(whenText(a.sendAt))}</span>` : a.status === 'sent' ? `<span class="pill ok">أُرسل ${esc(timeAgo(a.sentAt) === 'الآن' ? 'للتو' : timeAgo(a.sentAt))}</span>` : '<span class="pill mute">لم يُرسل</span>'}</div>
       <p style="margin:6px 0;white-space:pre-wrap">${esc(a.body)}</p>
-      ${a.popup ? '<span class="pill gold-pill">🪟 صفحة منبثقة</span>' : ''}${a.hasImage ? `<button class="ann-thumb" type="button" data-anpic="${esc(a.id)}" aria-label="عرض صورة الإعلان"><span>📷 عرض الصورة</span><small class="muted">${esc(fmtKB(a.imageBytes || 0))}</small></button>` : ''}
+      <div class="row" style="gap:6px">${a.popup ? '<span class="pill gold-pill">🪟 صفحة منبثقة</span>' : ''}${a.hasImage ? `<button class="ann-thumb" type="button" data-anpic="${esc(a.id)}" data-n="${a.imgN || 1}" aria-label="عرض صور الإعلان"><span>📷 ${(a.imgN || 1) > 1 ? `${ar(a.imgN)} صور` : 'عرض الصورة'}</span><small class="muted">${esc(fmtKB(a.imageBytes || 0))}</small></button>` : ''}${a.hasVoice ? `<button class="btn sm" type="button" data-anvo="${esc(a.id)}">🎙️ استمع (${ar(a.voiceSec || 0)} ث)</button>` : ''}${a.act ? `<span class="pill">🔗 ${esc(a.act.label)}</span>` : ''}</div>
+      ${a.poll ? `<div class="ann-poll-res" data-poll="${esc(a.id)}"><b>📊 ${esc(a.poll.q)}</b><div class="small muted">جارٍ عدّ الأصوات…</div></div>` : ''}
       <div class="row" style="justify-content:space-between">
         <span class="small" data-reads="${esc(a.id)}">${a.status === 'sent' ? 'جارٍ عدّ القراءات…' : ''}</span>
         <span class="row" style="gap:4px">${a.status === 'scheduled' || a.status === 'pending' ? `<button class="btn sm" type="button" data-now="${esc(a.id)}">أرسل الآن</button>` : `<button class="btn sm" type="button" data-unread="${esc(a.id)}">من لم يقرأ؟</button>`}<button class="btn sm danger" type="button" data-andel="${esc(a.id)}">${a.status === 'scheduled' ? 'إلغاء' : 'حذف'}</button></span>
@@ -3400,10 +3565,23 @@ function viewTeacher(app) {
     paintQuota(L);
     $$('[data-anpic]', host).forEach((b) => (b.onclick = async () => {
       b.disabled = true;
-      try { const blob = await annImage(b.dataset.anpic, (id) => store.getAnnImage(id)); if (blob) openLightbox(blob); else toast(`حُذفت الصورة (مضى عليها ${ar(IMG_DAYS)} يوماً).`); }
-      catch (e) { toast('تعذر تحميل الصورة: ' + (e.code || e.message)); }
+      try {
+        const n = +b.dataset.n || 1, id = b.dataset.anpic;
+        if (n === 1) { const blob = await annImage(id, (k) => store.getAnnImage(k)); if (blob) openLightbox(blob); else toast(`حُذفت الصورة (مضى عليها ${ar(IMG_DAYS)} يوماً).`); }
+        else openModal(`<div class="stack"><h3>📷 صور الإعلان</h3><div class="ann-album" id="tAlb"></div><div class="row"><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => mountAlbum($('#tAlb', m), id, n));
+      } catch (e) { toast('تعذر تحميل الصورة: ' + (e.code || e.message)); }
       b.disabled = false;
     }));
+    $$('[data-anvo]', host).forEach((b) => (b.onclick = () => playAnnVoice(b, b.dataset.anvo)));
+    L.filter((a) => a.poll).slice(0, 30).forEach(async (a) => {
+      const el = $(`[data-poll="${a.id}"]`, host); if (!el) return;
+      try {
+        const V = await store.listAnnVotes(a.id), tot = V.length, cnt = a.poll.opts.map((_, i) => V.filter((v) => v.o === i).length), mx = Math.max(1, ...cnt);
+        el.innerHTML = `<b>📊 ${esc(a.poll.q)}</b> <span class="small muted">${ar(tot)} ${tot === 1 ? 'صوت' : 'أصوات'}</span>
+          ${a.poll.opts.map((o, i) => `<div class="poll-r"><span>${esc(o)}</span><span class="poll-bar"><i style="width:${Math.round((cnt[i] / mx) * 100)}%"></i></span><b>${ar(cnt[i])}${tot ? ` <small class="muted">${ar(Math.round((cnt[i] / tot) * 100))}٪</small>` : ''}</b></div>`).join('')}
+          ${tot ? `<details class="small"><summary>من صوّت؟</summary>${a.poll.opts.map((o, i) => `<div><b>${esc(o)}:</b> ${V.filter((v) => v.o === i).map((v) => esc(D.students.find((s) => s.id === v.pn)?.name || v.pn)).join('، ') || '—'}</div>`).join('')}</details>` : ''}`;
+      } catch (e) { el.querySelector('.small').textContent = 'تعذر عدّ الأصوات: ' + (e.code || e.message); }
+    });
     const reads = {};
     L.filter((a) => a.status === 'sent').slice(0, 30).forEach(async (a) => {
       try {

@@ -2,7 +2,7 @@
 
 export const IMG_MAX_SIDE = 1280;        // أطول ضلع بالبكسل
 export const IMG_TARGET = 170 * 1024;     // الحجم المستهدف بعد الضغط (بايت)
-export const IMG_DAILY_LIMIT = 5;         // حد الصور اليومي للمعلم
+export const IMG_DAILY_LIMIT = 12;        // حد الصور اليومي للمعلم (في كل الإعلانات)
 export const IMG_DAYS = 30;               // تُحذف بعد ٣٠ يوماً
 
 const loadImg = (file) => new Promise((res, rej) => {

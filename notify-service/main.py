@@ -156,13 +156,17 @@ def publish_announcement(aid: str) -> dict:
     img = bool(a.get("hasImage"))
     n = {
         "type": "ann", "annId": aid, "hasImage": img, "popup": bool(a.get("popup")),
+        "imgN": int(a.get("imgN") or (1 if img else 0)), "hasVoice": bool(a.get("hasVoice")), "voiceSec": int(a.get("voiceSec") or 0),
+        "act": a.get("act"), "poll": a.get("poll"),
         "title": "📢 " + (a.get("title") or "إعلان من معلمك"),
         "body": a.get("body", ""),
         "link": "./#/student/ann/" + aid, "tag": "ann-" + aid,
         "createdAt": now_iso(),
     }
     # إشعار الجوال لا يعرض الصورة، فننبّه إلى وجودها في النص
-    pn_ = {**n, "title": n["title"] + " 📷", "body": n["body"] + "\n📷 مع صورة، افتح الإعلان لتراها."} if img else n
+    extra = (["📷 مع صورة" if (n["imgN"] or 0) <= 1 else f"📷 مع {ar_num(n['imgN'])} صور"] if img else []) + (["🎙️ رسالة صوتية"] if n["hasVoice"] else []) + (["📊 استطلاع"] if n["poll"] else [])
+    # إشعار الجوال لا يعرض الصورة ولا الصوت، فننبّه إلى وجودهما في النص
+    pn_ = {**n, "body": n["body"] + "\n" + "، ".join(extra) + "، افتح الإعلان."} if extra else n
     t = a.get("target") or {"type": "all"}
     paths, stats = [], {"sent": 0, "failed": 0, "removed": 0}
     if t.get("type") == "student" and t.get("studentId"):

@@ -241,13 +241,16 @@ const local = {
   async listAnnouncements() { return LS.get('anns', []); },
   async publishAnnouncementLocal(id) {
     const all = LS.get('anns', []); const a = all.find((x) => x.id === id); if (!a || a.status === 'sent') return;
-    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, hasImage: !!a.hasImage, popup: !!a.popup, link: './#/student/ann/' + id, tag: 'ann-' + id };
+    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, hasImage: !!a.hasImage, imgN: a.imgN || (a.hasImage ? 1 : 0), hasVoice: !!a.hasVoice, voiceSec: a.voiceSec || 0, act: a.act || null, poll: a.poll || null, popup: !!a.popup, link: './#/student/ann/' + id, tag: 'ann-' + id };
     const t = a.target || { type: 'all' };
     if (t.type === 'student') await this.addNotif({ ...n, classId: 'stu:' + t.studentId, studentId: t.studentId });
     else for (const cid of t.type === 'classes' ? t.classIds : ['all']) await this.addNotif({ ...n, classId: cid });
     a.status = 'sent'; a.sentAt = now(); LS.set('anns', all);
   },
-  async deleteAnnouncement(a) { LS.set('anns', LS.get('anns', []).filter((x) => x.id !== a.id)); LS.set('notifs', LS.get('notifs', []).filter((n) => n.annId !== a.id)); await this.deleteAnnImage(a.id); },
+  async deleteAnnouncement(a) { LS.set('anns', LS.get('anns', []).filter((x) => x.id !== a.id)); LS.set('notifs', LS.get('notifs', []).filter((n) => n.annId !== a.id)); await this.deleteAnnImage(a.id); for (let i = 1; i < (a.imgN || 0); i++) await this.deleteAnnImage(`${a.id}__${i}`); await this.deleteAnnImage(`${a.id}__voice`); },
+  async voteAnn(aid, pn, o) { const v = LS.get('annVotes', {}); (v[aid] = v[aid] || {})[pn] = { o, at: now() }; LS.set('annVotes', v); },
+  async getMyVote(aid, pn) { return LS.get('annVotes', {})[aid]?.[pn]?.o ?? null; },
+  async listAnnVotes(aid) { return Object.entries(LS.get('annVotes', {})[aid] || {}).map(([pn, x]) => ({ pn, ...x })); },
   // صور الإعلانات (محلياً في هذا المتصفح)
   async saveAnnImage(aid, img) { const all = LS.get('annImgs', {}); all[aid] = { ...img, createdAt: now() }; LS.set('annImgs', all); },
   async getAnnImage(aid) { return LS.get('annImgs', {})[aid] || null; },
@@ -669,8 +672,14 @@ async function makeCloud() {
     async deleteAnnouncement(a) {
       for (const p of a.notifPaths || []) await deleteDoc(doc(db, p)).catch(() => {});
       if (a.hasImage) await deleteDoc(doc(db, 'annImages', a.id)).catch(() => {});
+      for (let i = 1; i < (a.imgN || 0); i++) await deleteDoc(doc(db, 'annImages', `${a.id}__${i}`)).catch(() => {});
+      if (a.hasVoice) await deleteDoc(doc(db, 'annImages', `${a.id}__voice`)).catch(() => {});
       await deleteDoc(doc(db, 'announcements', a.id));
     },
+    // استطلاع الإعلان: صوت لكل طالب
+    async voteAnn(aid, pn, o) { await setDoc(doc(db, 'announcements', aid, 'votes', pn), { o, at: now() }); },
+    async getMyVote(aid, pn) { const d = await getDoc(doc(db, 'announcements', aid, 'votes', pn)).catch(() => null); return d?.exists() ? d.data().o : null; },
+    async listAnnVotes(aid) { return (await getDocs(collection(db, 'announcements', aid, 'votes'))).docs.map((d) => ({ pn: d.id, ...d.data() })); },
     async saveAnnImage(aid, img) { await setDoc(doc(db, 'annImages', aid), { ...img, createdAt: now() }); },
     async getAnnImage(aid) { await ensureAnon(); const d = await getDoc(doc(db, 'annImages', aid)); return d.exists() ? d.data() : null; },
     async deleteAnnImage(aid) { await deleteDoc(doc(db, 'annImages', aid)); },
