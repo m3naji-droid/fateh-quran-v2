@@ -1049,7 +1049,7 @@ function viewStudent(app) {
     const paint = () => {
       const n = Object.keys(v.likes || {}).length, liked = pref.get(k, false);
       host.innerHTML = `<div class="voice-card${mine ? ' mine' : ''}"><div class="vc-ic">🎙️</div><div class="vc-tx"><span class="vc-tag">صوت الأسبوع</span>
-        <b data-lk="${esc(v.pn)}">${esc(v.name)}</b><small>${esc(v.className || '')} · ${esc(v.range || '')}</small></div>
+        <b data-lk="${esc(v.pn)}">${esc(v.name)}</b><small>${esc(v.className || '')} · ${esc(v.range || '')}${v.week ? ` · ${esc(v.week)}` : ''}</small></div>
         <div class="vc-act"><button class="btn sm primary" type="button" id="vcPlay">▶ استمع</button>
         <button class="btn sm vc-like${liked ? ' on' : ''}" type="button" id="vcLike" ${liked || mine ? 'disabled' : ''}>❤️ ما شاء الله${n ? ` · ${ar(n)}` : ''}</button></div></div>`;
       let au = null;
@@ -1853,10 +1853,13 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
+      ${RW ? (() => { const nAch = Object.values(RW.ach || {}).filter(Boolean).length, nOwn = (RW.owned || []).length; return `<button type="button" class="rw-kpi${tab === 'rewards' ? ' on' : ''}" id="rwKpi">
+        <span class="rw-kpi-ic" aria-hidden="true">🏅</span><span class="rw-kpi-tx"><b>خزانتي</b><small>${nAch ? `${ar(nAch)} ${nAch === 1 ? 'وسام' : 'أوسمة'}` : 'لا أوسمة بعد'} · ${nOwn ? `${ar(nOwn)} من المتجر` : 'المتجر بانتظارك 🛍️'}</small></span>
+        <span class="rw-kpi-c">🪙 ${ar(myCoins())}</span><span class="rw-kpi-go" aria-hidden="true">←</span></button>`; })() : ''}
       ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="voiceStu"></div>' : ''}
       <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء'], ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`]].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>
       <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
@@ -1878,6 +1881,7 @@ function viewStudent(app) {
       srNoticeShown = true;
       setTimeout(() => whenModalFree(() => { if ($('#stBody', app) && !pref.get('srNotice2_' + me.id)) showSrNotice(); }), 1200);
     }
+    const rk = $('#rwKpi', app); if (rk) rk.onclick = () => { tab = 'rewards'; draw(); $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $('#stSet', app).onclick = () => { tab = tab === 'settings' ? 'tasks' : 'settings'; draw(); if (tab === 'settings') $('#stBody', app)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const body = $('#stBody', app);
@@ -4723,39 +4727,81 @@ function viewTeacher(app) {
     };
   }
 
-  /* صوت الأسبوع: يقترح الموقع أفضل تسميعات الأيام السبعة الأخيرة، والمعلم يسمع ويختار */
+  /* صوت الأسبوع: تختار الأسبوع، فيقترح الموقع أفضل تسميعاته، وتسمع وتختار؛ ومعه أرشيف الأصوات السابقة */
+  let voiceWeek = 0, voiceAu = null;
+  const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  /** أسبوع الدراسة (الأحد إلى السبت) بتوقيت البحرين: k=0 هذا الأسبوع، ١ الماضي… */
+  function weekRange(k) {
+    const TZ = 3 * 3600e3, now = new Date(Date.now() + TZ);
+    const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - now.getUTCDay() - 7 * k) - TZ;
+    const end = start + 7 * 864e5;
+    const a = new Date(start + TZ), z = new Date(end - 1 + TZ);
+    const label = a.getUTCMonth() === z.getUTCMonth() ? `${ar(a.getUTCDate())}–${ar(z.getUTCDate())} ${MONTHS_AR[z.getUTCMonth()]}` : `${ar(a.getUTCDate())} ${MONTHS_AR[a.getUTCMonth()]} – ${ar(z.getUTCDate())} ${MONTHS_AR[z.getUTCMonth()]}`;
+    return { from: new Date(start).toISOString(), to: new Date(end).toISOString(), label, name: k === 0 ? 'هذا الأسبوع' : k === 1 ? 'الأسبوع الماضي' : k === 2 ? 'قبل أسبوعين' : `قبل ${ar(k)} أسابيع` };
+  }
+  const playAudio = (getter) => async (e) => {
+    const b = e.currentTarget, label = b.textContent;
+    if (voiceAu && !voiceAu.paused && voiceAu._b === b) { voiceAu.pause(); b.textContent = label.replace('⏸ إيقاف', '🔊 استمع'); return; }
+    voiceAu?.pause();
+    try {
+      b.disabled = true;
+      const src = await getter(); if (!src) { toast('التسجيل غير متاح.'); return; }
+      voiceAu = new Audio(src); voiceAu._b = b; voiceAu.onended = () => { b.textContent = '🔊 استمع'; };
+      await voiceAu.play(); b.textContent = '⏸ إيقاف';
+    } catch (x) { toast('تعذر التشغيل: ' + (x.code || x.message)); } finally { b.disabled = false; }
+  };
   function drawVoiceT(host) {
     if (!host) return;
-    const from = new Date(Date.now() - 7 * 864e5).toISOString();
-    const best = (D.subs || []).filter((x) => x.hasAudio && x.createdAt >= from && !x.teacher && (x.percent ?? 0) >= 85)
-      .sort((a, b) => (b.grade ?? 0) - (a.grade ?? 0) || (b.percent ?? 0) - (a.percent ?? 0)).slice(0, 8);
+    const W = weekRange(voiceWeek);
+    const chosen = new Set((D.voices || []).map((v) => v.sid).filter(Boolean));
+    const best = (D.subs || []).filter((x) => x.hasAudio && x.createdAt >= W.from && x.createdAt < W.to && !x.teacher && (x.percent ?? 0) >= 85)
+      .sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0)).slice(0, 10);
     const stu = (pn) => D.students.find((x) => x.id === pn);
     const v = D.voice, vLikes = v ? Object.keys(v.likes || {}).length : 0;
+    const past = (D.voices || []).filter((x) => x.id !== v?.id).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
     host.innerHTML = `<h3>🎙️ صوت الأسبوع</h3>
-      ${v ? `<div class="voice-cur"><span class="small muted">الحالي (${esc((v.at || '').slice(0, 10))})</span><div><b data-lk="${esc(v.pn)}">${esc(v.name)}</b> · ${esc(v.className || '')} · ${esc(v.range || '')}</div><span class="small">❤️ ${ar(vLikes)} «ما شاء الله»</span></div>` : '<p class="small muted" style="margin:0">لم تختر صوتاً بعد.</p>'}
-      <p class="small muted" style="margin:0">أفضل تسميعات الأيام السبعة الأخيرة (بتسجيل ودقة ٨٥٪ فأكثر). استمع واختر أجملها؛ فيظهر لكل الطلاب في صفحتهم مع زر «ما شاء الله»، وينال صاحبه وسام «صوت الأسبوع» ونقاطاً ومكافآت.</p>
-      <div class="row"><label class="field" style="flex:1 1 120px">نقاط لوحة الشرف<input type="number" id="vPts" min="0" max="50" value="5"></label><label class="field" style="flex:1 1 120px">مكافآت 🪙<input type="number" id="vCoins" min="0" max="500" value="20"></label></div>
-      ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''}${x.grade != null ? ` · درجة ${ar(x.grade)}` : ''}</span></div>
-        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button><button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button></div></li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">لا تسميعات مناسبة في الأيام السبعة الأخيرة بعد.</p>'}`;
-    let au = null;
-    $$('[data-vp]', host).forEach((b) => (b.onclick = async () => {
-      const x = best[+b.dataset.vp]; au?.pause();
-      try { const blob = await store.getAudio(x.pn, x.id); if (!blob) return toast('التسجيل غير متاح.'); au = new Audio(URL.createObjectURL(blob)); au.play(); } catch (e) { toast('تعذر التشغيل: ' + (e.code || e.message)); }
+      ${v ? `<div class="voice-cur"><span class="small muted">الصوت الحالي · اختير ${esc((v.at || '').slice(0, 10))}${v.week ? ` لـ${esc(v.week)}` : ''}</span><div><b data-lk="${esc(v.pn)}">${esc(v.name)}</b> · ${esc(v.className || '')} · ${esc(v.range || '')}</div>
+        <div class="row" style="gap:8px"><span class="small">❤️ ${ar(vLikes)} «ما شاء الله»</span><button class="btn sm" type="button" id="vCurP">🔊 استمع</button></div></div>` : '<p class="small muted" style="margin:0">لم تختر صوتاً بعد.</p>'}
+      <ol class="vw-steps small"><li>اختر الأسبوع.</li><li>استمع لأفضل تسميعاته (بتسجيل ودقة ٨٥٪ فأكثر).</li><li>حدّد النقاط والمكافآت، ثم اضغط «⭐ اختره».</li></ol>
+      <div class="row">
+        <label class="field" style="flex:2 1 200px">الأسبوع<select id="vWeek">${Array.from({ length: 8 }, (_, k) => { const r = weekRange(k); return `<option value="${k}" ${k === voiceWeek ? 'selected' : ''}>${r.name} · ${r.label}</option>`; }).join('')}</select></label>
+        <label class="field" style="flex:1 1 110px">نقاط لوحة الشرف<input type="number" id="vPts" min="0" max="50" value="5"></label>
+        <label class="field" style="flex:1 1 110px">مكافآت 🪙<input type="number" id="vCoins" min="0" max="500" value="20"></label>
+      </div>
+      ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li${chosen.has(x.id) ? ' class="vw-done"' : ''}><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''} · ${esc((x.createdAt || '').slice(0, 10))}</span>${chosen.has(x.id) ? ' <span class="pill ok">اختير من قبل</span>' : ''}</div>
+        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button>${chosen.has(x.id) ? '' : `<button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button>`}</div></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">لا تسميعات بتسجيل ودقة ٨٥٪ فأكثر في ${esc(W.name)}.</p>`}
+      <details class="sp-box"${past.length ? '' : ' hidden'}><summary><b>📼 الأصوات السابقة (${ar(past.length)})</b></summary>
+        <ul class="rev-list" style="margin-top:8px">${past.map((p, i) => `<li><div><b data-lk="${esc(p.pn)}">${esc(p.name)}</b> <span class="small muted">${esc(p.className || '')} · ${esc(p.range || '')} · ${p.week ? esc(p.week) : esc((p.at || '').slice(0, 10))}</span>${p.likes ? ` <span class="small">❤️ ${ar(Object.keys(p.likes).length)}</span>` : ''}</div>
+          <div class="row" style="gap:6px"><button class="btn sm" type="button" data-pp="${i}">🔊 استمع</button><button class="btn sm ghost" type="button" data-pr="${i}" title="يظهر للطلاب من جديد دون نقاط أو مكافآت إضافية">↺ اعرضه من جديد</button></div></li>`).join('')}</ul></details>`;
+    host.querySelector('#vWeek').onchange = (e) => { voiceWeek = +e.target.value; drawVoiceT(host); };
+    const vc = host.querySelector('#vCurP'); if (vc) vc.onclick = playAudio(async () => { const d = await store.getVoiceAudio(v.id); return d && `data:${d.mime};base64,${d.b64}`; });
+    $$('[data-vp]', host).forEach((b) => (b.onclick = playAudio(async () => { const x = best[+b.dataset.vp]; const blob = await store.getAudio(x.pn, x.id); return blob && URL.createObjectURL(blob); })));
+    $$('[data-pp]', host).forEach((b) => (b.onclick = playAudio(async () => { const p = past[+b.dataset.pp]; const d = await store.getVoiceAudio(p.id); return d && `data:${d.mime};base64,${d.b64}`; })));
+    $$('[data-pr]', host).forEach((b) => (b.onclick = async () => {
+      const p = past[+b.dataset.pr];
+      if (!(await confirmBox(`عرض صوت ${p.name} من جديد لكل الطلاب؟ (بلا نقاط أو مكافآت إضافية)`, 'اعرضه'))) return;
+      try {
+        if (D.voice) await store.archiveVoice(D.voice);
+        const vv = { ...p, at: new Date().toISOString(), likes: p.likes || {}, again: true };
+        await store.setVoice(vv); D.voice = vv; D.voices = (D.voices || []).map((x) => (x.id === vv.id ? vv : x));
+        toast('يظهر الآن للطلاب.'); drawVoiceT(host);
+      } catch (x) { toast('تعذر: ' + (x.code || x.message)); }
     }));
     $$('[data-vc]', host).forEach((b) => (b.onclick = async () => {
       const x = best[+b.dataset.vc], st = stu(x.pn); if (!st) return;
-      if (!(await confirmBox(`اختيار ${st.name} «صوت الأسبوع»؟`, 'اختره'))) return;
+      if (!(await confirmBox(`اختيار ${st.name} «صوت الأسبوع» (${W.name})؟`, 'اختره'))) return;
       b.disabled = true;
       try {
         const blob = await store.getAudio(x.pn, x.id); if (!blob) throw new Error('التسجيل غير متاح');
         const id = 'v' + Date.now().toString(36), at = new Date().toISOString();
         const pts = Math.max(0, Math.min(50, +$('#vPts', host).value || 0)), coins = Math.max(0, Math.min(500, +$('#vCoins', host).value || 0));
         if (!(await store.saveVoiceAudio(id, blob))) throw new Error('التسجيل طويل جداً');
+        if (D.voice) await store.archiveVoice(D.voice).catch(() => {}); // يُحفظ عدد «ما شاء الله» للصوت السابق
         const range = rangeLabel(x.surah, x.from, x.to);
-        const vv = { id, pn: st.id, name: st.name, classId: st.classId, className: className(st.classId), surah: x.surah, from: x.from, to: x.to, range, at, pts, likes: {} };
+        const vv = { id, sid: x.id, pn: st.id, name: st.name, classId: st.classId, className: className(st.classId), surah: x.surah, from: x.from, to: x.to, range, week: W.label, at, pts, likes: {} };
         await store.setVoice(vv);
-        D.voice = vv; D.voices = [...(D.voices || []), vv];
-        await store.addBadges({ [st.id]: { id: 'voice-' + id, icon: '🎙️', color: '#0f5c46', label: 'صوت الأسبوع', title: range, at } }).catch(() => {});
+        D.voices = [...(D.voices || []).map((p) => (p.id === D.voice?.id ? D.voice : p)), vv]; D.voice = vv;
+        await store.addBadges({ [st.id]: { id: 'voice-' + id, icon: '🎙️', color: '#0f5c46', label: 'صوت الأسبوع', title: `${range} · ${W.label}`, at } }).catch(() => {});
         if (coins) await store.grantCoins(st.id, coins).catch(() => {});
         const nid = await store.addStudentNotif(st.id, { type: 'voice', title: '🎙️ أنت «صوت الأسبوع»!', body: `اختار معلمك تلاوتك (${range}) لتُسمَع في صفحة كل الطلاب. +${ar(pts)} نقاط و${ar(coins)} 🪙 ووسام «صوت الأسبوع». ما شاء الله!`, link: './#/student', tag: 'voice-' + id }).catch(() => null);
         if (nid) sendPush(nid, st.id).catch(() => {});
