@@ -18,8 +18,8 @@ import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, season
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
 import { compressImage, blobToB64, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi } from './push.js';
-import { mountIssueTile, drawIssuesTeacher } from './speech-issues.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview } from './push.js';
+import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js';
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti, pickHigh, pickLow } from './celebrate.js';
@@ -371,7 +371,46 @@ function mountRecite(root, opts) {
     if (now - throttle > 250) run(); else pendingT = setTimeout(run, 250);
   }
 
+  /* فحص الجهاز قبل أول تحدٍّ أو مباراة: يُعرف من أول مرة هل تظهر الكلمات، فلا تضيع محاولته */
+  const iosApp = isIOS && !!(window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone);
+  const needCap = () => opts.capCheck && hasRecognition && !iosApp && !devCaps.capChecked && !devCaps.noDual;
+  function openCapCheck() {
+    openModal(`<div class="stack cap-chk" style="text-align:center;align-items:center">
+      <div style="font-size:42px">🎙️</div><h2 style="margin:0">قبل أن تبدأ: فحص سريع لجهازك</h2>
+      <p style="margin:0">مرة واحدة فقط (١٢ ثانية)، لنعرف هل تظهر الكلمات على جوالك أثناء القراءة، فلا تضيع محاولتك.</p>
+      <div class="cap-step" id="capStep"></div><ul class="sp-res" id="capRes" style="text-align:start"></ul>
+      <div class="row" style="justify-content:center"><button class="btn primary" type="button" id="capGo">ابدأ الفحص</button><button class="btn ghost" type="button" id="capSkip">تخطَّ</button></div></div>`, (m) => {
+      const go = m.querySelector('#capGo');
+      m.querySelector('#capSkip').onclick = () => { devCaps.setCapChecked(); closeModal(); };
+      go.onclick = async () => {
+        if (go.dataset.done) { closeModal(); return; }
+        go.disabled = true; m.querySelector('#capSkip').hidden = true;
+        const r = await capCheck((t) => { const e = m.querySelector('#capStep'); if (e) e.textContent = t; });
+        if (!m.isConnected) return;
+        const and = /Android/.test(navigator.userAgent);
+        m.querySelector('#capRes').innerHTML = r.sr === 'ok'
+          ? (r.dual ? '<li class="ok">✓ جهازك جاهز: تظهر الكلمات أثناء التسميع.</li>' : '<li class="ok">✓ ضبطنا جهازك: ستظهر الكلمات في التحديات والمباريات والتدريب.</li>')
+          : `<li class="bad">✗ جوالك لا يتعرف على الكلام الآن. لا بأس: ادخل، وسيصل تسجيلك إلى المعلم فيسمعه ويقيّمك.</li>${and ? '<li>💡 للحل: الإعدادات ← التطبيقات ← التطبيقات الافتراضية ← الإدخال الصوتي ← اختر Google، ثم حدّث «خدمات الكلام من Google».</li>' : ''}`;
+        go.disabled = false; go.dataset.done = '1'; go.textContent = 'تم، اضغط الميكروفون وابدأ';
+        if (r.sr !== 'ok') { const again = document.createElement('button'); again.className = 'btn ghost'; again.type = 'button'; again.textContent = '↺ أعد الفحص'; again.onclick = () => { closeModal(); openCapCheck(); }; go.after(again); }
+      };
+    });
+  }
+  /** لماذا لم تظهر الكلمات؟ يُرسل مع التسجيل ليعرف المعلم السبب */
+  function noWordsWhy() {
+    const d = lastDiag || {};
+    if (iosApp) return 'ios-app';
+    if (!hasRecognition) return 'no-sr';
+    if ((d.errs || []).some((e) => /not-allowed/.test(e))) return 'sr-blocked';
+    if (d.noRec) return 'sr-broken';
+    if ((d.voiced || 0) < 3000) return 'quiet';
+    if (devCaps.capChecked && !devCaps.srOk) return 'sr-broken';
+    if (!devCaps.srOk) return 'unknown-dev';
+    return 'silent';
+  }
+
   async function startRec() {
+    if (needCap()) return openCapCheck();
     player.stop();
     pop?.remove();
     $('#rcResult', root).innerHTML = ''; $('#rcLive', root).innerHTML = ''; $('#rcGo', root).innerHTML = '';
@@ -379,7 +418,8 @@ function mountRecite(root, opts) {
     last = null;
     // جهاز لا يجمع التسجيل والتعرف: في الواجبات يُسجَّل للمعلم فقط، وفي التدريب والتحديات تظهر الكلمات بلا تسجيل
     const nd = devCaps.noDual || devCaps.tryNoDual;
-    const recOnly = devCaps.noDual && !!opts.onSubmit, srOnly = nd && !opts.onSubmit && hasRecognition;
+    // التجربة (التعرف وحده قبل التأكد) في التدريب فقط؛ أما التحديات والمباريات فلا تُجرَّب إلا بعد التأكد حتى لا تضيع المحاولة
+    const recOnly = devCaps.noDual && !!opts.onSubmit, srOnly = hasRecognition && !opts.onSubmit && (devCaps.noDual || (nd && opts.practice));
     $('#rcNotice', root).innerHTML = recOnly ? '<div class="notice">🎙️ جهازك لا يستطيع إظهار الكلمات أثناء التسجيل؛ لذلك يُسجَّل تسميعك فقط، ويسمعه معلمك ويقيّمه بنفسه.</div>'
       : srOnly ? '<div class="notice">📝 على جهازك تظهر الكلمات أثناء القراءة، ولا يُحفظ تسجيل صوتي في التدريب والتحديات.</div>' : '';
     sess = new RecitationSession({
@@ -586,7 +626,7 @@ function mountRecite(root, opts) {
 
   function buildSubmission() {
     const base = { surah, from, to, mode, duration: lastDuration, transcript: lastTranscript.slice(0, 5000), dev: devInfo(lastDiag), ...(aiRes ? { ai: aiRes } : aiCtl && !aiFailed && !aiCtl.signal.aborted ? { aiRunning: true } : {}) };
-    if (!last) return { ...base, auto: false, percent: null, statuses: '', mistakes: [], counts: null, wpm: 0 };
+    if (!last) return { ...base, auto: false, percent: null, statuses: '', mistakes: [], counts: null, wpm: 0, why: noWordsWhy() };
     const sc = score(last, lastDuration);
     const code = { correct: 'c', wrong: 'w', missing: 'm', pending: 'm' };
     return {
@@ -867,7 +907,7 @@ function mountPractice(host, learn, onActivity, onResult) {
     comp = mountTalqeen($('#prBody', host), { ...r, reciter: pref.get('reciter', RECITERS[0].id), onActivity, onAyahDone: onResult,
       onExit: () => mount(r), onFinish: () => { mode0 = 'hifz'; mount(r); } });
   };
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, noAi: true, onTalqeen: onResult ? talqeen : null }); }; // التدريب الحر بلا تحليل تجويد آلي
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, noAi: true, practice: true, onTalqeen: onResult ? talqeen : null }); }; // التدريب الحر بلا تحليل تجويد آلي
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
   return { destroy: () => comp?.destroy() };
@@ -1147,7 +1187,7 @@ function viewStudent(app) {
     if (m.live) { const iv = setInterval(() => { const el = $('#hmLeft', body); if (!el) return clearInterval(iv); const s = Math.max(0, Math.round((endMs - Date.now()) / 1000)); el.textContent = `⏱ ${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}`; }, 500); }
     let liveT = 0;
     comp = mountRecite($('#hmRc', body), {
-      surah: m.surah, from: m.from, to: m.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true,
+      surah: m.surah, from: m.from, to: m.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true, capCheck: true,
       maxSeconds: m.live ? Math.max(30, Math.round((endMs - Date.now()) / 1000)) : 600,
       confirmStart: 'محاولة واحدة فقط تُحتسب عند الإيقاف. هل أنت مستعد؟',
       onActivity: (sec) => logAct('practice', sec),
@@ -1163,8 +1203,9 @@ function viewStudent(app) {
       try {
         if (m.live) store.setLive(heroT.id, m.id, side, { done: 1, total: 1, ok: 0, on: false, fin: true }).catch(() => {});
         await store.saveMatchAudio(heroT.id, `${m.id}_${side}_${m.tb || 0}`, blob);
-        const r = { pend: 1, p: null, s: null, wpm: 0, dur: Math.round(dur || 0), at: new Date().toISOString() };
+        const r = { pend: 1, p: null, s: null, wpm: 0, dur: Math.round(dur || 0), at: new Date().toISOString(), why: sub.why || '', dev: { os: sub.dev?.os || '', br: sub.dev?.br || '' } };
         await store.updateMatch(heroT.id, m.id, { [side === 'a' ? 'ra' : 'rb']: r });
+        notifyReview({ kind: 'm', tid: heroT.id, id: m.id, side: side === 'a' ? 'ra' : 'rb' }).catch(() => {});
         toast('لم يتعرف جهازك على كلامك، فأُرسل تسجيلك إلى المعلم ليقيّمه بنفسه.');
         watchMatch(m.id, r);
       } catch (e) { body.innerHTML = `<div class="notice">تعذر الإرسال: ${esc(e.code || e.message)}</div>`; }
@@ -1407,7 +1448,7 @@ function viewStudent(app) {
     }
     body.innerHTML = '<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً، بلا تلميح، ومحاولة واحدة فقط: النتيجة تُحتسب عند أول إيقاف. استعد جيداً ثم ابدأ.</div><div id="chRc"></div>';
     comp = mountRecite($('#chRc', body), {
-      surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true,
+      surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true, capCheck: true,
       onActivity: (sec) => logAct('practice', sec),
       // الجهاز لم يتعرف على الكلام: يُرسل التسجيل ليقيّمه المعلم
       onNoTranscript: (sub, blob, dur) => setTimeout(async () => {
@@ -1415,9 +1456,10 @@ function viewStudent(app) {
         body.innerHTML = '<div class="loading">جارٍ إرسال تسجيلك…</div>';
         try {
           if (!(await store.saveChAudio(c.id, v.side, blob))) throw new Error('التسجيل طويل جداً');
-          const r = { pend: 1, p: null, wpm: 0, dur: Math.round(dur || 0), at: new Date().toISOString() };
+          const r = { pend: 1, p: null, wpm: 0, dur: Math.round(dur || 0), at: new Date().toISOString(), why: sub.why || '', dev: { os: sub.dev?.os || '', br: sub.dev?.br || '' } };
           await store.updateChallenge(c.id, { [v.side]: r });
           c[v.side] = r;
+          notifyReview({ kind: 'ch', id: c.id, side: v.side }).catch(() => {});
         } catch (x) { body.innerHTML = `<div class="notice">تعذر الإرسال: ${esc(x.code || x.message)}</div>`; return; }
         showChResult(body, c, true);
         paintChBar();
@@ -2117,6 +2159,7 @@ function viewTeacher(app) {
   if (!s || s.role !== 'teacher') return teacherLogin(app);
   let tab = pref.get('tTab', 'subs');
   if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; history.replaceState(null, '', '#/teacher'); }
+  if (/^#\/teacher\/review/.test(location.hash)) { tab = 'honor'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/redo/.test(location.hash)) { tab = 'subs'; history.replaceState(null, '', '#/teacher'); }
   let lateReqs = [];
@@ -4404,6 +4447,15 @@ function viewTeacher(app) {
     (D.tourneys || []).filter((t) => t.status === 'running').forEach((t) => (D.hMatches?.[t.id] || []).filter((m) => !m.done).forEach((m) => ['ra', 'rb'].forEach((k) => { if (m[k]?.pend) L.push({ kind: 'm', id: m.id, tid: t.id, k, who: k === 'ra' ? m.a : m.b, vs: k === 'ra' ? m.b : m.a, r: m[k], range: rng(m), m, t }); })));
     return L;
   }
+  const WHY = {
+    'ios-app': '🍎 آيفون (التطبيق المثبّت): لا يدعم التعرف على الكلام. للنتيجة الفورية يفتح الموقع من Safari.',
+    'no-sr': '🌐 متصفحه لا يدعم التعرف على الكلام. يستعمل Chrome (أندرويد) أو Safari (آيفون).',
+    'sr-blocked': '🚫 إذن التعرف على الكلام مرفوض في جهازه.',
+    'sr-broken': '⚙️ خدمة التعرف في جواله لا تعمل: يحتاج خطوات Google (الإدخال الصوتي ← Google).',
+    quiet: '🔈 لم يُسمع كلام واضح: صوته ضعيف، أو الجوال بعيد، أو لم يقرأ.',
+    'unknown-dev': '🆕 جهاز لم يُضبط بعد؛ يُضبط بفحص قصير قبل تحدّيه القادم.',
+    silent: '❔ قرأ بوضوح والتعرف لم يلتقط كلامه.',
+  };
   function drawRevT(host) {
     if (!host) return;
     const L = pendingReviews();
@@ -4411,7 +4463,8 @@ function viewTeacher(app) {
     if (!L.length) { host.innerHTML = ''; return; }
     host.innerHTML = `<h3>🎧 تسجيلات بانتظار تقييمك <span class="pill">${ar(L.length)}</span></h3>
       <p class="small muted" style="margin:0">هؤلاء قرؤوا في تحدٍّ أو مباراة لكن أجهزتهم لم تتعرف على كلامهم، فأرسلوا تسجيلاتهم إليك. استمع وضع نسبة الدقة (٠–١٠٠)، فتُحسب النتيجة كأنها آلية.</p>
-      <ul class="rev-list">${L.map((x, i) => `<li><div><b>${esc(x.who.name)}</b> <span class="small muted">${x.kind === 'ch' ? '⚔️ تحدٍّ' : '🏆 مباراة'} مع ${esc(x.vs?.name || '—')} · ${esc(x.range)}${x.r.dur ? ` · ${ar(Math.round(x.r.dur))} ث` : ''}</span></div>
+      <ul class="rev-list">${L.map((x, i) => `<li><div><b>${esc(x.who.name)}</b> <span class="small muted">${x.kind === 'ch' ? '⚔️ تحدٍّ' : '🏆 مباراة'} مع ${esc(x.vs?.name || '—')} · ${esc(x.range)}${x.r.dur ? ` · ${ar(Math.round(x.r.dur))} ث` : ''}</span>
+        <div class="small rev-why">${esc(WHY[x.r.why] || 'السبب غير مسجّل (تسجيل قبل التحديث)')}${x.r.dev?.os ? ` · <span class="muted">📱 ${esc({ iOS: 'آيفون', Android: 'أندرويد' }[x.r.dev.os] || x.r.dev.os)} · ${esc(x.r.dev.br || '')}</span>` : ''}</div></div>
         <div class="row" style="gap:6px"><button class="btn sm" type="button" data-rvp="${i}">🔊 استمع</button><input type="number" min="0" max="100" inputmode="numeric" placeholder="٪" data-rvv="${i}" style="width:80px" aria-label="نسبة الدقة"><button class="btn sm primary" type="button" data-rvs="${i}">حفظ</button></div></li>`).join('')}</ul>`;
     host.querySelectorAll('[data-rvp]').forEach((b) => (b.onclick = async () => {
       const x = L[+b.dataset.rvp]; b.disabled = true;

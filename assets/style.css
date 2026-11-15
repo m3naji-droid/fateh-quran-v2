@@ -1193,3 +1193,5 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 @keyframes rcGo { 50% { box-shadow: 0 0 0 6px rgba(15, 92, 70, .12); } }
 @media (prefers-reduced-motion: reduce) { .rc-go { animation: none; } }
 .srn-never { justify-self: center; font-size: 14px; color: var(--muted); margin-top: -6px; }
+.rev-why { margin-top: 3px; color: var(--warn); }
+.cap-step { min-height: 1.6em; font-weight: 700; color: var(--green); font-size: 17px; }

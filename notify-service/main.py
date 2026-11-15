@@ -479,6 +479,11 @@ def run_teacher(local: dt.datetime) -> dict | None:
             to_teachers("🔁 وصلت إعادة طلبتها", f"أعاد {x.get('studentName') or 'طالب'} تسميع «{rng}» كما طلبت. استمع وقيّم.", "retake-" + str(x.get("retakeId")))
         for fx, ref in feedbacks[:10]:  # ملاحظات وصلت في أوقات الهدوء أو تعذّر تنبيهها فوراً
             feedback_push(fx, ref)
+        try:  # تسجيلات تحديات ومباريات تنتظر التقييم ولم يصل تنبيهها (أوقات الهدوء أو تعذّر)
+            for x, ref, side, kind in pending_reviews()[:10]:
+                review_push(x, ref, side, kind)
+        except Exception as e:
+            print("review digest:", str(e)[:200])
         out = {"subs": total, "retakes": len(retakes), "feedback": len(feedbacks)}
     # تنبيهات الاستهلاك: مرة واحدة لكل عتبة
     alerts = st.get("alerts") or {}
@@ -532,12 +537,38 @@ class FeedbackReq(BaseModel):
     feedback: str
 
 
+class ReviewReq(BaseModel):
+    kind: str  # ch | m
+    id: str
+    tid: str = ""
+    side: str  # ra | rb
+
+
 class LateReq(BaseModel):
     student: str
     task: str
 
 
 FB_KINDS = {"comment": "💬 تعليق", "complaint": "⚠️ شكوى", "suggest": "💡 اقتراح", "note": "📝 ملاحظة"}
+
+
+WHY_SHORT = {"ios-app": "آيفون (التطبيق المثبّت)", "no-sr": "متصفح لا يدعم التعرف", "sr-blocked": "إذن التعرف مرفوض",
+             "sr-broken": "خدمة التعرف في جواله لا تعمل", "quiet": "صوت ضعيف أو لم يقرأ", "unknown-dev": "جهاز لم يُضبط بعد",
+             "silent": "التعرف لم يلتقط كلامه"}
+
+
+def review_push(doc: dict, ref, side: str, kind: str) -> dict:
+    """تنبيه المعلم بتسجيل ينتظر تقييمه (تحدٍّ أو مباراة)، مرة واحدة لكل تسجيل."""
+    r = doc.get(side) or {}
+    who = doc.get("a" if side == "ra" else "b") or {}
+    vs = doc.get("b" if side == "ra" else "a") or {}
+    why = WHY_SHORT.get(r.get("why") or "", "")
+    what = "تحدٍّ" if kind == "ch" else "مباراة"
+    out = to_teachers(f"🎧 تسجيل بانتظار تقييمك: {who.get('name') or 'طالب'}",
+                      f"في {what} مع {vs.get('name') or '—'}: لم يتعرف جهازه على كلامه{f' ({why})' if why else ''}. استمع وضع نسبته.",
+                      f"rev-{ref.id}-{side}", "./#/teacher/review")
+    ref.update({f"{side}.nT": True})
+    return out
 
 
 def feedback_push(x: dict, ref) -> dict:
@@ -843,6 +874,51 @@ def feedback(req: FeedbackReq, authorization: str | None = Header(None)):
     if quiet(dt.datetime.now(TZ)):
         return {"sent": 0, "deferred": True}  # يرسلها ملخّص المعلم بعد الساعة ٦ صباحاً
     return feedback_push(x, ref)
+
+
+@app.post("/review")
+def review(req: ReviewReq, authorization: str | None = Header(None)):
+    """يتحقق أن المرسل هو صاحب التسجيل المعلّق، ثم ينبّه المعلم مرة واحدة (وفي أوقات الهدوء يرسله الملخّص لاحقاً)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    if req.side not in ("ra", "rb") or req.kind not in ("ch", "m"):
+        raise HTTPException(400, "طلب غير صالح.")
+    ref = db.collection("challenges").document(req.id) if req.kind == "ch" else db.collection("tourneys").document(req.tid).collection("matches").document(req.id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "غير موجود.")
+    d = snap.to_dict()
+    pn = (d.get("a" if req.side == "ra" else "b") or {}).get("pn")
+    if not pn or (db.collection("roster").document(pn).get().to_dict() or {}).get("uid") != uid:
+        raise HTTPException(403, "غير مسموح.")
+    r = d.get(req.side) or {}
+    if not r.get("pend") or r.get("nT"):
+        return {"sent": 0, "already": True}
+    if quiet(dt.datetime.now(TZ)):
+        return {"sent": 0, "deferred": True}
+    return review_push(d, ref, req.side, req.kind)
+
+
+def pending_reviews():
+    """تسجيلات التحديات والمباريات المعلّقة التي لم يُنبَّه المعلم بها بعد."""
+    out = []
+    for side in ("ra", "rb"):
+        for c in where(db.collection("challenges"), f"{side}.pend", "==", 1).stream():
+            x = c.to_dict()
+            if not (x.get(side) or {}).get("nT") and not x.get("cancel"):
+                out.append((x, c.reference, side, "ch"))
+    for t in where(db.collection("tourneys"), "status", "==", "running").stream():
+        for m in t.reference.collection("matches").stream():
+            x = m.to_dict()
+            for side in ("ra", "rb"):
+                r = x.get(side) or {}
+                if r.get("pend") and not r.get("nT") and not x.get("done"):
+                    out.append((x, m.reference, side, "m"))
+    return out
 
 
 @app.post("/late")

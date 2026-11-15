@@ -127,6 +127,18 @@ export async function notifyFeedback(pn, id) {
   return res.json();
 }
 
+/** تسجيل في تحدٍّ أو مباراة لم يتعرف الجهاز على كلامه: ينبّه المعلم خارج التطبيق ليقيّمه */
+export async function notifyReview({ kind, id, tid = '', side }) {
+  if (!PUSH.url || store.mode !== 'cloud') return null;
+  const token = await store.idToken();
+  const res = await fetch(PUSH.url.replace(/\/$/, '') + '/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ kind, id, tid, side }),
+  });
+  return res.ok ? res.json() : null;
+}
+
 /** طلب تسليم متأخر: الخادم يتحقق من الطالب ثم ينبّه المعلم */
 /** يطلب من الخادم تحليل تجويد تسليم الآن (يكمل حتى لو أُغلقت الصفحة، والمؤقت يلتقط ما فاته) */
 export async function requestServerAi(pn, sid) {

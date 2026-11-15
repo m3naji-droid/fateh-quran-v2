@@ -56,6 +56,9 @@ export const devCaps = {
   setNoDual(v) { lsSet('fp_noDual', v ? '1' : null); lsSet('fp_tryNoDual', null); },
   setTry(v) { lsSet('fp_tryNoDual', v ? '1' : null); },
   setSrOk() { lsSet('fp_srOk', '1'); },
+  // فُحص الجهاز (أو ثبت أنه يجمع التسجيل والتعرف): لا حاجة لفحص قبل التحديات
+  get capChecked() { return !!lsGet('fp_capChecked'); },
+  setCapChecked() { lsSet('fp_capChecked', new Date().toISOString().slice(0, 10)); },
 };
 
 export class RecitationSession {
@@ -179,7 +182,7 @@ export class RecitationSession {
     ['audiostart', 'soundstart', 'speechstart', 'nomatch'].forEach((k) => (r['on' + k] = () => { if (this.diag.ev.length < 12 && !this.diag.ev.includes(k)) this.diag.ev.push(k); }));
     r.onresult = (e) => {
       this.diag.results++; this.lastRes = Date.now();
-      if (this.diag.results === 1) { if (this.noRec) { devCaps.setSrOk(); if (devCaps.tryNoDual) devCaps.setNoDual(true); } else if (this.stream) devCaps.setNoDual(false); }
+      if (this.diag.results === 1) { if (this.noRec) { devCaps.setSrOk(); if (devCaps.tryNoDual) devCaps.setNoDual(true); } else if (this.stream) { devCaps.setNoDual(false); devCaps.setSrOk(); devCaps.setCapChecked(); } }
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];

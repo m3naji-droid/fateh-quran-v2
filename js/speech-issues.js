@@ -62,7 +62,7 @@ export const devGroup = (d) => (d ? `${OS_AR[d.os] || d.os} · ${String(d.browse
 
 /* ---------------- الفحص التلقائي ---------------- */
 /** اختبار التعرف على الكلام لمدة ms: يعيد {sr, heard, errs, ev} */
-function srTest(ms) {
+export function srTest(ms) {
   return new Promise((res) => {
     const out = { sr: '', heard: '', errs: [], ev: [] };
     let done = false; const fin = () => { if (done) return; done = true; try { s.abort(); } catch {} out.sr = out.heard ? 'ok' : out.errs.length ? 'error' : 'silent'; res(out); };
@@ -74,6 +74,29 @@ function srTest(ms) {
     try { s.start(); } catch (e) { out.errs.push('start:' + (e.name || 'err')); fin(); }
     setTimeout(() => { try { s.stop(); } catch {} setTimeout(fin, 1200); }, ms);
   });
+}
+
+/** فحص قصير قبل أول تحدٍّ أو مباراة: التعرف وحده، ثم التعرف والتسجيل مفتوح. يضبط طريقة الجهاز ويعيد {sr, dual} */
+export async function capCheck(onStep = () => {}) {
+  const out = { sr: 'unsupported', dual: null, heard: '' };
+  if (!SR) return out;
+  onStep('١/٢ · قل الآن: «بسم الله الرحمن الرحيم»');
+  const t = await srTest(6000);
+  out.sr = t.sr; out.heard = t.heard;
+  if (t.sr === 'ok') {
+    devCaps.setSrOk();
+    onStep('٢/٢ · وقل الآن: «الحمد لله رب العالمين»');
+    let stream = null, rec = null;
+    try { stream = await openMic(); try { rec = new MediaRecorder(stream); rec.start(500); } catch {} } catch {}
+    const t2 = await srTest(6000);
+    try { rec && rec.state !== 'inactive' && rec.stop(); } catch {}
+    stream?.getTracks().forEach((x) => x.stop());
+    out.dual = t2.sr === 'ok';
+    devCaps.setNoDual(!out.dual);
+  }
+  devCaps.setCapChecked();
+  onStep('');
+  return out;
 }
 
 /** فحص من ثلاث خطوات: التعرف وحده، ثم الميكروفون (إذن ومستوى وتسجيل)، ثم التعرف والميكروفون مفتوح معاً كما في التسميع */
@@ -115,7 +138,7 @@ export async function runDiag(onStep = () => {}, onLevel = () => {}) {
   stream?.getTracks().forEach((t) => t.stop());
   try { ac?.close(); } catch {}
   // نحفظ ما عرفناه عن الجهاز: يستعمله التسميع والتدريب لاختيار الطريقة المناسبة
-  if (r.sr === 'ok') { devCaps.setSrOk(); if (r.sr2) devCaps.setNoDual(r.sr2 !== 'ok'); }
+  if (r.sr === 'ok') { devCaps.setSrOk(); if (r.sr2) { devCaps.setNoDual(r.sr2 !== 'ok'); devCaps.setCapChecked(); } }
   onLevel(0); onStep('');
   return r;
 }
