@@ -14,11 +14,12 @@ export const CATALOG = [
   { id: 'f-stars', kind: 'frame', name: 'إطار النجوم', v: 'stars', price: 60 },
   { id: 'f-gold', kind: 'frame', name: 'إطار ذهبي', v: 'gold', price: 90 },
   { id: 'f-crown', kind: 'frame', name: 'إطار التاج الملكي', v: 'crown', price: 0, need: 'streak:3', rare: true },
-  { id: 't-flag', kind: 'title', name: 'حامل الراية', v: 'حامل الراية', price: 25 },
-  { id: 't-himma', kind: 'title', name: 'صاحب الهمّة', v: 'صاحب الهمّة', price: 25 },
-  { id: 't-rafiq', kind: 'title', name: 'رفيق القرآن', v: 'رفيق القرآن', price: 35 },
-  { id: 't-faris', kind: 'title', name: 'فارس التحديات', v: 'فارس التحديات', price: 45 },
-  { id: 't-star', kind: 'title', name: 'نجم المقرأة', v: 'نجم المقرأة', price: 70 },
+  // الألقاب لا تُشترى: تُنال بالإنجاز (earn) أو يمنحها المعلم
+  { id: 't-flag', kind: 'title', name: 'حامل الراية', v: 'حامل الراية', earn: 'days:10' },
+  { id: 't-himma', kind: 'title', name: 'صاحب الهمّة', v: 'صاحب الهمّة', earn: 'streak:15' },
+  { id: 't-rafiq', kind: 'title', name: 'رفيق القرآن', v: 'رفيق القرآن', earn: 'streak:20' },
+  { id: 't-faris', kind: 'title', name: 'فارس التحديات', v: 'فارس التحديات', earn: 'wins:16' },
+  { id: 't-star', kind: 'title', name: 'نجم المقرأة', v: 'نجم المقرأة', earn: 'voices:2' },
   { id: 'c-emerald', kind: 'color', name: 'زمردي', v: '#0f8a5f', price: 15 },
   { id: 'c-ruby', kind: 'color', name: 'ياقوتي', v: '#c0263e', price: 15 },
   { id: 'c-royal', kind: 'color', name: 'أزرق ملكي', v: '#2554c7', price: 15 },
@@ -34,12 +35,30 @@ export const CATALOG = [
   { id: 'x-stars', kind: 'fx', name: 'مطر النجوم', v: 'stars', price: 40 },
   { id: 'x-moon', kind: 'fx', name: 'أهلّة ذهبية', v: 'moon', price: 50 },
 ];
-/** المتجر الفعلي: القائمة الأساسية مع تعديلات المعلم (السعر، الإخفاء) وما أضافه */
+/** المتجر الفعلي: القائمة الأساسية مع تعديلات المعلم (السعر، الإخفاء) وما أضافه.
+    الألقاب لا تُباع أبداً: لقب بلا شرط إنجاز يمنحه المعلم فقط */
 export function shopItems(shop) {
   const mods = shop?.items || {};
   const base = CATALOG.map((x) => ({ ...x, ...(mods[x.id] || {}) }));
   const extra = Object.values(mods).filter((x) => x && x.custom && !CATALOG.some((c) => c.id === x.id));
-  return [...base, ...extra].filter((x) => !x.deleted);
+  return [...base, ...extra].filter((x) => !x.deleted).map((x) => (x.kind === 'title' ? { ...x, price: 0, grantOnly: !x.earn } : x));
+}
+
+/* ---------------- شروط الألقاب ---------------- */
+// ctx: { days: عدد أيام المراجعة كلها، streak: أطول سلسلة أيام متتالية، wins: مرات الفوز، voices: مرات «صوت الأسبوع» }
+export const EARN = {
+  days: { txt: (n) => `يراجع ${ar(n)} أيام (متتالية أو متفرقة)`, unit: 'يوم' },
+  streak: { txt: (n) => `يراجع ${ar(n)} يوماً دون انقطاع`, unit: 'يوم متتالٍ' },
+  wins: { txt: (n) => `يفوز في التحديات أكثر من ${ar(n - 1)} مرة`, unit: 'فوز' },
+  voices: { txt: (n) => `يُختار صوته «صوت الأسبوع» ${n === 2 ? 'مرتين' : ar(n) + ' مرات'}`, unit: 'مرة' },
+};
+const parseEarn = (e) => { const [k, n] = String(e || '').split(':'); return EARN[k] ? { k, n: +n || 1 } : null; };
+export const earnText = (it) => { const e = parseEarn(it.earn); return e ? EARN[e.k].txt(e.n) : ''; };
+/** {have, need, done} لتقدّم اللقب */
+export function earnProgress(it, ctx) {
+  const e = parseEarn(it.earn); if (!e) return null;
+  const have = ctx?.[e.k] || 0;
+  return { have: Math.min(have, e.n), need: e.n, done: have >= e.n };
 }
 export const itemById = (shop, id) => shopItems(shop).find((x) => x.id === id);
 

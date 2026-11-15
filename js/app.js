@@ -23,7 +23,7 @@ import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js'
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
-import { CATALOG, KINDS, SLOT, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx } from './rewards.js';
+import { CATALOG, KINDS, SLOT, earnText, earnProgress, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx } from './rewards.js';
 import { dayTimes } from './prayer.js';
 /** الاحتفال، ومعه تأثير الطالب الخاص من المتجر إن اختاره */
 const FX = { kind: '' };
@@ -1008,11 +1008,38 @@ function viewStudent(app) {
   let RW = null, SHOP = null, achBusy = false;
   const myCoins = () => balance(me.rankInfo?.all?.points || 0, RW?.wallet);
   const bestStreak = (days) => { const L = [...days].sort(); let b = 0, n = 0, prev = null; L.forEach((d) => { n = prev && addDays(prev, 1) === d ? n + 1 : 1; b = Math.max(b, n); prev = d; }); return b; };
+  /** ما أنجزه الطالب لشروط الألقاب */
+  const earnCtx = () => { const days = activeDays(); return { days: [...days].length, streak: bestStreak(days), wins: myCh.filter((c) => chWinner(c) === me.id).length, voices: (me.rankInfo?._badges || []).filter((b) => String(b.id || '').startsWith('voice-')).length }; };
+  /** الألقاب التي تحققت شروطها تُضاف إلى ما يملكه، مع تهنئة */
+  async function checkTitles() {
+    const ctx = earnCtx(), own = new Set(RW.owned || []);
+    const got = shopItems(SHOP).filter((x) => x.kind === 'title' && x.earn && !x.hidden && !own.has(x.id) && earnProgress(x, ctx)?.done);
+    if (!got.length) return;
+    const owned = [...own, ...got.map((x) => x.id)];
+    await store.saveRewards(me.id, { owned });
+    RW = { ...RW, owned };
+    const t = got[got.length - 1];
+    whenModalFree(() => {
+      openModal(`<div class="stack ach-new" style="text-align:center;align-items:center"><div class="ach-big">🏷️</div><span class="srn-tag">لقب جديد</span>
+        <h2 style="margin:0">«${esc(t.v)}»</h2><p style="margin:0">نلته لأنك ${esc(earnText(t).replace(/^ي/, 'تـ').replace(/^تـ/, 'ت'))}. ما شاء الله!</p>
+        ${got.length > 1 ? `<p class="small muted" style="margin:0">ومعه ${ar(got.length - 1)} ${got.length === 2 ? 'لقب آخر' : 'ألقاب أخرى'}</p>` : ''}
+        <div class="row" style="justify-content:center"><button class="btn primary" type="button" id="ttWear">ضعه تحت اسمي</button><button class="btn" type="button" data-close>لاحقاً</button></div></div>`, (m) => {
+        m.querySelector('#ttWear').onclick = async () => {
+          const lk = { ...(RW.look || {}), t: t.v };
+          try { await store.saveRewards(me.id, { look: lk }); await store.setMyLook(me.id, lk).catch(() => {}); RW = { ...RW, look: lk }; setLook(me.id, lk); } catch {}
+          closeModal(); tab = 'rewards'; draw();
+        };
+      });
+      setTimeout(() => confetti(), 150);
+    });
+    if ($('#stBody', app)) draw();
+  }
   /** يفتح الأوسمة المستحقة ويضيف مكافآتها، مع احتفال لكل وسام جديد */
   async function checkAch() {
     if (!RW || achBusy) return;
     achBusy = true;
     try {
+      await checkTitles().catch((e) => console.warn('titles', e));
       const days = activeDays();
       const lv = achLevels({ streak: streakOf(days).days, best: bestStreak(days), count: data.subs.length, subs: [...data.subs, ...pref.get('actT_' + me.id, []).map((t) => ({ createdAt: new Date(t).toISOString() }))], days, prayer: (t) => dayTimes(t) });
       const old = RW.ach || {}, fresh = [];
@@ -1072,7 +1099,7 @@ function viewStudent(app) {
   function drawRewards(body) {
     if (!RW) { body.innerHTML = '<div class="loading">جارٍ التحميل…</div>'; return; }
     const coins = myCoins(), items = shopItems(SHOP).filter((x) => !x.hidden);
-    const owned = new Set(RW.owned || []), look = RW.look || {};
+    const owned = new Set(RW.owned || []), look = RW.look || {}, ectx = earnCtx();
     const days = activeDays(), cur = { streak: Math.max(streakOf(days).days, bestStreak(days)), count: data.subs.length };
     const achCard = (a) => {
       const n = RW.ach?.[a.id] || 0;
@@ -1086,8 +1113,9 @@ function viewStudent(app) {
     const preview = (it) => it.kind === 'frame' ? `<span class="lk lk-f-${esc(it.v)}">${esc(me.name)}</span>` : it.kind === 'title' ? `<span class="lk-t" style="display:inline-block">${esc(it.v)}</span>`
       : it.kind === 'color' ? `<b style="color:${esc(it.v)}">${esc(me.name)}</b>` : it.kind === 'icon' || it.kind === 'badge' ? `<span style="font-size:30px">${esc(it.v || '🏅')}</span>` : `<span style="font-size:28px">${it.v === 'stars' ? '⭐✨' : it.v === 'moon' ? '🌙✨' : '🎆🎇'}</span>`;
     const card = (it) => {
-      const has = owned.has(it.id), slot = SLOT[it.kind], worn = slot && look[slot] === it.v, can = meetsNeed(it, RW.ach);
+      const has = owned.has(it.id), slot = SLOT[it.kind], worn = slot && look[slot] === it.v, can = meetsNeed(it, RW.ach), pr = !has && it.earn ? earnProgress(it, ectx) : null;
       const btn = has ? (slot ? `<button class="btn sm ${worn ? 'primary' : ''}" type="button" data-wear="${esc(it.id)}">${worn ? '✓ مستخدَم' : 'استخدِم'}</button>` : '<span class="pill ok">✓ لك</span>')
+        : pr ? `<small class="muted">🔒 ${esc(earnText(it))}</small><div class="ach-bar"><i style="width:${Math.round((pr.have / pr.need) * 100)}%"></i></div><small class="muted">${ar(pr.have)} / ${ar(pr.need)}</small>`
         : it.grantOnly ? '<span class="small muted">🎖️ يمنحه المعلم</span>'
         : !can ? `<span class="small muted">🔒 ${esc(it.needTxt || 'يُفتح بوسام المداوم الذهبي')}</span>`
         : rwConfirm === it.id ? `<button class="btn sm primary" type="button" data-buy="${esc(it.id)}">تأكيد الشراء بـ ${ar(it.price)} 🪙</button>`
@@ -1457,6 +1485,7 @@ function viewStudent(app) {
     try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); setChPts(chCfg?.pts); } catch (e) { console.warn('challenges', e); }
     myCh.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     paintChBar();
+    setTimeout(() => checkAch(), 2500);
     const host = $('#chCard', app); if (host) drawChCard(host);
     // تحدٍّ انتهى وقته ولم يُبلَّغ: نطلب إشعار النتيجة (يكفي طرف واحد)
     myCh.filter((c) => chStatus(c) === 'done' && !c.nDone).forEach((c) => notifyChallenge(c.id, 'done').catch(() => {}));
@@ -4660,12 +4689,14 @@ function viewTeacher(app) {
     const L = all.filter((x) => x.kind === shopKind && !x.deleted);
     const valLabel = { frame: 'الشكل', title: 'نص اللقب', color: 'اللون', icon: 'الرمز', fx: 'التأثير', badge: 'رمز الوسام' };
     host.innerHTML = `<h3>🛍️ المتجر والمكافآت</h3>
-      <p class="small muted" style="margin:0">الطلاب يكسبون 🪙 مكافأة لكل نقطة في لوحة الشرف، ومع الأوسمة. عدّل الأسعار، أو أخفِ ما لا تريده، أو أضف ألقاباً وأوسمة خاصة: تُباع في المتجر، أو تمنحها أنت لطالب.</p>
+      <p class="small muted" style="margin:0">الطلاب يكسبون 🪙 مكافأة لكل نقطة في لوحة الشرف، ومع الأوسمة. عدّل الأسعار، أو أخفِ ما لا تريده، أو أضف أوسمة ورموزاً خاصة تُباع أو تمنحها أنت. <b>الألقاب لا تُشترى</b>: يُنال بعضها بالإنجاز تلقائياً، وما تضيفه أنت تمنحه لمن تشاء.</p>
       <div class="seg" role="tablist">${kinds.map((k) => `<button type="button" class="${k === shopKind ? 'on' : ''}" data-sk="${k}">${KINDS[k]}</button>`).join('')}</div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>العنصر</th><th>السعر 🪙</th><th>في المتجر</th><th></th></tr></thead><tbody>
+      <div class="table-wrap"><table class="table"><thead><tr><th>العنصر</th><th>${shopKind === 'title' ? 'كيف يُنال' : 'السعر 🪙'}</th><th>${shopKind === 'title' ? 'الظهور' : 'في المتجر'}</th><th></th></tr></thead><tbody>
         ${L.map((x) => `<tr data-it="${esc(x.id)}"><td>${x.kind === 'icon' || x.kind === 'badge' ? esc(x.v) + ' ' : x.kind === 'color' ? `<span class="sw" style="background:${esc(x.v)}"></span> ` : ''}<b>${esc(x.name)}</b>${x.kind === 'title' ? ` <span class="small muted">«${esc(x.v)}»</span>` : ''}${x.need ? ' <span class="pill">نادر</span>' : ''}</td>
-          <td><input type="number" min="0" max="5000" value="${x.price || 0}" data-price style="width:90px" aria-label="السعر"></td>
-          <td><select data-mode aria-label="طريقة الحصول"><option value="sell" ${!x.hidden && !x.grantOnly ? 'selected' : ''}>يُباع</option><option value="grant" ${x.grantOnly ? 'selected' : ''}>يمنحه المعلم فقط</option><option value="hide" ${x.hidden ? 'selected' : ''}>مخفي</option></select></td>
+          ${x.kind === 'title' ? `<td class="small">${x.earn ? `🏆 ${esc(earnText(x))}` : '🎖️ تمنحه أنت'}<input type="hidden" data-price value="0"></td>
+          <td><select data-mode aria-label="الظهور"><option value="${x.earn ? 'sell' : 'grant'}" ${!x.hidden ? 'selected' : ''}>${x.earn ? 'يُنال بالإنجاز' : 'يمنحه المعلم'}</option><option value="hide" ${x.hidden ? 'selected' : ''}>مخفي</option></select></td>`
+          : `<td><input type="number" min="0" max="5000" value="${x.price || 0}" data-price style="width:90px" aria-label="السعر"></td>
+          <td><select data-mode aria-label="طريقة الحصول"><option value="sell" ${!x.hidden && !x.grantOnly ? 'selected' : ''}>يُباع</option><option value="grant" ${x.grantOnly ? 'selected' : ''}>يمنحه المعلم فقط</option><option value="hide" ${x.hidden ? 'selected' : ''}>مخفي</option></select></td>`}
           <td>${x.custom ? '<button class="btn sm danger" type="button" data-del>حذف</button>' : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا عناصر.</td></tr>'}
       </tbody></table></div>
       <details class="sp-box"><summary><b>➕ إضافة لقب أو وسام أو رمز</b></summary>
@@ -4685,7 +4716,11 @@ function viewTeacher(app) {
       <div class="row"><button class="btn primary" type="button" id="shSave">حفظ تعديلات المتجر</button></div>`;
     const kk = host.querySelector('#shK'), kv = host.querySelector('#shV');
     const ph = { title: 'نص اللقب', badge: '🏅 رمز', icon: '🌟 رمز', color: '#0f8a5f' };
-    kk.onchange = () => { kv.placeholder = ph[kk.value]; kv.type = kk.value === 'color' ? 'color' : 'text'; host.querySelector('#shVL').firstChild.textContent = valLabel[kk.value]; };
+    kk.onchange = () => {
+      kv.placeholder = ph[kk.value]; kv.type = kk.value === 'color' ? 'color' : 'text'; host.querySelector('#shVL').firstChild.textContent = valLabel[kk.value];
+      // الألقاب لا تُباع: تمنحها أنت
+      const t = kk.value === 'title'; host.querySelector('#shP').closest('label').hidden = t; host.querySelector('#shM').closest('label').hidden = t;
+    };
     kk.onchange();
     $$('[data-sk]', host).forEach((b) => (b.onclick = () => { shopKind = b.dataset.sk; drawShopT(host); }));
     const collect = () => {
@@ -4703,7 +4738,7 @@ function viewTeacher(app) {
       const k = kk.value, n = host.querySelector('#shN').value.trim(), v = kv.value.trim() || (k === 'title' ? n : '');
       if (!n || !v) return toast('اكتب الاسم والقيمة.');
       const id = 'u-' + Date.now().toString(36);
-      D.shop.items = { ...collect(), [id]: { id, kind: k, name: n, v, price: Math.max(0, +host.querySelector('#shP').value || 0), grantOnly: host.querySelector('#shM').value === 'grant', custom: true } };
+      D.shop.items = { ...collect(), [id]: { id, kind: k, name: n, v, price: k === 'title' ? 0 : Math.max(0, +host.querySelector('#shP').value || 0), grantOnly: k === 'title' || host.querySelector('#shM').value === 'grant', custom: true } };
       shopKind = k; drawShopT(host); toast('أُضيف. لا تنسَ «حفظ تعديلات المتجر».');
     };
     host.querySelector('#shSave').onclick = async (e) => {
