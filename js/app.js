@@ -4832,8 +4832,13 @@ function viewTeacher(app) {
     if (!host) return;
     const W = weekRange(voiceWeek);
     const chosen = new Set((D.voices || []).map((v) => v.sid).filter(Boolean));
-    const best = (D.subs || []).filter((x) => x.hasAudio && x.createdAt >= W.from && x.createdAt < W.to && !x.teacher && (x.percent ?? 0) >= 85)
-      .sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0)).slice(0, 10);
+    // كل تسميعات الأسبوع، المقيَّمة وغير المقيَّمة
+    const inWeek = (D.subs || []).filter((x) => x.createdAt >= W.from && x.createdAt < W.to);
+    const withAu = inWeek.filter((x) => x.hasAudio), gone = inWeek.filter((x) => x.audioDeletedAt).length;
+    const best = withAu.filter((x) => (x.percent ?? 0) >= 85).sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0)).slice(0, 10);
+    const why = !inWeek.length ? `لا تسميعات في ${W.name}.`
+      : !withAu.length ? `في ${W.name} ${ar(inWeek.length)} تسميعاً، لكن لا تسجيلات صوتية متاحة لها${gone ? ` (حُذفت تسجيلات ${ar(gone)} منها لتوفير المساحة)` : ''}.`
+      : `في ${W.name} ${ar(withAu.length)} تسجيلاً، لكن لم تبلغ دقة أيٍّ منها ٨٥٪.`;
     const stu = (pn) => D.students.find((x) => x.id === pn);
     const v = D.voice, vLikes = v ? Object.keys(v.likes || {}).length : 0;
     const past = (D.voices || []).filter((x) => x.id !== v?.id).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
@@ -4847,7 +4852,7 @@ function viewTeacher(app) {
         <label class="field" style="flex:1 1 110px">مكافآت 🪙<input type="number" id="vCoins" min="0" max="500" value="20"></label>
       </div>
       ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li${chosen.has(x.id) ? ' class="vw-done"' : ''}><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''} · ${esc((x.createdAt || '').slice(0, 10))}</span>${chosen.has(x.id) ? ' <span class="pill ok">اختير من قبل</span>' : ''}</div>
-        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button>${chosen.has(x.id) ? '' : `<button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button>`}</div></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">لا تسميعات بتسجيل ودقة ٨٥٪ فأكثر في ${esc(W.name)}.</p>`}
+        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button>${chosen.has(x.id) ? '' : `<button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button>`}</div></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">${esc(why)}</p>`}
       <details class="sp-box"${past.length ? '' : ' hidden'}><summary><b>📼 الأصوات السابقة (${ar(past.length)})</b></summary>
         <ul class="rev-list" style="margin-top:8px">${past.map((p, i) => `<li><div><b data-lk="${esc(p.pn)}">${esc(p.name)}</b> <span class="small muted">${esc(p.className || '')} · ${esc(p.range || '')} · ${p.week ? esc(p.week) : esc((p.at || '').slice(0, 10))}</span>${p.likes ? ` <span class="small">❤️ ${ar(Object.keys(p.likes).length)}</span>` : ''}</div>
           <div class="row" style="gap:6px"><button class="btn sm" type="button" data-pp="${i}">🔊 استمع</button><button class="btn sm ghost" type="button" data-pr="${i}" title="يظهر للطلاب من جديد دون نقاط أو مكافآت إضافية">↺ اعرضه من جديد</button></div></li>`).join('')}</ul></details>`;
