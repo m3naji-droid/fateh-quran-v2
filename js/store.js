@@ -272,7 +272,21 @@ const local = {
   async setPushMute() {},
   async setBoard(b) { LS.set('board', b); },
   async saveRanks(ranks) { const r = LS.get('roster', {}); Object.entries(ranks).forEach(([id, v]) => { if (r[id]) r[id].rank = v; }); LS.set('roster', r); },
-  async getMyRank(me) { const r = LS.get('roster', {})[me.id]; return r ? { ...(r.rank || {}), _badges: r.badges || [] } : null; },
+  async getMyRank(me) { const r = LS.get('roster', {})[me.id]; return r ? { ...(r.rank || {}), _badges: r.badges || [], _rw: { wallet: r.wallet || {}, owned: r.owned || [], ach: r.ach || {}, look: r.look || null } } : null; },
+  // المكافآت: المتجر، وزينة الأسماء، ومحفظة الطالب، وصوت الأسبوع
+  async getShop() { return LS.get('shop', null); },
+  async setShop(x) { LS.set('shop', x); },
+  async getLooks() { return LS.get('looks', {}); },
+  async setMyLook(pn, look) { const m = LS.get('looks', {}); m['u' + pn] = { ...(look || {}), pn }; LS.set('looks', m); },
+  async saveRewards(pn, patch) { const r = LS.get('roster', {}); r[pn] = { ...(r[pn] || {}), ...patch }; LS.set('roster', r); },
+  async grantItem(pn, id) { const r = LS.get('roster', {}); if (r[pn]) { r[pn].owned = [...new Set([...(r[pn].owned || []), id])]; LS.set('roster', r); } },
+  async grantCoins(pn, n) { const r = LS.get('roster', {}); if (r[pn]) { r[pn].wallet = { ...(r[pn].wallet || {}), bonus: (r[pn].wallet?.bonus || 0) + n }; LS.set('roster', r); } },
+  async getVoice() { return LS.get('voice', null); },
+  async setVoice(v) { LS.set('voice', v); const a = LS.get('voices', []); LS.set('voices', [...a.filter((x) => x.id !== v.id), v]); },
+  async listVoices() { return LS.get('voices', []); },
+  async likeVoice(pn) { const v = LS.get('voice', null); if (v) { v.likes = { ...(v.likes || {}), ['u' + pn]: true }; LS.set('voice', v); } },
+  async saveVoiceAudio(id, blob) { const m = LS.get('vaudio', {}); m[id] = { b64: await blobToB64(blob), mime: blob.type }; try { LS.set('vaudio', m); } catch {} return true; },
+  async getVoiceAudio(id) { return LS.get('vaudio', {})[id] || null; },
 };
 
 /** معرّف ثابت لمستند الجهاز من رمز الإشعار (الرمز طويل وفيه رموز لا تصلح معرّفاً) */
@@ -695,7 +709,22 @@ async function makeCloud() {
       }
       changed.forEach((s) => (s.rank = ranks[s.id]));
     },
-    async getMyRank(me) { const d = await getDoc(doc(db, 'roster', me.id)); return d.exists() ? { ...(d.data().rank || {}), _badges: d.data().badges || [] } : null; },
+    async getMyRank(me) { const d = await getDoc(doc(db, 'roster', me.id)); if (!d.exists()) return null; const x = d.data(); return { ...(x.rank || {}), _badges: x.badges || [], _rw: { wallet: x.wallet || {}, owned: x.owned || [], ach: x.ach || {}, look: x.look || null } }; },
+    async getShop() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'shop')); return d.exists() ? d.data() : null; },
+    async setShop(x) { await setDoc(doc(db, 'leaderboard', 'shop'), { ...x, at: now() }); },
+    async getLooks() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'looks')); return d.exists() ? d.data() : {}; },
+    async setLooksAll(m) { await setDoc(doc(db, 'leaderboard', 'looks'), m, { merge: true }); },
+    async ensureLooks() { const r = doc(db, 'leaderboard', 'looks'); const d = await getDoc(r); if (!d.exists()) await setDoc(r, {}); },
+    async setMyLook(pn, look) { await updateDoc(doc(db, 'leaderboard', 'looks'), { [auth.currentUser.uid]: { ...(look || {}), pn } }); },
+    async saveRewards(pn, patch) { await updateDoc(doc(db, 'roster', pn), patch); },
+    async grantItem(pn, id) { const r = doc(db, 'roster', pn); const d = await getDoc(r); await updateDoc(r, { owned: [...new Set([...(d.data()?.owned || []), id])] }); },
+    async grantCoins(pn, n) { await updateDoc(doc(db, 'roster', pn), { 'wallet.bonus': increment(n) }); },
+    async getVoice() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'voice')); return d.exists() ? d.data() : null; },
+    async setVoice(v) { await setDoc(doc(db, 'leaderboard', 'voice'), v); await setDoc(doc(db, 'voices', v.id), v); },
+    async listVoices() { await ensureAnon(); return list('voices'); },
+    async likeVoice() { await updateDoc(doc(db, 'leaderboard', 'voice'), { ['likes.' + auth.currentUser.uid]: true }); },
+    async saveVoiceAudio(id, blob) { const b64 = await blobToB64(blob), P = 900000, n = Math.ceil(b64.length / P); if (n > 12) return false; for (let k = 1; k < n; k++) await setDoc(doc(db, 'voices', id, 'audio', 'p' + k), { b64: b64.slice(k * P, (k + 1) * P) }); await setDoc(doc(db, 'voices', id, 'audio', 'main'), { b64: b64.slice(0, P), mime: blob.type, parts: n }); return true; },
+    async getVoiceAudio(id) { await ensureAnon(); const d = await getDoc(doc(db, 'voices', id, 'audio', 'main')); if (!d.exists()) return null; const m = d.data(); let b64 = m.b64; for (let k = 1; k < (m.parts || 1); k++) { const p = await getDoc(doc(db, 'voices', id, 'audio', 'p' + k)); b64 += p.exists() ? p.data().b64 : ''; } return { ...m, b64 }; },
     // ترحيل بيانات النسخة القديمة (مقرأة الفاتح) إلى البنية الجديدة
     async migrateLegacy() {
       const oldStudents = await list('students').catch(() => []);

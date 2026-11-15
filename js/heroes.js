@@ -218,7 +218,7 @@ export function bracketHtml(matches, { stage, classId, me }) {
   if (!rounds.length) return '<div class="empty">لم تبدأ هذه المرحلة بعد.</div>';
   const card = (m) => {
     const w = m.done ? m.winner : null;
-    const row = (p, r, side) => p ? `<div class="hb-p${w === p.pn ? ' win' : w ? ' lose' : ''}${p.pn === me ? ' me' : ''}"><span>${esc(p.name)}</span><b>${m.bye ? '' : score(r)}</b></div>` : '';
+    const row = (p, r, side) => p ? `<div class="hb-p${w === p.pn ? ' win' : w ? ' lose' : ''}${p.pn === me ? ' me' : ''}"><span data-lk="${esc(p.pn)}" data-lk-no-title>${esc(p.name)}</span><b>${m.bye ? '' : score(r)}</b></div>` : '';
     return `<div class="hb-m${m.live ? ' live' : ''}${!m.done ? ' open' : ''}" data-mid="${esc(m.id)}">
       ${m.bye ? `${row(m.a)}<div class="hb-bye">تأهل بالقرعة</div>` : `${row(m.a, m.ra)}${row(m.b, m.rb)}`}
       ${!m.bye ? `<div class="hb-meta">${m.third ? '🥉 المركز الثالث · ' : m.kind === 'final' ? '🏆 النهائي · ' : ''}${m.live ? '📺 مباشر' : ''}${m.tb ? ` · ${ar(m.tb)} جولة فاصلة` : ''}${m.draw ? ' · حُسمت بالقرعة' : ''}${!m.done && !m.live ? ' · جارية' : ''}</div>` : ''}</div>`;

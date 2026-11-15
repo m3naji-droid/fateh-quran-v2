@@ -127,7 +127,7 @@ export function mountLists(host, lists, { me = null, myClass = null, myRank = nu
     const mine = myRank?.[kind]?.[S.p + S.sc];
     const inTop = rows.some((r) => r.pn === me);
     const classPick = !myClass && S.sc === 'c' ? `<select data-cls="${kind}" class="small">${classes.map((c) => `<option value="${esc(c.id)}"${c.id === S.cls ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : '';
-    const line = (r, i) => `<li class="${r.pn === me ? 'me' : ''}"><span class="lr-n">${i < 3 ? ['🥇', '🥈', '🥉'][i] : ar(i + 1)}</span><span class="lr-name"><b>${esc(r.name)}</b>${S.sc === 's' ? `<small class="muted">${esc(cname(r.classId))}</small>` : ''}</span>
+    const line = (r, i) => `<li class="${r.pn === me ? 'me' : ''}"><span class="lr-n">${i < 3 ? ['🥇', '🥈', '🥉'][i] : ar(i + 1)}</span><span class="lr-name"><b data-lk="${esc(r.pn)}">${esc(r.name)}</b>${S.sc === 's' ? `<small class="muted">${esc(cname(r.classId))}</small>` : ''}</span>
       <span class="lr-v">${kind === 'ch' ? `<b>${ar(r.wins)}</b> فوز <small class="muted">من ${ar(r.played)} · ${ar(r.rate)}٪${r.streak >= 2 ? ` · 🔥${ar(r.streak)}` : ''}</small>` : `<b>${ar(r.pts)}</b> نقطة <small class="muted">${r.ayat ? `${ar(r.ayat)} آية` : ''}${r.mins ? `${r.ayat ? ' · ' : ''}${ar(r.mins)} د` : ''} · ${ar(r.days)} يوم</small>`}</span></li>`;
     return `<div class="card lists-card stack" style="gap:8px" data-k="${kind}">
       <div class="row" style="justify-content:space-between;gap:6px"><h3 style="margin:0">${title}</h3>${onExport ? `<button class="btn sm ghost" type="button" data-x="${kind}">Excel</button>` : ''}</div>

@@ -22,7 +22,14 @@ import { pushState, enablePush, disablePush, refreshPush, testNotification, send
 import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js';
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
-import { confetti, pickHigh, pickLow } from './celebrate.js';
+import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
+import { CATALOG, KINDS, SLOT, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx } from './rewards.js';
+import { dayTimes } from './prayer.js';
+/** الاحتفال، ومعه تأثير الطالب الخاص من المتجر إن اختاره */
+const FX = { kind: '' };
+function confetti(...a) { confetti0(...a); if (FX.kind) setTimeout(() => playFx(FX.kind), 250); }
+/** خريطة الزينة من مستند looks (مفاتيحه معرّفات الحسابات وفي كل قيمة رقم الطالب) */
+const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
 import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
@@ -981,6 +988,8 @@ function viewStudent(app) {
     const st = streakOf(activeDays());
     const k = $('#kpiStreak', app); if (k) k.innerHTML = `<b>🔥 ${ar(st.days)}</b><span>أيام متتالية</span>`;
     if (st.days > before && before > 0 && !celebrateStreak()) toast(`🔥 سلسلتك الآن ${ar(st.days)} أيام متتالية. أحسنت!`);
+    const T = pref.get('actT_' + me.id, []); T.push(Date.now()); pref.set('actT_' + me.id, T.slice(-60));
+    setTimeout(() => checkAch(), 800);
   }
   /** احتفال عند ٧ و١٤ و٣٠ يوماً (مرة لكل سلسلة) */
   function showSrNotice() {
@@ -994,6 +1003,128 @@ function viewStudent(app) {
       m.querySelector('#srnOk').onclick = () => closeModal();
       m.querySelector('#srnNever').onclick = () => { pref.set('srNotice2_' + me.id, 1); closeModal(); };
     });
+  }
+  /* ================= المكافآت: الأوسمة والمتجر وزينة الاسم ================= */
+  let RW = null, SHOP = null, achBusy = false;
+  const myCoins = () => balance(me.rankInfo?.all?.points || 0, RW?.wallet);
+  const bestStreak = (days) => { const L = [...days].sort(); let b = 0, n = 0, prev = null; L.forEach((d) => { n = prev && addDays(prev, 1) === d ? n + 1 : 1; b = Math.max(b, n); prev = d; }); return b; };
+  /** يفتح الأوسمة المستحقة ويضيف مكافآتها، مع احتفال لكل وسام جديد */
+  async function checkAch() {
+    if (!RW || achBusy) return;
+    achBusy = true;
+    try {
+      const days = activeDays();
+      const lv = achLevels({ streak: streakOf(days).days, best: bestStreak(days), count: data.subs.length, subs: [...data.subs, ...pref.get('actT_' + me.id, []).map((t) => ({ createdAt: new Date(t).toISOString() }))], days, prayer: (t) => dayTimes(t) });
+      const old = RW.ach || {}, fresh = [];
+      let coins = 0;
+      ACH.forEach((a) => { const o = old[a.id] || 0, n = lv[a.id] || 0; if (n > o) { fresh.push({ a, n }); coins += a.coins.slice(o, n).reduce((x, c) => x + c, 0); } });
+      if (!fresh.length) return;
+      const ach = { ...old }; fresh.forEach(({ a, n }) => (ach[a.id] = n));
+      coins = Math.min(coins, 200);
+      const wallet = { ...RW.wallet, bonus: (RW.wallet?.bonus || 0) + coins };
+      await store.saveRewards(me.id, { ach, wallet });
+      RW = { ...RW, ach, wallet };
+      const f = fresh[fresh.length - 1];
+      whenModalFree(() => {
+        openModal(`<div class="stack ach-new" style="text-align:center;align-items:center"><div class="ach-big">${f.a.icon}</div>
+          <span class="srn-tag">${f.a.hidden ? '🎁 وسام مخفي اكتشفته!' : '🏅 وسام جديد'}</span>
+          <h2 style="margin:0">${esc(f.a.name)}${f.a.at ? ` · ${LEVELS[f.n - 1]}` : ''}</h2><p style="margin:0">${esc(f.a.desc(f.a.at ? f.a.at[f.n - 1] : 0))}</p>
+          <p class="ach-coins">+${ar(coins)} 🪙 مكافأة</p>${fresh.length > 1 ? `<p class="small muted" style="margin:0">ومعه ${fresh.length === 2 ? 'وسام آخر' : ar(fresh.length - 1) + ' أوسمة أخرى'} في خزانتك</p>` : ''}
+          <div class="row" style="justify-content:center"><button class="btn primary" type="button" id="achGo">افتح خزانتي</button><button class="btn" type="button" data-close>لاحقاً</button></div></div>`, (m) => {
+          m.querySelector('#achGo').onclick = () => { closeModal(); tab = 'rewards'; draw(); };
+        });
+        setTimeout(() => confetti(), 150);
+      });
+      if ($('#stBody', app)) draw();
+    } catch (e) { console.warn('ach', e); } finally { achBusy = false; }
+  }
+  /* صوت الأسبوع في صفحة الطالب: اسمعه، وقل «ما شاء الله» */
+  let voiceCache = null;
+  async function mountVoiceStu(host) {
+    if (!host) return;
+    try { voiceCache = voiceCache || (await store.getVoice()); } catch { return; }
+    const v = voiceCache;
+    if (!v || !host.isConnected || Date.now() - Date.parse(v.at) > 8 * 864e5) return;
+    const k = 'vLiked_' + v.id, mine = v.pn === me.id;
+    const paint = () => {
+      const n = Object.keys(v.likes || {}).length, liked = pref.get(k, false);
+      host.innerHTML = `<div class="voice-card${mine ? ' mine' : ''}"><div class="vc-ic">🎙️</div><div class="vc-tx"><span class="vc-tag">صوت الأسبوع</span>
+        <b data-lk="${esc(v.pn)}">${esc(v.name)}</b><small>${esc(v.className || '')} · ${esc(v.range || '')}</small></div>
+        <div class="vc-act"><button class="btn sm primary" type="button" id="vcPlay">▶ استمع</button>
+        <button class="btn sm vc-like${liked ? ' on' : ''}" type="button" id="vcLike" ${liked || mine ? 'disabled' : ''}>❤️ ما شاء الله${n ? ` · ${ar(n)}` : ''}</button></div></div>`;
+      let au = null;
+      $('#vcPlay', host).onclick = async (e) => {
+        const b = e.currentTarget;
+        if (au && !au.paused) { au.pause(); b.textContent = '▶ استمع'; return; }
+        b.disabled = true; b.textContent = '…';
+        try { const d = au ? null : await store.getVoiceAudio(v.id); if (!au) { if (!d) throw new Error('غير متاح'); au = new Audio(`data:${d.mime};base64,${d.b64}`); au.onended = () => { b.textContent = '▶ استمع'; }; } await au.play(); b.textContent = '⏸ إيقاف'; }
+        catch (x) { toast('تعذر التشغيل: ' + x.message); b.textContent = '▶ استمع'; }
+        b.disabled = false;
+      };
+      $('#vcLike', host).onclick = async () => {
+        pref.set(k, true); v.likes = { ...(v.likes || {}), ['me' + me.id]: true }; paint();
+        store.likeVoice(me.id).catch((e) => console.warn('like', e));
+      };
+    };
+    paint();
+  }
+  let rwKind = 'frame', rwConfirm = '';
+  function drawRewards(body) {
+    if (!RW) { body.innerHTML = '<div class="loading">جارٍ التحميل…</div>'; return; }
+    const coins = myCoins(), items = shopItems(SHOP).filter((x) => !x.hidden);
+    const owned = new Set(RW.owned || []), look = RW.look || {};
+    const days = activeDays(), cur = { streak: Math.max(streakOf(days).days, bestStreak(days)), count: data.subs.length };
+    const achCard = (a) => {
+      const n = RW.ach?.[a.id] || 0;
+      if (a.hidden) return n ? `<div class="ach on"><span class="ach-i">${a.icon}</span><b>${esc(a.name)}</b><small>${esc(a.desc())}</small></div>`
+        : '<div class="ach off"><span class="ach-i">❓</span><b>وسام مخفي</b><small>اكتشفه بنفسك!</small></div>';
+      const next = a.at[n];
+      return `<div class="ach ${n ? 'on l' + n : 'off'}"><span class="ach-i">${a.icon}</span><b>${esc(a.name)}</b><small>${n ? LEVELS[n - 1] : 'لم يُفتح بعد'}</small>
+        ${next ? `<div class="ach-bar"><i style="width:${Math.min(100, Math.round((cur[a.id] / next) * 100))}%"></i></div><small class="muted">${ar(Math.min(cur[a.id], next))} / ${ar(next)} · التالي ${LEVELS[n]}</small>` : '<small>🏆 أعلى مستوى</small>'}</div>`;
+    };
+    const myBadges = [...(me.rankInfo?._badges || []), ...items.filter((x) => x.kind === 'badge' && owned.has(x.id)).map((x) => ({ icon: x.v || '🏅', label: x.name, color: x.color }))];
+    const preview = (it) => it.kind === 'frame' ? `<span class="lk lk-f-${esc(it.v)}">${esc(me.name)}</span>` : it.kind === 'title' ? `<span class="lk-t" style="display:inline-block">${esc(it.v)}</span>`
+      : it.kind === 'color' ? `<b style="color:${esc(it.v)}">${esc(me.name)}</b>` : it.kind === 'icon' || it.kind === 'badge' ? `<span style="font-size:30px">${esc(it.v || '🏅')}</span>` : `<span style="font-size:28px">${it.v === 'stars' ? '⭐✨' : it.v === 'moon' ? '🌙✨' : '🎆🎇'}</span>`;
+    const card = (it) => {
+      const has = owned.has(it.id), slot = SLOT[it.kind], worn = slot && look[slot] === it.v, can = meetsNeed(it, RW.ach);
+      const btn = has ? (slot ? `<button class="btn sm ${worn ? 'primary' : ''}" type="button" data-wear="${esc(it.id)}">${worn ? '✓ مستخدَم' : 'استخدِم'}</button>` : '<span class="pill ok">✓ لك</span>')
+        : it.grantOnly ? '<span class="small muted">🎖️ يمنحه المعلم</span>'
+        : !can ? `<span class="small muted">🔒 ${esc(it.needTxt || 'يُفتح بوسام المداوم الذهبي')}</span>`
+        : rwConfirm === it.id ? `<button class="btn sm primary" type="button" data-buy="${esc(it.id)}">تأكيد الشراء بـ ${ar(it.price)} 🪙</button>`
+        : `<button class="btn sm" type="button" data-pre="${esc(it.id)}" ${coins < it.price ? 'disabled' : ''}>${it.price ? `اشترِ · ${ar(it.price)} 🪙` : 'احصل عليه'}</button>${coins < it.price ? `<small class="muted">ينقصك ${ar(it.price - coins)}</small>` : ''}`;
+      return `<div class="shop-it${has ? ' own' : ''}${it.rare ? ' rare' : ''}"><div class="shop-pv">${preview(it)}</div><b>${esc(it.name)}</b>${btn}</div>`;
+    };
+    const kinds = Object.keys(KINDS).filter((k) => items.some((x) => x.kind === k));
+    if (!kinds.includes(rwKind)) rwKind = kinds[0] || 'frame';
+    const hasLook = Object.keys(look).some((k) => look[k] && k !== 'pn');
+    body.innerHTML = `<div class="stack" style="gap:16px">
+      <div class="card rw-head"><div><span class="small muted">رصيدك</span><div class="rw-coins">🪙 ${ar(coins)}</div><small class="muted">تكسب مكافأة مع كل نقطة في لوحة الشرف، وأكثر مع الأوسمة. الشراء لا ينقص نقاطك ولا ترتيبك.</small></div>
+        <div class="rw-me"><span class="small muted">اسمك كما يراه الجميع</span><div class="rw-name"><span data-lk="${esc(me.id)}">${esc(me.name)}</span></div>${hasLook ? '<button class="btn sm ghost" type="button" id="rwPlain">بلا زينة</button>' : ''}</div></div>
+      <div class="card stack"><h3>🏅 أوسمتي</h3><div class="ach-grid">${ACH.map(achCard).join('')}</div>
+        ${myBadges.length ? `<div class="badges">${myBadges.map((b) => `<span class="badge-pill" style="--bc:${esc(b.color || '#a77a1c')}">${esc(b.icon || '🏅')} ${esc(b.label)}</span>`).join('')}</div>` : ''}</div>
+      <div class="card stack"><h3>🛍️ المتجر</h3>
+        <div class="seg shop-tabs" role="tablist">${kinds.map((k) => `<button type="button" role="tab" class="${k === rwKind ? 'on' : ''}" data-rk="${k}">${KINDS[k]}</button>`).join('')}</div>
+        <div class="shop-grid">${items.filter((x) => x.kind === rwKind).map(card).join('') || '<p class="muted">لا شيء هنا بعد.</p>'}</div></div></div>`;
+    $$('[data-rk]', body).forEach((b) => (b.onclick = () => { rwKind = b.dataset.rk; rwConfirm = ''; drawRewards(body); }));
+    $$('[data-pre]', body).forEach((b) => (b.onclick = () => { rwConfirm = b.dataset.pre; drawRewards(body); }));
+    $$('[data-buy]', body).forEach((b) => (b.onclick = async () => {
+      const it = items.find((x) => x.id === b.dataset.buy); if (!it || myCoins() < (it.price || 0)) return;
+      b.disabled = true;
+      const wallet = { ...RW.wallet, spent: (RW.wallet?.spent || 0) + (it.price || 0) }, ow = [...new Set([...(RW.owned || []), it.id])];
+      try { await store.saveRewards(me.id, { wallet, owned: ow }); RW = { ...RW, wallet, owned: ow }; rwConfirm = ''; toast(`🎉 صار «${it.name}» لك!`); confetti(); draw(); }
+      catch (e) { b.disabled = false; toast('تعذر الشراء: ' + (e.code || e.message)); }
+    }));
+    const saveLook = async (lk) => {
+      try { await store.saveRewards(me.id, { look: lk }); await store.setMyLook(me.id, lk).catch((e) => console.warn('look', e)); RW = { ...RW, look: lk }; FX.kind = lk.x || ''; setLook(me.id, lk); drawRewards(body); }
+      catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    };
+    $$('[data-wear]', body).forEach((b) => (b.onclick = () => {
+      const it = items.find((x) => x.id === b.dataset.wear); if (!it) return;
+      const slot = SLOT[it.kind], lk = { ...(RW.look || {}) };
+      if (lk[slot] === it.v) delete lk[slot]; else lk[slot] = it.v;
+      saveLook(lk); if (it.kind === 'fx' && lk.x) playFx(lk.x);
+    }));
+    const pl = $('#rwPlain', body); if (pl) pl.onclick = () => saveLook({});
   }
   function celebrateStreak() {
     const st = streakOf(activeDays());
@@ -1251,7 +1382,7 @@ function viewStudent(app) {
       $('#hwS', app).textContent = `${hRange(m)}${m.tb ? ` · جولة فاصلة ${ar(m.tb)}` : ''}`;
       const w = m.done ? m.winner : null;
       const lane = (p, r, side) => { const L = live[side] || {}; const pct = r ? 100 : L.total ? Math.round((L.done / L.total) * 100) : 0; const acc = r ? r.s : L.done ? Math.round((L.ok / Math.max(1, L.done)) * 100) : 0;
-        return `<div class="race-lane${w === p.pn ? ' win' : ''}"><div class="rl-name">${esc(p.name)}${p.pn === me.id ? ' (أنت)' : ''} ${L.on && !r ? '<span class="rl-on">🎙️ يقرأ الآن</span>' : ''}</div>
+        return `<div class="race-lane${w === p.pn ? ' win' : ''}"><div class="rl-name"><span data-lk="${esc(p.pn)}">${esc(p.name)}</span>${p.pn === me.id ? ' (أنت)' : ''} ${L.on && !r ? '<span class="rl-on">🎙️ يقرأ الآن</span>' : ''}</div>
           <div class="rl-track"><i style="width:${pct}%"></i><span>${r?.pend ? '⏳ بانتظار تقييم المعلم لتسجيله' : r ? `النتيجة ${ar(r.s)}٪${r.pen ? ` (دقة ${ar(r.p)}٪ − تجويد ${ar(r.pen)})` : ''}` : L.total ? `${ar(pct)}٪ من المقطع · دقة ${ar(acc)}٪` : 'لم يبدأ بعد'}</span></div>
           ${r && (m.live || r.pend) ? `<button class="btn sm" type="button" data-aud="${esc(`${m.id}_${side}_${m.tb || 0}`)}">🔊 استمع لتلاوته</button>` : ''}</div>`; };
       $('#hwBody', app).innerHTML = `<div class="race">${lane(m.a, m.ra, 'a')}${m.b ? lane(m.b, m.rb, 'b') : ''}</div>
@@ -1355,7 +1486,7 @@ function viewStudent(app) {
         : st === 'declined' ? '<span class="pill mute">اعتذر</span>'
         : st === 'cancelled' ? (w === me.id ? '<span class="pill ok">🏆 فزت (ألغاه زميلك)</span>' : `<span class="pill mute">أُلغي${!c.cancel.free && c.cancel.by === me.id ? ` (−${ar(CH_PTS.cancel)})` : ''}</span>`)
         : w === me.id ? '<span class="pill ok">🏆 فزت</span>' : w === 'tie' ? '<span class="pill warn">🤝 تعادل</span>' : w ? '<span class="pill mute">خسرت</span>' : '<span class="pill mute">انتهى الوقت</span>';
-      return `<li><div><b>${v.incoming ? '⬅' : '➡'} ${esc(v.other.name)}</b><span class="small muted">${esc(chLabel(c))}${st === 'open' ? ' · ' + esc(ar(timeLeft(c))) : v.mine && v.theirs ? ` · ${ar(v.mine.p)}٪ مقابل ${ar(v.theirs.p)}٪` : ''}</span></div><div class="row" style="gap:4px;flex-wrap:nowrap">${res}</div></li>`;
+      return `<li><div><b>${v.incoming ? '⬅' : '➡'} <span data-lk="${esc(v.other.pn)}" data-lk-no-title>${esc(v.other.name)}</span></b><span class="small muted">${esc(chLabel(c))}${st === 'open' ? ' · ' + esc(ar(timeLeft(c))) : v.mine && v.theirs ? ` · ${ar(v.mine.p)}٪ مقابل ${ar(v.theirs.p)}٪` : ''}</span></div><div class="row" style="gap:4px;flex-wrap:nowrap">${res}</div></li>`;
     };
     host.innerHTML = `<div class="card ch-card stack" style="gap:10px;margin-bottom:16px">
       <div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3><span class="small muted">انتصاراتك: <b>${ar(wins)}</b> من ${ar(played)}</span></div>
@@ -1481,7 +1612,7 @@ function viewStudent(app) {
   }
   function showChResult(body, c, fresh = false) {
     const v = chView(c, me.id), st = chStatus(c), w = chWinner(c);
-    const tile = (who, r) => `<div class="ch-tile${w === who.pn ? ' win' : ''}"><span>${esc(who.name)}</span><b>${r?.pend ? '⏳' : r ? ar(r.p) + '٪' : '—'}</b><small>${r ? `${ar(r.wpm)} كلمة/دقيقة` : st === 'open' ? 'لم يسمّع بعد' : 'لم يشارك'}</small>${w === who.pn ? '<i>🏆</i>' : ''}</div>`;
+    const tile = (who, r) => `<div class="ch-tile${w === who.pn ? ' win' : ''}"><span data-lk="${esc(who.pn)}">${esc(who.name)}</span><b>${r?.pend ? '⏳' : r ? ar(r.p) + '٪' : '—'}</b><small>${r ? `${ar(r.wpm)} كلمة/دقيقة` : st === 'open' ? 'لم يسمّع بعد' : 'لم يشارك'}</small>${w === who.pn ? '<i>🏆</i>' : ''}</div>`;
     const head = st === 'review' ? `⏳ وصل تسجيل ${v.mine?.pend ? 'ك' : esc(v.other.name)} إلى المعلم ليقيّمه بنفسه، وتظهر النتيجة بعد تقييمه.`
       : st === 'open' ? `سمّعت بدقة ${ar(v.mine.p)}٪، والآن ننتظر ${esc(v.other.name)} (${esc(ar(timeLeft(c)))}).`
       : st === 'declined' ? 'اعتذر عن التحدي.'
@@ -1587,7 +1718,7 @@ function viewStudent(app) {
     paintBell();
     openModal(`<div class="stack"><h2>التنبيهات</h2>
       ${L.length ? `<ul class="notif-list">${L.map((n) => `<li><button type="button" class="notif-item${(n.createdAt || '') > seen ? ' new' : ''}" data-nid="${esc(n.id)}">
-        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'speechFix' ? '🎙️' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'late' ? '⏰' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
+        <span class="notif-ico">${n.type === 'board' ? '🏆' : n.type === 'month' ? (n.win ? '🏅' : '📊') : n.type === 'season' ? (n.icon || '🏆') : n.type === 'streak' ? '🔥' : n.type === 'ann' ? '📢' : n.type === 'remind' ? '⏰' : n.type === 'retake' ? '🔁' : n.type === 'fbReply' ? '💬' : n.type === 'speechFix' ? '🎙️' : n.type === 'voice' ? '🎙️' : n.type === 'reward' ? '🎁' : n.type === 'challenge' ? '⚔️' : n.type === 'cheer' ? '💚' : n.type === 'khatma' ? '📿' : n.type === 'hero' ? '🏆' : n.type === 'late' ? '⏰' : n.type === 'grade' ? (n.score >= 8 ? '🎉' : '⭐') : n.type === 'task-edit' ? '✎' : '📖'}</span>
         <span class="notif-tx"><b>${esc((n.title || '').replace(/^(🎉|📢|⏰|🔁|🔥|👑|🏆|🏅|📊|🌟|🏁|💬|⚔️|🤝|💚|📿)\s*/u, ''))}</b><span>${esc(n.body || '')}</span><small class="muted">${esc(timeAgo(n.createdAt))}</small></span></button></li>`).join('')}</ul>`
         : '<div class="empty">لا توجد تنبيهات خلال آخر ٣٠ يوماً.</div>'}
       ${pushState(me.id) === 'ready' ? '<p class="small muted" style="margin:0">لتصلك التنبيهات على جوالك حتى والمقرأة مغلقة، فعّلها من «الإعدادات».</p>' : ''}</div>`, (m) => {
@@ -1625,8 +1756,12 @@ function viewStudent(app) {
       app.innerHTML = `<div class="empty">تعذر تحميل البيانات: ${esc(e.message)}</div>`;
       return;
     }
+    RW = { wallet: { spent: 0, bonus: 0 }, owned: [], ach: {}, look: null, ...(me.rankInfo?._rw || {}) };
+    FX.kind = RW.look?.x || '';
+    if (RW.look) setLook(me.id, RW.look);
     draw();
     pruneImageCache();
+    Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({}))]).then(([sh, lk]) => { SHOP = sh; setLooks({ ...looksMap(lk), ...(RW.look ? { [me.id]: RW.look } : {}) }); if (tab === 'rewards' && $('#stBody', app)) draw(); });
     store.listSeasons().then((L) => { mySeasons = L; paintSeason(); }).catch(() => {});
     loadHeroes();
     iqraCfg().then((c) => { const on = (c.pns || []).includes(me.id); if (on !== iqraOn) { iqraOn = on; if ($('#stBody', app) && !offIqra) draw(); } }).catch(() => {});
@@ -1638,6 +1773,7 @@ function viewStudent(app) {
     openSubId = null; // درجة من إشعار: نفتح «سجل التسميع» ويعرض announceGrades الاحتفال
     announceGrades();
     whenModalFree(() => { if ($('#stBody', app)) celebrateStreak(); });
+    setTimeout(() => checkAch(), 1500);
     if (!offNotifs) offNotifs = store.watchNotifs(me.classId, async (L) => {
       // درجة جديدة وصلت والصفحة مفتوحة: نحدّث التسليمات ونعرض الاحتفال
       if (L.some((n) => n.type === 'retake' && !notifs.some((o) => o.id === n.id)) && paintBell.done) {
@@ -1706,7 +1842,7 @@ function viewStudent(app) {
     const streak = streakOf(activeDays()).days;
     app.innerHTML = `
       <div class="page-head">
-        <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، ${esc(me.name)}</h1>
+        <div><span class="muted small">${esc(cls?.name || '')}</span><h1>السلام عليكم، <span data-lk="${esc(me.id)}">${esc(me.name)}</span></h1>
           ${me.rankInfo?.month?.stage === 1 ? `<span class="title-pill">${rankBadge(1)} شيخ المرحلة هذا الشهر</span>` : me.rankInfo?.month?.cls === 1 ? `<span class="title-pill">${rankBadge(1)} قارئ الصف هذا الشهر</span>` : ''}
           ${(me.rankInfo?._badges || []).length ? `<div class="badges">${me.rankInfo._badges.slice(-6).map((b) => `<span class="badge-pill" style="--bc:${esc(b.color || '#a77a1c')}" title="${esc(b.title || '')}">${esc(b.icon || '🏅')} ${esc(b.label)}</span>`).join('')}</div>` : ''}</div>
         <div class="row"><button class="btn bell-btn" id="stBell" type="button" aria-label="التنبيهات"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg><span class="bell-n"></span></button><button class="btn gear-btn${tab === 'settings' ? ' on' : ''}" id="stSet" type="button" aria-pressed="${tab === 'settings'}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg> الإعدادات</button><button class="btn" id="stOut" type="button">تسجيل الخروج</button></div>
@@ -1717,10 +1853,10 @@ function viewStudent(app) {
         <div class="kpi"><b>${ar(data.subs.length)}</b><span>مرات التسميع</span></div>
         <div class="kpi" id="kpiStreak" title="تُحسب الأيام التي سمّعت فيها واجباً أو تدرّبت دقيقة فأكثر"><b>🔥 ${ar(streak)}</b><span>أيام متتالية</span></div>
       </div>
-      ${tab === 'tasks' ? '<div id="cdMonth"></div>' : ''}
+      ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="voiceStu"></div>' : ''}
       <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء'], ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`]].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>
       <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
@@ -1734,6 +1870,7 @@ function viewStudent(app) {
       mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
       mountPrayerTile($('#prTileW', app));
       mountMonthCountdown($('#cdMonth', app), { onHonor: () => { tab = 'honor'; draw(); } });
+      mountVoiceStu($('#voiceStu', app));
     }
     startPrayerAlerts((m) => toast(m));
     // إعلان تعديل التعرف على الصوت: يظهر عند كل فتح للموقع، حتى يضغط الطالب «فهمت، لا تظهرها مرة أخرى»
@@ -1750,6 +1887,7 @@ function viewStudent(app) {
     if (tab === 'practice') drawPractice(body);
     if (tab === 'honor') drawHonor(body);
     if (tab === 'mushaf') drawMushaf(body);
+    if (tab === 'rewards') drawRewards(body);
     if (tab === 'heroes') drawHeroes(body);
     if (tab === 'iqra') offIqra = mountIqraStudent(body, { me, toast, confetti });
     if (tab === 'settings') drawStSettings(body);
@@ -2293,6 +2431,7 @@ function viewTeacher(app) {
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
     loadIqraT();
+    loadRewardsT().catch((e) => console.warn('rewards', e));
     unsub?.();
     unsub = store.watchSubmissions((subs) => { D.subs = subs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); schedulePublish(); if (!load.mb) { load.mb = true; setTimeout(checkMonthBar, 300); setTimeout(migrateGrades, 1500); } setTimeout(replaceRetaken, 800); if (tab === 'subs' || tab === 'reports' || tab === 'honor') drawBody(); else drawHead(); }, (e) => toast('تعذر تحديث التسليمات: ' + (e.code || e.message)));
     draw();
@@ -3960,7 +4099,7 @@ function viewTeacher(app) {
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
   const boardSubs = () => {
-    const base = D.subs.concat(D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : []);
+    const base = D.subs.concat(voiceBonus(), D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
   function schedulePublish() {
@@ -4021,7 +4160,7 @@ function viewTeacher(app) {
     const { board } = computeBoard(boardSubs(), D.students, D.classes);
     const months = [...new Set(D.subs.map((x) => (x.createdAt || '').slice(0, 7)).filter(Boolean))].sort().reverse();
     const cur = new Date().toISOString().slice(0, 7);
-    body.innerHTML = `<div class="card stack" style="gap:10px;margin-bottom:16px" id="revT"></div><div class="card stack month-card" style="gap:10px;margin-bottom:16px">
+    body.innerHTML = `<div class="card stack" style="gap:10px;margin-bottom:16px" id="revT"></div><div class="card stack" style="gap:10px;margin-bottom:16px" id="voiceT"></div><div class="card stack" style="gap:10px;margin-bottom:16px" id="shopT"></div><div class="card stack month-card" style="gap:10px;margin-bottom:16px">
         <div class="row" style="justify-content:space-between"><h3>📅 نتائج الشهر والشهادات</h3><span class="small muted" id="mStat"></span></div>
         <p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>
         <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}</div>
@@ -4032,7 +4171,7 @@ function viewTeacher(app) {
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="ssAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
       <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="lsT" class="lists-wrap" style="margin-bottom:16px"></div><div id="hbBoard"></div>`;
-    drawRevT($('#revT', body));
+    drawRevT($('#revT', body)); drawVoiceT($('#voiceT', body)); drawShopT($('#shopT', body));
     drawKhAdmin($('#khAdm', body));
     drawHeroAdmin($('#hrAdm', body));
     drawSeasonAdmin($('#ssAdm', body));
@@ -4491,6 +4630,137 @@ function viewTeacher(app) {
         toast(`حُفظت نتيجة ${x.who.name}: ${ar(r.p)}٪`);
         schedulePublish(); drawRevT(host);
       } catch (e) { b.disabled = false; toast('تعذر الحفظ: ' + (e.code || e.message)); }
+    }));
+  }
+  /* ================= المكافآت (المعلم): المتجر، والمنح، وصوت الأسبوع ================= */
+  async function loadRewardsT() {
+    store.ensureLooks?.().catch(() => {});
+    let [sh, lk, vs, v] = await Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({})), store.listVoices().catch(() => []), store.getVoice().catch(() => null)]);
+    D.shop = sh || { items: {} }; D.voices = vs || []; D.voice = v;
+    // زينة اختارها طالب قبل إنشاء مستند الزينة المشترك: يضيفها المعلم من سجل الطالب
+    const miss = {};
+    D.students.forEach((x) => { if (x.look && x.uid && !lk?.[x.uid]) miss[x.uid] = { ...x.look, pn: x.id }; });
+    if (Object.keys(miss).length && store.mode === 'cloud') { lk = { ...(lk || {}), ...miss }; store.setLooksAll?.(miss).catch(() => {}); }
+    setLooks(looksMap(lk));
+    schedulePublish();
+    if (tab === 'honor') drawBody();
+  }
+  const voiceBonus = () => (D.voices || []).filter((v) => v.pn && v.pts).map((v) => ({ pn: v.pn, bonus: v.pts, createdAt: v.at }));
+  let shopKind = 'title';
+  function drawShopT(host) {
+    if (!host) return;
+    if (!D.shop) { host.innerHTML = '<h3>🛍️ المتجر والمكافآت</h3><div class="loading">جارٍ التحميل…</div>'; return; }
+    const mods = D.shop.items || {};
+    const all = [...CATALOG.map((x) => ({ ...x, ...(mods[x.id] || {}) })), ...Object.values(mods).filter((x) => x?.custom && !x.deleted)];
+    const kinds = Object.keys(KINDS);
+    const L = all.filter((x) => x.kind === shopKind && !x.deleted);
+    const valLabel = { frame: 'الشكل', title: 'نص اللقب', color: 'اللون', icon: 'الرمز', fx: 'التأثير', badge: 'رمز الوسام' };
+    host.innerHTML = `<h3>🛍️ المتجر والمكافآت</h3>
+      <p class="small muted" style="margin:0">الطلاب يكسبون 🪙 مكافأة لكل نقطة في لوحة الشرف، ومع الأوسمة. عدّل الأسعار، أو أخفِ ما لا تريده، أو أضف ألقاباً وأوسمة خاصة: تُباع في المتجر، أو تمنحها أنت لطالب.</p>
+      <div class="seg" role="tablist">${kinds.map((k) => `<button type="button" class="${k === shopKind ? 'on' : ''}" data-sk="${k}">${KINDS[k]}</button>`).join('')}</div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>العنصر</th><th>السعر 🪙</th><th>في المتجر</th><th></th></tr></thead><tbody>
+        ${L.map((x) => `<tr data-it="${esc(x.id)}"><td>${x.kind === 'icon' || x.kind === 'badge' ? esc(x.v) + ' ' : x.kind === 'color' ? `<span class="sw" style="background:${esc(x.v)}"></span> ` : ''}<b>${esc(x.name)}</b>${x.kind === 'title' ? ` <span class="small muted">«${esc(x.v)}»</span>` : ''}${x.need ? ' <span class="pill">نادر</span>' : ''}</td>
+          <td><input type="number" min="0" max="5000" value="${x.price || 0}" data-price style="width:90px" aria-label="السعر"></td>
+          <td><select data-mode aria-label="طريقة الحصول"><option value="sell" ${!x.hidden && !x.grantOnly ? 'selected' : ''}>يُباع</option><option value="grant" ${x.grantOnly ? 'selected' : ''}>يمنحه المعلم فقط</option><option value="hide" ${x.hidden ? 'selected' : ''}>مخفي</option></select></td>
+          <td>${x.custom ? '<button class="btn sm danger" type="button" data-del>حذف</button>' : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا عناصر.</td></tr>'}
+      </tbody></table></div>
+      <details class="sp-box"><summary><b>➕ إضافة لقب أو وسام أو رمز</b></summary>
+        <div class="row" style="margin-top:10px">
+          <label class="field" style="flex:1 1 130px">النوع<select id="shK">${['title', 'badge', 'icon', 'color'].map((k) => `<option value="${k}" ${k === shopKind ? 'selected' : ''}>${KINDS[k]}</option>`).join('')}</select></label>
+          <label class="field" style="flex:2 1 180px">الاسم<input id="shN" maxlength="40" placeholder="مثلاً: متقن الأسبوع"></label>
+          <label class="field" style="flex:1 1 120px" id="shVL">${valLabel[shopKind] || 'القيمة'}<input id="shV" maxlength="30" placeholder="🏅 أو نص اللقب"></label>
+          <label class="field" style="flex:1 1 90px">السعر 🪙<input id="shP" type="number" min="0" max="5000" value="30"></label>
+          <label class="field" style="flex:1 1 140px">طريقة الحصول<select id="shM"><option value="sell">يُباع في المتجر</option><option value="grant">يمنحه المعلم فقط</option></select></label>
+        </div><button class="btn primary" type="button" id="shAdd">إضافة</button></details>
+      <details class="sp-box"><summary><b>🎖️ منح طالب عنصراً أو مكافآت</b></summary>
+        <div class="row" style="margin-top:10px">
+          <label class="field" style="flex:2 1 180px">الطالب<select id="grS">${D.students.slice().sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((x) => `<option value="${esc(x.id)}">${esc(x.name)} · ${esc(className(x.classId))}</option>`).join('')}</select></label>
+          <label class="field" style="flex:2 1 180px">العنصر<select id="grI"><option value="">— مكافآت فقط —</option>${all.filter((x) => !x.deleted).map((x) => `<option value="${esc(x.id)}">${esc(KINDS[x.kind].split(' ')[0])} ${esc(x.name)}</option>`).join('')}</select></label>
+          <label class="field" style="flex:1 1 100px">مكافآت 🪙<input id="grC" type="number" min="0" max="500" value="0"></label>
+        </div><button class="btn primary" type="button" id="grGo">امنح</button></details>
+      <div class="row"><button class="btn primary" type="button" id="shSave">حفظ تعديلات المتجر</button></div>`;
+    const kk = host.querySelector('#shK'), kv = host.querySelector('#shV');
+    const ph = { title: 'نص اللقب', badge: '🏅 رمز', icon: '🌟 رمز', color: '#0f8a5f' };
+    kk.onchange = () => { kv.placeholder = ph[kk.value]; kv.type = kk.value === 'color' ? 'color' : 'text'; host.querySelector('#shVL').firstChild.textContent = valLabel[kk.value]; };
+    kk.onchange();
+    $$('[data-sk]', host).forEach((b) => (b.onclick = () => { shopKind = b.dataset.sk; drawShopT(host); }));
+    const collect = () => {
+      const m = { ...(D.shop.items || {}) };
+      $$('[data-it]', host).forEach((tr) => {
+        const id = tr.dataset.it, base = CATALOG.find((c) => c.id === id), cur = m[id] || {};
+        const price = Math.max(0, Math.min(5000, +tr.querySelector('[data-price]').value || 0)), mode = tr.querySelector('[data-mode]').value;
+        const patch = { price, hidden: mode === 'hide', grantOnly: mode === 'grant' };
+        m[id] = base ? { ...cur, ...patch } : { ...cur, ...patch };
+      });
+      return m;
+    };
+    $$('[data-del]', host).forEach((b) => (b.onclick = () => { const id = b.closest('[data-it]').dataset.it; D.shop.items = { ...collect(), [id]: { ...(D.shop.items[id] || {}), deleted: true } }; drawShopT(host); }));
+    host.querySelector('#shAdd').onclick = () => {
+      const k = kk.value, n = host.querySelector('#shN').value.trim(), v = kv.value.trim() || (k === 'title' ? n : '');
+      if (!n || !v) return toast('اكتب الاسم والقيمة.');
+      const id = 'u-' + Date.now().toString(36);
+      D.shop.items = { ...collect(), [id]: { id, kind: k, name: n, v, price: Math.max(0, +host.querySelector('#shP').value || 0), grantOnly: host.querySelector('#shM').value === 'grant', custom: true } };
+      shopKind = k; drawShopT(host); toast('أُضيف. لا تنسَ «حفظ تعديلات المتجر».');
+    };
+    host.querySelector('#shSave').onclick = async (e) => {
+      e.target.disabled = true;
+      try { D.shop = { items: collect() }; await store.setShop(D.shop); toast('حُفظ المتجر، ويظهر للطلاب الآن.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); }
+      e.target.disabled = false;
+    };
+    host.querySelector('#grGo').onclick = async (e) => {
+      const pn = host.querySelector('#grS').value, id = host.querySelector('#grI').value, c = Math.max(0, Math.min(500, +host.querySelector('#grC').value || 0));
+      if (!pn || (!id && !c)) return toast('اختر عنصراً أو اكتب عدد المكافآت.');
+      e.target.disabled = true;
+      try {
+        if (id) await store.grantItem(pn, id);
+        if (c) await store.grantCoins(pn, c);
+        const it = all.find((x) => x.id === id), st = D.students.find((x) => x.id === pn);
+        const nid = await store.addStudentNotif(pn, { type: 'reward', title: '🎁 هدية من معلمك', body: `${it ? `«${it.name}»` : ''}${it && c ? ' و' : ''}${c ? `${ar(c)} 🪙 مكافأة` : ''}. افتح «خزانتي».`, link: './#/student', tag: 'rw-' + Date.now() }).catch(() => null);
+        if (nid) sendPush(nid, pn).catch(() => {});
+        toast(`مُنح ${st?.name || 'الطالب'} ${it ? `«${it.name}»` : ''}${it && c ? ' و' : ''}${c ? ar(c) + ' 🪙' : ''}.`);
+      } catch (x) { toast('تعذر المنح: ' + (x.code || x.message)); }
+      e.target.disabled = false;
+    };
+  }
+
+  /* صوت الأسبوع: يقترح الموقع أفضل تسميعات الأيام السبعة الأخيرة، والمعلم يسمع ويختار */
+  function drawVoiceT(host) {
+    if (!host) return;
+    const from = new Date(Date.now() - 7 * 864e5).toISOString();
+    const best = (D.subs || []).filter((x) => x.hasAudio && x.createdAt >= from && !x.teacher && (x.percent ?? 0) >= 85)
+      .sort((a, b) => (b.grade ?? 0) - (a.grade ?? 0) || (b.percent ?? 0) - (a.percent ?? 0)).slice(0, 8);
+    const stu = (pn) => D.students.find((x) => x.id === pn);
+    const v = D.voice, vLikes = v ? Object.keys(v.likes || {}).length : 0;
+    host.innerHTML = `<h3>🎙️ صوت الأسبوع</h3>
+      ${v ? `<div class="voice-cur"><span class="small muted">الحالي (${esc((v.at || '').slice(0, 10))})</span><div><b data-lk="${esc(v.pn)}">${esc(v.name)}</b> · ${esc(v.className || '')} · ${esc(v.range || '')}</div><span class="small">❤️ ${ar(vLikes)} «ما شاء الله»</span></div>` : '<p class="small muted" style="margin:0">لم تختر صوتاً بعد.</p>'}
+      <p class="small muted" style="margin:0">أفضل تسميعات الأيام السبعة الأخيرة (بتسجيل ودقة ٨٥٪ فأكثر). استمع واختر أجملها؛ فيظهر لكل الطلاب في صفحتهم مع زر «ما شاء الله»، وينال صاحبه وسام «صوت الأسبوع» ونقاطاً ومكافآت.</p>
+      <div class="row"><label class="field" style="flex:1 1 120px">نقاط لوحة الشرف<input type="number" id="vPts" min="0" max="50" value="5"></label><label class="field" style="flex:1 1 120px">مكافآت 🪙<input type="number" id="vCoins" min="0" max="500" value="20"></label></div>
+      ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''}${x.grade != null ? ` · درجة ${ar(x.grade)}` : ''}</span></div>
+        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button><button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button></div></li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">لا تسميعات مناسبة في الأيام السبعة الأخيرة بعد.</p>'}`;
+    let au = null;
+    $$('[data-vp]', host).forEach((b) => (b.onclick = async () => {
+      const x = best[+b.dataset.vp]; au?.pause();
+      try { const blob = await store.getAudio(x.pn, x.id); if (!blob) return toast('التسجيل غير متاح.'); au = new Audio(URL.createObjectURL(blob)); au.play(); } catch (e) { toast('تعذر التشغيل: ' + (e.code || e.message)); }
+    }));
+    $$('[data-vc]', host).forEach((b) => (b.onclick = async () => {
+      const x = best[+b.dataset.vc], st = stu(x.pn); if (!st) return;
+      if (!(await confirmBox(`اختيار ${st.name} «صوت الأسبوع»؟`, 'اختره'))) return;
+      b.disabled = true;
+      try {
+        const blob = await store.getAudio(x.pn, x.id); if (!blob) throw new Error('التسجيل غير متاح');
+        const id = 'v' + Date.now().toString(36), at = new Date().toISOString();
+        const pts = Math.max(0, Math.min(50, +$('#vPts', host).value || 0)), coins = Math.max(0, Math.min(500, +$('#vCoins', host).value || 0));
+        if (!(await store.saveVoiceAudio(id, blob))) throw new Error('التسجيل طويل جداً');
+        const range = rangeLabel(x.surah, x.from, x.to);
+        const vv = { id, pn: st.id, name: st.name, classId: st.classId, className: className(st.classId), surah: x.surah, from: x.from, to: x.to, range, at, pts, likes: {} };
+        await store.setVoice(vv);
+        D.voice = vv; D.voices = [...(D.voices || []), vv];
+        await store.addBadges({ [st.id]: { id: 'voice-' + id, icon: '🎙️', color: '#0f5c46', label: 'صوت الأسبوع', title: range, at } }).catch(() => {});
+        if (coins) await store.grantCoins(st.id, coins).catch(() => {});
+        const nid = await store.addStudentNotif(st.id, { type: 'voice', title: '🎙️ أنت «صوت الأسبوع»!', body: `اختار معلمك تلاوتك (${range}) لتُسمَع في صفحة كل الطلاب. +${ar(pts)} نقاط و${ar(coins)} 🪙 ووسام «صوت الأسبوع». ما شاء الله!`, link: './#/student', tag: 'voice-' + id }).catch(() => null);
+        if (nid) sendPush(nid, st.id).catch(() => {});
+        schedulePublish(); toast(`صار ${st.name} «صوت الأسبوع». ما شاء الله!`); drawVoiceT(host);
+      } catch (e) { b.disabled = false; toast('تعذر: ' + (e.code || e.message)); }
     }));
   }
   async function drawChAdmin(host) {

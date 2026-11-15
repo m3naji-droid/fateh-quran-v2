@@ -40,6 +40,24 @@ service cloud.firestore {
     match /leaderboard/{id} {
       allow read: if signedIn();
       allow write: if isTeacher();
+      // زينة الأسماء: كل طالب يغيّر مفتاحه فقط (مفتاحه معرّف حسابه، وفيه رقمه)
+      allow update: if id == 'looks' && signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid])
+        && isStudent(request.resource.data[request.auth.uid].pn);
+      // «ما شاء الله» على صوت الأسبوع: كل طالب يضيف إعجابه فقط
+      allow update: if id == 'voice' && signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
+        && request.resource.data.likes.diff(resource.data.get('likes', {})).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.likes[request.auth.uid] == true;
+    }
+    // أرشيف «صوت الأسبوع» وتسجيلاته
+    match /voices/{vid} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+      match /audio/{k} {
+        allow read: if signedIn();
+        allow write: if isTeacher();
+      }
     }
     // التنبيهات: يكتبها المعلم، ويقرؤها الطلاب في جرس الموقع
     match /notifs/{id} {
@@ -160,9 +178,15 @@ service cloud.firestore {
       allow get: if isTeacher() || (signedIn() && resource.data.get('uid', '') == request.auth.uid);
       allow list, create, delete: if isTeacher();
       // الطالب يستطيع فقط تسجيل أنه غيّر كلمة سره
+      // والمكافآت: الأوسمة والزينة والشراء (لا يزيد المنفَق عن رصيده، ولا ينقص، ولا تُحذف مشترياته)
       allow update: if isTeacher()
         || (signedIn() && resource.data.get('uid', '') == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pwChanged', 'pwChangedAt']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pwChanged', 'pwChangedAt', 'wallet', 'owned', 'ach', 'look'])
+            && request.resource.data.get('owned', []).hasAll(resource.data.get('owned', []))
+            && request.resource.data.get('wallet', {}).get('spent', 0) >= resource.data.get('wallet', {}).get('spent', 0)
+            && request.resource.data.get('wallet', {}).get('bonus', 0) >= resource.data.get('wallet', {}).get('bonus', 0)
+            && request.resource.data.get('wallet', {}).get('bonus', 0) <= resource.data.get('wallet', {}).get('bonus', 0) + 200
+            && request.resource.data.get('wallet', {}).get('spent', 0) <= resource.data.get('rank', {}).get('all', {}).get('points', 0) + request.resource.data.get('wallet', {}).get('bonus', 0) + 1);
 
       // طلب تسليم واجب بعد انتهاء موعده: ينشئه الطالب، ويقرّره المعلم
       match /late/{tid} {

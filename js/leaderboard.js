@@ -129,7 +129,7 @@ function rows(items, me, valueFn, subFn) {
   if (!items.length) return '<div class="empty small">لا توجد نتائج بعد. أول من يسلّم واجباته يتصدر!</div>';
   return `<ol class="lb-list">${items.map((x, i) => `<li class="${me && x.id === me ? 'me' : ''} r${i + 1}">
     ${rankBadge(i + 1)}
-    <span class="lb-name"><b>${esc(x.name)}</b>${subFn ? `<small>${subFn(x)}</small>` : ''}</span>
+    <span class="lb-name"><b data-lk="${esc(x.id)}">${esc(x.name)}</b>${subFn ? `<small>${subFn(x)}</small>` : ''}</span>
     <span class="lb-val">${valueFn(x)}</span></li>`).join('')}</ol>`;
 }
 

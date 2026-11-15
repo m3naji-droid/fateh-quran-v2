@@ -13,8 +13,8 @@ function podium(top, title, sub) {
   const order = [1, 0, 2].filter((i) => top[i]); // الثاني، الأول، الثالث
   const medal = ['👑', '🥈', '🥉'];
   return `<div class="cr-slide"><h1 class="cr-title">${esc(title)}</h1><p class="cr-sub">${esc(sub)}</p>
-    <div class="cr-podium">${order.map((i) => `<div class="cr-step s${i + 1}" style="--d:${[1.6, 0.9, 0.3][i]}s"><div class="cr-medal">${medal[i]}</div><div class="cr-name">${esc(top[i].name)}</div>${top[i].className ? `<div class="cr-cls">${esc(top[i].className)}</div>` : ''}<div class="cr-pts">${pts(top[i].points)}</div><div class="cr-block">${ar(i + 1)}</div></div>`).join('')}</div>
-    ${top.length > 3 ? `<div class="cr-rest">${top.slice(3, 5).map((x, j) => `<div style="--d:${2.4 + j * 0.3}s"><b>${ar(j + 4)}</b> ${esc(x.name)} <span>${pts(x.points)}</span></div>`).join('')}</div>` : ''}</div>`;
+    <div class="cr-podium">${order.map((i) => `<div class="cr-step s${i + 1}" style="--d:${[1.6, 0.9, 0.3][i]}s"><div class="cr-medal">${medal[i]}</div><div class="cr-name" data-lk="${esc(top[i].id || '')}">${esc(top[i].name)}</div>${top[i].className ? `<div class="cr-cls">${esc(top[i].className)}</div>` : ''}<div class="cr-pts">${pts(top[i].points)}</div><div class="cr-block">${ar(i + 1)}</div></div>`).join('')}</div>
+    ${top.length > 3 ? `<div class="cr-rest">${top.slice(3, 5).map((x, j) => `<div style="--d:${2.4 + j * 0.3}s"><b>${ar(j + 4)}</b> <span data-lk="${esc(x.id || '')}" data-lk-no-title>${esc(x.name)}</span> <span>${pts(x.points)}</span></div>`).join('')}</div>` : ''}</div>`;
 }
 function race(classes, focus) {
   if (!classes.length) return '<div class="cr-slide"><h1 class="cr-title">تحدي الصفوف</h1><p class="cr-sub">لا نقاط بعد هذا الشهر.</p></div>';
