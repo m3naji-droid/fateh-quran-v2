@@ -241,7 +241,7 @@ const local = {
   async listAnnouncements() { return LS.get('anns', []); },
   async publishAnnouncementLocal(id) {
     const all = LS.get('anns', []); const a = all.find((x) => x.id === id); if (!a || a.status === 'sent') return;
-    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, hasImage: !!a.hasImage, link: './#/student/ann/' + id, tag: 'ann-' + id };
+    const n = { type: 'ann', annId: id, title: '📢 ' + (a.title || 'إعلان من معلمك'), body: a.body, hasImage: !!a.hasImage, popup: !!a.popup, link: './#/student/ann/' + id, tag: 'ann-' + id };
     const t = a.target || { type: 'all' };
     if (t.type === 'student') await this.addNotif({ ...n, classId: 'stu:' + t.studentId, studentId: t.studentId });
     else for (const cid of t.type === 'classes' ? t.classIds : ['all']) await this.addNotif({ ...n, classId: cid });

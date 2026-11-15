@@ -1339,10 +1339,18 @@ function viewStudent(app) {
     $$('[data-ack]', host).forEach((b) => (b.onclick = () => ackAnn(b.dataset.ack)));
     $$('[data-annopen]', host).forEach((b) => (b.onclick = () => openAnn(b.dataset.annopen)));
   }
-  function openAnn(aid) {
+  /** إعلان «صفحة منبثقة» لم يقرأه: يظهر في وسط الشاشة فور الفتح (الأقدم أولاً) */
+  function checkPopAnn() {
+    if (!$('#stBody', app) || openAnn.pending) return;
+    const acked = new Set(pref.get(ackKey, [])), pop = anns().filter((n) => n.popup && !acked.has(n.annId)).pop();
+    if (!pop) return;
+    openAnn.pending = true;
+    whenModalFree(() => { openAnn.pending = false; if ($('#stBody', app) && !new Set(pref.get(ackKey, [])).has(pop.annId)) openAnn(pop.annId, true); setTimeout(checkPopAnn, 800); });
+  }
+  function openAnn(aid, pop = false) {
     const n = anns().find((x) => x.annId === aid);
     if (!n) return toast('هذا الإعلان لم يعد موجوداً.');
-    openModal(`<div class="stack"><h2>📢 ${esc((n.title || '').replace(/^📢\s*/, ''))}</h2><p style="margin:0;white-space:pre-wrap;line-height:2">${esc(n.body || '')}</p>
+    openModal(`<div class="stack${pop || n.popup ? ' ann-pop' : ''}">${pop || n.popup ? '<div class="ann-pop-ic">📢</div><span class="ann-pop-tag">إعلان من معلمك</span>' : ''}<h2>${pop || n.popup ? '' : '📢 '}${esc((n.title || '').replace(/^📢\s*/, ''))}</h2><p style="margin:0;white-space:pre-wrap;line-height:2">${esc(n.body || '')}</p>
       ${n.hasImage ? '<div class="ann-img" id="annImg"><div class="loading">جارٍ تحميل الصورة…</div></div>' : ''}
       <small class="muted">${esc(timeAgo(n.createdAt))}</small><div class="row"><button class="btn primary" type="button" data-close>فهمت</button></div></div>`, (m) => {
       if (!n.hasImage) return;
@@ -1904,6 +1912,7 @@ function viewStudent(app) {
     }
     RW = { wallet: { spent: 0, bonus: 0 }, owned: [], ach: {}, look: null, ...(me.rankInfo?._rw || {}) };
     hbStart();
+    setTimeout(checkPopAnn, 1600);
     FX.kind = RW.look?.x || '';
     if (RW.look) setLook(me.id, RW.look);
     draw();
@@ -1942,6 +1951,7 @@ function viewStudent(app) {
       notifs = L.filter((n) => !(n.taskId && ['task', 'task-edit', 'remind'].includes(n.type) && knownTasks.has(n.taskId) && !data.tasks.some((x) => x.id === n.taskId)) && !(n.taskId && ['task', 'task-edit', 'remind'].includes(n.type) && knownTasks.size && !knownTasks.has(n.taskId) && n.createdAt < (loadedAt || '')));
       paintBell(); paintBell.done = true; paintAnnBar();
       if (openAnnId && anns().some((n) => n.annId === openAnnId)) { const id = openAnnId; openAnnId = null; openAnn(id); }
+      else checkPopAnn();
       const months = L.filter((n) => n.type === 'month');
       const mDeep = openMonthYm && months.find((n) => n.ym === openMonthYm);
       if (mDeep) { openMonthYm = null; openMonth(mDeep); }
@@ -3264,6 +3274,11 @@ function viewTeacher(app) {
           <label class="field" style="flex:1 1 160px">الصف<select id="anStuC">${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
           <label class="field" style="flex:2 1 200px">الطالب<select id="anStuS"></select></label>
         </div>
+        <fieldset class="seg-field"><legend>طريقة العرض</legend>
+          <label><input type="radio" name="anM" value="bar" checked> 📌 شريط أعلى الصفحة</label>
+          <label><input type="radio" name="anM" value="popup"> 🪟 صفحة منبثقة</label>
+        </fieldset>
+        <p class="small muted" id="anMNote" style="margin:-6px 0 0" hidden>تظهر للطالب نافذة في وسط الشاشة فور فتحه الموقع (مرة واحدة)، ويبقى الإعلان بعدها في الجرس. مناسبة للتنبيهات المهمة.</p>
         <fieldset class="seg-field"><legend>متى يُرسل؟</legend>
           <label><input type="radio" name="anW" value="now" checked> الآن</label>
           <label><input type="radio" name="anW" value="later"> في موعد محدد</label>
@@ -3311,6 +3326,7 @@ function viewTeacher(app) {
     };
     $('#anPicX', body).onclick = () => { pic = null; $('#anPrev', body).hidden = true; $('#anPickL', body).hidden = false; };
     $$('[name=anT]', body).forEach((r) => (r.onchange = () => { const v = $('[name=anT]:checked', body).value; $('#anCls', body).hidden = v !== 'classes'; $('#anStu', body).hidden = v !== 'student'; }));
+    $$('[name=anM]', body).forEach((r) => (r.onchange = () => { $('#anMNote', body).hidden = $('[name=anM]:checked', body).value !== 'popup'; }));
     $$('[name=anW]', body).forEach((r) => (r.onchange = () => { $('#anLater', body).hidden = $('[name=anW]:checked', body).value !== 'later'; }));
     $('#evSave', body).onclick = async () => {
       const v = $('#evT', body).value || '19:00';
@@ -3341,7 +3357,7 @@ function viewTeacher(app) {
       btn.disabled = true;
       try {
         if (pic && imgsToday(await store.listAnnouncements()) >= IMG_DAILY_LIMIT) { btn.disabled = false; return toast(`وصلت إلى حد ${ar(IMG_DAILY_LIMIT)} صور اليوم. أزل الصورة أو أرسلها غداً.`); }
-        const fields = { title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length };
+        const fields = { title: $('#anTitle', body).value.trim(), body: $('#anBody', body).value.trim(), target, status: later ? 'scheduled' : 'pending', sendAt, recipients: annRecipients(target).length, popup: $('[name=anM]:checked', body).value === 'popup' };
         // الحالة «مسودة» حتى تُرفع الصورة، فلا يُنشر إعلان مجدول قبل اكتمال صورته
         const id = await store.saveAnnouncement(pic ? { ...fields, status: 'draft', hasImage: true, imageBytes: Math.ceil(pic.blob.size * 4 / 3) } : fields);
         if (pic) {
@@ -3376,7 +3392,7 @@ function viewTeacher(app) {
       <div class="row" style="justify-content:space-between;align-items:flex-start"><div><b>${esc(a.title || 'إعلان من معلمك')}</b><div class="small muted">إلى: ${esc(annTargetLabel(a.target))}</div></div>
         ${a.status === 'scheduled' ? `<span class="pill warn">مجدول · ${esc(whenText(a.sendAt))}</span>` : a.status === 'sent' ? `<span class="pill ok">أُرسل ${esc(timeAgo(a.sentAt) === 'الآن' ? 'للتو' : timeAgo(a.sentAt))}</span>` : '<span class="pill mute">لم يُرسل</span>'}</div>
       <p style="margin:6px 0;white-space:pre-wrap">${esc(a.body)}</p>
-      ${a.hasImage ? `<button class="ann-thumb" type="button" data-anpic="${esc(a.id)}" aria-label="عرض صورة الإعلان"><span>📷 عرض الصورة</span><small class="muted">${esc(fmtKB(a.imageBytes || 0))}</small></button>` : ''}
+      ${a.popup ? '<span class="pill gold-pill">🪟 صفحة منبثقة</span>' : ''}${a.hasImage ? `<button class="ann-thumb" type="button" data-anpic="${esc(a.id)}" aria-label="عرض صورة الإعلان"><span>📷 عرض الصورة</span><small class="muted">${esc(fmtKB(a.imageBytes || 0))}</small></button>` : ''}
       <div class="row" style="justify-content:space-between">
         <span class="small" data-reads="${esc(a.id)}">${a.status === 'sent' ? 'جارٍ عدّ القراءات…' : ''}</span>
         <span class="row" style="gap:4px">${a.status === 'scheduled' || a.status === 'pending' ? `<button class="btn sm" type="button" data-now="${esc(a.id)}">أرسل الآن</button>` : `<button class="btn sm" type="button" data-unread="${esc(a.id)}">من لم يقرأ؟</button>`}<button class="btn sm danger" type="button" data-andel="${esc(a.id)}">${a.status === 'scheduled' ? 'إلغاء' : 'حذف'}</button></span>

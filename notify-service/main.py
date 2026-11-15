@@ -155,7 +155,7 @@ def publish_announcement(aid: str) -> dict:
         return {"sent": 0, "failed": 0, "removed": 0, "already": True}
     img = bool(a.get("hasImage"))
     n = {
-        "type": "ann", "annId": aid, "hasImage": img,
+        "type": "ann", "annId": aid, "hasImage": img, "popup": bool(a.get("popup")),
         "title": "📢 " + (a.get("title") or "إعلان من معلمك"),
         "body": a.get("body", ""),
         "link": "./#/student/ann/" + aid, "tag": "ann-" + aid,

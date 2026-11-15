@@ -1313,3 +1313,12 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .wu-cls .small { grid-column: 2; }
 .wu-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } @media (max-width: 560px) { .wu-two { grid-template-columns: 1fr; } }
 .on-dot[hidden] { display: none; }
+/* إعلان «صفحة منبثقة» */
+.ann-pop { text-align: center; align-items: center; }
+.ann-pop .ann-pop-ic { font-size: 54px; line-height: 1; animation: annPop .5s cubic-bezier(.2, 1.6, .4, 1); }
+.ann-pop .ann-pop-tag { font-size: 12px; font-weight: 800; color: #8a6400; background: #fbefc4; padding: 3px 12px; border-radius: 999px; }
+.ann-pop h2 { margin: 0; }
+.ann-pop p { text-align: center; font-size: 17px; }
+.ann-pop .row { justify-content: center; }
+.ann-pop .ann-img { width: 100%; }
+@keyframes annPop { from { transform: scale(.3); opacity: 0; } }
