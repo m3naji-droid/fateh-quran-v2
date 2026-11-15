@@ -4831,7 +4831,12 @@ function viewTeacher(app) {
   function drawVoiceT(host) {
     if (!host) return;
     const W = weekRange(voiceWeek);
-    const chosen = new Set((D.voices || []).map((v) => v.sid).filter(Boolean));
+    // معرّف تسليم الواجب واحد لكل الطلاب (t_رقم الواجب)، فالمفتاح رقم الطالب مع المعرّف
+    const vk = (pn, sid) => `${pn}|${sid}`;
+    const chosen = new Set((D.voices || []).filter((v) => v.sid).map((v) => vk(v.pn, v.sid)));
+    const forWeek = (r) => (D.voices || []).filter((v) => (v.wk ? v.wk === r.from : v.week === r.label));
+    const wkOf = (v) => v?.wk || v?.at || '';
+    const weekVoices = forWeek(W);
     // كل تسميعات الأسبوع، المقيَّمة وغير المقيَّمة
     const inWeek = (D.subs || []).filter((x) => x.createdAt >= W.from && x.createdAt < W.to);
     const withAu = inWeek.filter((x) => x.hasAudio), gone = inWeek.filter((x) => x.audioDeletedAt).length;
@@ -4847,12 +4852,13 @@ function viewTeacher(app) {
         <div class="row" style="gap:8px"><span class="small">❤️ ${ar(vLikes)} «ما شاء الله»</span><button class="btn sm" type="button" id="vCurP">🔊 استمع</button></div></div>` : '<p class="small muted" style="margin:0">لم تختر صوتاً بعد.</p>'}
       <ol class="vw-steps small"><li>اختر الأسبوع.</li><li>استمع لأفضل تسميعاته (بتسجيل ودقة ٨٥٪ فأكثر).</li><li>حدّد النقاط والمكافآت، ثم اضغط «⭐ اختره».</li></ol>
       <div class="row">
-        <label class="field" style="flex:2 1 200px">الأسبوع<select id="vWeek">${Array.from({ length: 8 }, (_, k) => { const r = weekRange(k); return `<option value="${k}" ${k === voiceWeek ? 'selected' : ''}>${r.name} · ${r.label}</option>`; }).join('')}</select></label>
+        <label class="field" style="flex:2 1 200px">الأسبوع<select id="vWeek">${Array.from({ length: 8 }, (_, k) => { const r = weekRange(k), n = forWeek(r).length; return `<option value="${k}" ${k === voiceWeek ? 'selected' : ''}>${n ? '🎙️ ' : ''}${r.name} · ${r.label}${n ? ' · اخترت له' : ''}</option>`; }).join('')}</select></label>
         <label class="field" style="flex:1 1 110px">نقاط لوحة الشرف<input type="number" id="vPts" min="0" max="50" value="5"></label>
         <label class="field" style="flex:1 1 110px">مكافآت 🪙<input type="number" id="vCoins" min="0" max="500" value="20"></label>
       </div>
-      ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li${chosen.has(x.id) ? ' class="vw-done"' : ''}><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''} · ${esc((x.createdAt || '').slice(0, 10))}</span>${chosen.has(x.id) ? ' <span class="pill ok">اختير من قبل</span>' : ''}</div>
-        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button>${chosen.has(x.id) ? '' : `<button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button>`}</div></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">${esc(why)}</p>`}
+      ${weekVoices.length ? `<div class="small">🎙️ صوت ${esc(W.name)}: ${weekVoices.map((p) => `<b data-lk="${esc(p.pn)}">${esc(p.name)}</b>${p.id === v?.id ? ' <span class="pill ok">يظهر للطلاب الآن</span>' : ''}`).join('، ')}</div>` : ''}
+      ${best.length ? `<ul class="rev-list">${best.map((x, i) => `<li${chosen.has(vk(x.pn, x.id)) ? ' class="vw-done"' : ''}><div><b data-lk="${esc(x.pn)}">${esc(stu(x.pn)?.name || x.studentName || '')}</b> <span class="small muted">${esc(className(stu(x.pn)?.classId))} · ${esc(rangeLabel(x.surah, x.from, x.to))} · ${x.percent != null ? ar(x.percent) + '٪' : ''} · ${esc((x.createdAt || '').slice(0, 10))}</span>${chosen.has(vk(x.pn, x.id)) ? ' <span class="pill ok">اختير من قبل</span>' : ''}</div>
+        <div class="row" style="gap:6px"><button class="btn sm" type="button" data-vp="${i}">🔊 استمع</button>${chosen.has(vk(x.pn, x.id)) ? '' : `<button class="btn sm primary" type="button" data-vc="${i}">⭐ اختره</button>`}</div></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">${esc(why)}</p>`}
       <details class="sp-box"${past.length ? '' : ' hidden'}><summary><b>📼 الأصوات السابقة (${ar(past.length)})</b></summary>
         <ul class="rev-list" style="margin-top:8px">${past.map((p, i) => `<li><div><b data-lk="${esc(p.pn)}">${esc(p.name)}</b> <span class="small muted">${esc(p.className || '')} · ${esc(p.range || '')} · ${p.week ? esc(p.week) : esc((p.at || '').slice(0, 10))}</span>${p.likes ? ` <span class="small">❤️ ${ar(Object.keys(p.likes).length)}</span>` : ''}</div>
           <div class="row" style="gap:6px"><button class="btn sm" type="button" data-pp="${i}">🔊 استمع</button><button class="btn sm ghost" type="button" data-pr="${i}" title="يظهر للطلاب من جديد دون نقاط أو مكافآت إضافية">↺ اعرضه من جديد</button></div></li>`).join('')}</ul></details>`;
@@ -4879,16 +4885,23 @@ function viewTeacher(app) {
         const id = 'v' + Date.now().toString(36), at = new Date().toISOString();
         const pts = Math.max(0, Math.min(50, +$('#vPts', host).value || 0)), coins = Math.max(0, Math.min(500, +$('#vCoins', host).value || 0));
         if (!(await store.saveVoiceAudio(id, blob))) throw new Error('التسجيل طويل جداً');
-        if (D.voice) await store.archiveVoice(D.voice).catch(() => {}); // يُحفظ عدد «ما شاء الله» للصوت السابق
         const range = rangeLabel(x.surah, x.from, x.to);
-        const vv = { id, sid: x.id, pn: st.id, name: st.name, classId: st.classId, className: className(st.classId), surah: x.surah, from: x.from, to: x.to, range, week: W.label, at, pts, likes: {} };
-        await store.setVoice(vv);
-        D.voices = [...(D.voices || []).map((p) => (p.id === D.voice?.id ? D.voice : p)), vv]; D.voice = vv;
+        const vv = { id, sid: x.id, pn: st.id, name: st.name, classId: st.classId, className: className(st.classId), surah: x.surah, from: x.from, to: x.to, range, week: W.label, wk: W.from, at, pts, likes: {} };
+        // صوت لأسبوع أقدم من الصوت الظاهر الآن: يُحفظ في الأرشيف ولا يحلّ محلّ صوت الأسبوع الأحدث
+        const show = !D.voice || wkOf(D.voice) <= W.from;
+        if (show) {
+          if (D.voice) await store.archiveVoice(D.voice).catch(() => {}); // يُحفظ عدد «ما شاء الله» للصوت السابق
+          await store.setVoice(vv);
+          D.voices = [...(D.voices || []).map((p) => (p.id === D.voice?.id ? D.voice : p)), vv]; D.voice = vv;
+        } else {
+          await store.archiveVoice(vv);
+          D.voices = [...(D.voices || []), vv];
+        }
         await store.addBadges({ [st.id]: { id: 'voice-' + id, icon: '🎙️', color: '#0f5c46', label: 'صوت الأسبوع', title: `${range} · ${W.label}`, at } }).catch(() => {});
         if (coins) await store.grantCoins(st.id, coins).catch(() => {});
-        const nid = await store.addStudentNotif(st.id, { type: 'voice', title: '🎙️ أنت «صوت الأسبوع»!', body: `اختار معلمك تلاوتك (${range}) لتُسمَع في صفحة كل الطلاب. +${ar(pts)} نقاط و${ar(coins)} 🪙 ووسام «صوت الأسبوع». ما شاء الله!`, link: './#/student', tag: 'voice-' + id }).catch(() => null);
+        const nid = await store.addStudentNotif(st.id, { type: 'voice', title: '🎙️ أنت «صوت الأسبوع»!', body: `اختار معلمك تلاوتك (${range}) صوتاً لـ${W.name}${show ? ' لتُسمَع في صفحة كل الطلاب' : ''}. +${ar(pts)} نقاط و${ar(coins)} 🪙 ووسام «صوت الأسبوع». ما شاء الله!`, link: './#/student', tag: 'voice-' + id }).catch(() => null);
         if (nid) sendPush(nid, st.id).catch(() => {});
-        schedulePublish(); toast(`صار ${st.name} «صوت الأسبوع». ما شاء الله!`); drawVoiceT(host);
+        schedulePublish(); toast(show ? `صار ${st.name} «صوت الأسبوع». ما شاء الله!` : `اختير ${st.name} صوتاً لـ${W.name} (حُفظ في الأصوات السابقة، ويبقى صوت الأسبوع الأحدث ظاهراً للطلاب).`); drawVoiceT(host);
       } catch (e) { b.disabled = false; toast('تعذر: ' + (e.code || e.message)); }
     }));
   }
