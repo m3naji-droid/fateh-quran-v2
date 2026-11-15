@@ -15,11 +15,22 @@ export const CATALOG = [
   { id: 'f-gold', kind: 'frame', name: 'إطار ذهبي', v: 'gold', price: 90 },
   { id: 'f-crown', kind: 'frame', name: 'إطار التاج الملكي', v: 'crown', price: 0, need: 'streak:3', rare: true },
   // الألقاب لا تُشترى: تُنال بالإنجاز (earn) أو يمنحها المعلم
+  // لكل لقب ثلاثة مستويات: 🥉 برونزي بالعدد المكتوب، 🥈 فضي بضعفه، 🥇 ذهبي بثلاثة أضعافه
   { id: 't-flag', kind: 'title', name: 'حامل الراية', v: 'حامل الراية', earn: 'days:10' },
   { id: 't-himma', kind: 'title', name: 'صاحب الهمّة', v: 'صاحب الهمّة', earn: 'streak:15' },
   { id: 't-rafiq', kind: 'title', name: 'رفيق القرآن', v: 'رفيق القرآن', earn: 'streak:20' },
-  { id: 't-faris', kind: 'title', name: 'فارس التحديات', v: 'فارس التحديات', earn: 'wins:16' },
+  { id: 't-faris', kind: 'title', name: 'فارس التحديات', v: 'فارس التحديات', earn: 'wins:15' },
   { id: 't-star', kind: 'title', name: 'نجم المقرأة', v: 'نجم المقرأة', earn: 'voices:2' },
+  { id: 't-mutqin', kind: 'title', name: 'المُتقِن', v: 'المُتقِن', earn: 'perfect:10' },
+  { id: 't-fajr', kind: 'title', name: 'فجر الهمّة', v: 'فجر الهمّة', earn: 'fajr:5' },
+  { id: 't-night', kind: 'title', name: 'قارئ الليل', v: 'قارئ الليل', earn: 'night:10' },
+  { id: 't-back', kind: 'title', name: 'العائد بقوة', v: 'العائد بقوة', earn: 'back:7' },
+  { id: 't-amma', kind: 'title', name: 'حافظ جزء عمّ', v: 'حافظ جزء عمّ', earn: 'amma:1' },
+  { id: 't-brave', kind: 'title', name: 'المقدام', v: 'المقدام', earn: 'brave:20' },
+  { id: 't-champ', kind: 'title', name: 'بطل الدوري', v: 'بطل الدوري', earn: 'champ:1' },
+  { id: 't-athar', kind: 'title', name: 'صاحب الأثر', v: 'صاحب الأثر', earn: 'top:1' },
+  { id: 't-iqra', kind: 'title', name: 'صاعد اقرأ وارتقِ', v: 'صاعد اقرأ وارتقِ', earn: 'iqra:10' },
+  { id: 't-fix', kind: 'title', name: 'مُصحِّح أخطائه', v: 'مُصحِّح أخطائه', earn: 'fixed:20' },
   { id: 'c-emerald', kind: 'color', name: 'زمردي', v: '#0f8a5f', price: 15 },
   { id: 'c-ruby', kind: 'color', name: 'ياقوتي', v: '#c0263e', price: 15 },
   { id: 'c-royal', kind: 'color', name: 'أزرق ملكي', v: '#2554c7', price: 15 },
@@ -44,21 +55,50 @@ export function shopItems(shop) {
   return [...base, ...extra].filter((x) => !x.deleted).map((x) => (x.kind === 'title' ? { ...x, price: 0, grantOnly: !x.earn } : x));
 }
 
-/* ---------------- شروط الألقاب ---------------- */
-// ctx: { days: عدد أيام المراجعة كلها، streak: أطول سلسلة أيام متتالية، wins: مرات الفوز، voices: مرات «صوت الأسبوع» }
+/* ---------------- شروط الألقاب ومستوياتها ---------------- */
+// ctx: { days, streak, wins, voices, perfect, fajr, night, back, amma:[عدد مرات تسميع كل سورة من جزء عمّ], brave, champ, top, iqra, fixed }
+// المستوى k (١ برونزي، ٢ فضي، ٣ ذهبي) يحتاج need(n, k)؛ والأصل n × k
+const cnt = (n, one, two, few, many) => (n === 1 ? one : n === 2 ? two : n <= 10 ? `${ar(n)} ${few}` : `${ar(n)} ${many}`);
+const times = (n) => cnt(n, 'مرة واحدة', 'مرتين', 'مرات', 'مرة');
+export const MEDALS = ['🥉', '🥈', '🥇'];
+export const AMMA = 37; // سور جزء عمّ (٧٨–١١٤)
 export const EARN = {
-  days: { txt: (n) => `يراجع ${ar(n)} أيام (متتالية أو متفرقة)`, unit: 'يوم' },
-  streak: { txt: (n) => `يراجع ${ar(n)} يوماً دون انقطاع`, unit: 'يوم متتالٍ' },
-  wins: { txt: (n) => `يفوز في التحديات أكثر من ${ar(n - 1)} مرة`, unit: 'فوز' },
-  voices: { txt: (n) => `يُختار صوته «صوت الأسبوع» ${n === 2 ? 'مرتين' : ar(n) + ' مرات'}`, unit: 'مرة' },
+  days: { txt: (n) => `يراجع ${cnt(n, 'يوماً', 'يومين', 'أيام', 'يوماً')} (متتالية أو متفرقة)` },
+  streak: { txt: (n) => `يراجع ${cnt(n, 'يوماً', 'يومين', 'أيام', 'يوماً')} دون انقطاع` },
+  wins: { need: (n, k) => n * k + 1, txt: (n) => `يفوز في التحديات أكثر من ${ar(n - 1)} مرة` },
+  voices: { txt: (n) => `يُختار صوته «صوت الأسبوع» ${times(n)}` },
+  perfect: { txt: (n) => `يسمّع ${cnt(n, 'تسميعاً', 'تسميعين', 'تسميعات', 'تسميعاً')} بدقة ١٠٠٪` },
+  fajr: { txt: (n) => `يسمّع بين الفجر والشروق في ${cnt(n, 'يوم', 'يومين', 'أيام', 'يوماً')}` },
+  night: { txt: (n) => `يسمّع بعد صلاة العشاء في ${cnt(n, 'ليلة', 'ليلتين', 'ليالٍ', 'ليلة')}` },
+  back: { txt: (n) => `يعود بعد انقطاع أسبوع فأكثر ثم يواظب ${cnt(n, 'يوماً', 'يومين', 'أيام', 'يوماً')} متتالية` },
+  amma: { need: (n, k) => k, txt: (k) => `يسمّع سور جزء عمّ كلها بدقة ٨٥٪ فأكثر${k > 1 ? ` (${times(k)})` : ''}`,
+    val: (ctx) => (ctx.amma?.length ? Math.min(...ctx.amma) : 0), prog: (ctx, k) => ({ have: (ctx.amma || []).filter((c) => c >= k).length, need: AMMA, unit: 'سورة' }) },
+  brave: { txt: (n) => `يقبل ${cnt(n, 'تحدياً', 'تحديين', 'تحديات', 'تحدياً')} ويشارك فيها، فاز أو خسر` },
+  champ: { txt: (n) => `يفوز بنهائي مسابقة الأبطال ${times(n)}` },
+  top: { txt: (n) => `يكون الأول في لوحة الشرف (في صفه أو على المرحلة) ${n === 1 ? 'شهراً' : n === 2 ? 'شهرين' : ar(n) + ' أشهر'}` },
+  iqra: { txt: (n) => `يُتقن ${cnt(n, 'درساً', 'درسين', 'دروس', 'درساً')} في «اقرأ وارتقِ»` },
+  fixed: { txt: (n) => `يُصلح ${cnt(n, 'خطأً', 'خطأين', 'أخطاء', 'خطأً')} من دفتر الأخطاء (يعيد الموضع صحيحاً)` },
 };
-const parseEarn = (e) => { const [k, n] = String(e || '').split(':'); return EARN[k] ? { k, n: +n || 1 } : null; };
-export const earnText = (it) => { const e = parseEarn(it.earn); return e ? EARN[e.k].txt(e.n) : ''; };
-/** {have, need, done} لتقدّم اللقب */
+const parseEarn = (e) => { const [k, n] = String(e || '').split(':'); return EARN[k] ? { k, n: +n || 1, E: EARN[k] } : null; };
+const needOf = (e, k) => (e.E.need ? e.E.need(e.n, k) : e.n * k);
+const valOf = (e, ctx) => (e.E.val ? e.E.val(ctx) : ctx?.[e.k] || 0);
+/** نص شرط المستوى k (١ افتراضاً) */
+export const earnText = (it, k = 1) => { const e = parseEarn(it.earn); return e ? e.E.txt(needOf(e, k)) : ''; };
+/** أعداد المستويات الثلاثة، مثل «🥉 ١٠ · 🥈 ٢٠ · 🥇 ٣٠» */
+export const earnSteps = (it) => { const e = parseEarn(it.earn); return e ? [1, 2, 3].map((k) => `${MEDALS[k - 1]} ${e.k === 'amma' ? '×' + ar(k) : e.k === 'wins' ? '+' + ar(needOf(e, k) - 1) : ar(needOf(e, k))}`).join(' · ') : ''; };
+/** المستوى المستحق (٠ لم يُنل، ١ برونزي، ٢ فضي، ٣ ذهبي) */
+export function earnLevel(it, ctx) {
+  const e = parseEarn(it.earn); if (!e) return 0;
+  const v = valOf(e, ctx);
+  return [1, 2, 3].filter((k) => v >= needOf(e, k)).length;
+}
+/** {lvl, next, have, need, unit, txt} تقدّم اللقب نحو مستواه التالي (next=null عند الذهبي) */
 export function earnProgress(it, ctx) {
   const e = parseEarn(it.earn); if (!e) return null;
-  const have = ctx?.[e.k] || 0;
-  return { have: Math.min(have, e.n), need: e.n, done: have >= e.n };
+  const lvl = earnLevel(it, ctx), next = lvl < 3 ? lvl + 1 : null;
+  if (!next) return { lvl, next, done: true };
+  const need = needOf(e, next), p = e.E.prog ? e.E.prog(ctx, next) : { have: valOf(e, ctx), need };
+  return { lvl, next, have: Math.min(p.have, p.need), need: p.need, unit: p.unit || '', txt: e.E.txt(need), done: lvl >= 1 };
 }
 export const itemById = (shop, id) => shopItems(shop).find((x) => x.id === id);
 
@@ -123,7 +163,7 @@ function decorate(el) {
   if (L.f) el.classList.add('lk-f-' + L.f);
   if (L.c) el.style.setProperty('--lkc', L.c);
   if (L.i) el.insertAdjacentHTML('afterbegin', `<span class="lk-i" aria-hidden="true">${esc(L.i)}</span>`);
-  if (L.t && el.dataset.lkNoTitle == null) el.insertAdjacentHTML('beforeend', `<span class="lk-t">${esc(L.t)}</span>`);
+  if (L.t && el.dataset.lkNoTitle == null) el.insertAdjacentHTML('beforeend', `<span class="lk-t${L.tl ? ' tl' + L.tl : ''}">${L.tl ? MEDALS[L.tl - 1] + ' ' : ''}${esc(L.t)}</span>`);
 }
 let dq = 0;
 export function decorateAll(root = document) {

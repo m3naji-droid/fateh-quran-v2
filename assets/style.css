@@ -1265,3 +1265,10 @@ body > .upd-bar.upd-bar { position: fixed; z-index: 9000; }
 .rw-kpi-go { font-size: 20px; color: var(--gold); }
 .vw-steps { margin: 0; padding-inline-start: 20px; line-height: 1.9; color: var(--muted); }
 .rev-list li.vw-done { opacity: .7; }
+/* مستويات الألقاب */
+.tl-lv { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #f4e3cf; color: #8a4f1c; }
+.tl-lv.tl2 { background: #e7ebef; color: #4b5866; }
+.tl-lv.tl3 { background: #fbefc4; color: #8a6400; }
+.lk-t.tl3 { color: #b8860b; }
+.lk-t.tl2 { color: #6b7785; }
+.lk-t.tl1 { color: #a0612a; }
