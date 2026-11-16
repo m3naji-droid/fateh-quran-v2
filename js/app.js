@@ -7,7 +7,7 @@ import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
-import { earnHimma, himmaBonus, computeLists, mountLists, HM } from './lists.js';
+import { earnHimma, himmaToday, himmaBonus, computeLists, mountLists, HM } from './lists.js';
 import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { mountIqraStudent, mountIqraTeacher, iqraCfg, iqraBonus, IQ_DEFAULT } from './iqra.js';
@@ -1036,11 +1036,51 @@ function viewStudent(app) {
   /** نقاط «الهمة العالية» من التدريب: نقطة لكل آية صحيحة بسقوفها، أو دقائق لمن لا يعمل عنده التعرّف */
   function earnTraining(sub) {
     try {
-      const day = riyadhDay(), r = earnHimma(me.id, day, sub, hasRecognition);
-      if (!r.pts) return;
+      const day = riyadhDay(), before = himmaToday(me.id, day).pts, r = earnHimma(me.id, day, sub, hasRecognition);
+      HS.n++;
+      if (!r.pts) { paintHmBar(); return; }
       store.logHimma(me.id, day, r).catch((e) => console.warn('himma', e));
-      toast(`🌟 +${ar(r.pts)} ${r.mins ? (r.mins === 1 ? 'نقطة همّة (دقيقة تدريب)' : 'نقاط همّة (دقائق تدريب)') : r.pts === 1 ? 'نقطة همّة' : 'نقاط همّة'}`);
+      HS.pts += r.pts;
+      const total = before + r.pts, newHonor = Math.floor(total / HM.ratio) > Math.floor(before / HM.ratio);
+      hmPop(`<b>🌟 <bdi dir="ltr">+${ar(r.pts)}</bdi> ${r.mins ? 'همّة (دقائق تدريب)' : 'همّة'}</b><span>⭐ <bdi dir="ltr">+${arDec(r.pts / HM.ratio)}</bdi> شرف</span><small>مجموعك اليوم: ${ar(total)} همّة${total >= HM.dayCap ? ' · بلغت سقف اليوم 🎉' : ''}</small>${newHonor ? '<em>🎉 نقطة شرف جديدة!</em>' : ''}`);
+      paintHmBar();
     } catch (e) { console.warn('himma', e); }
+  }
+  /* --- نقاط الهمّة والشرف أثناء التدريب وبعده --- */
+  const HS = { pts: 0, n: 0 };
+  if (store.mode === 'local') window.__earnTraining = earnTraining; // للتجارب المحلية فقط
+  const arDec = (x) => ar(String(Math.round(x * 10) / 10).replace('.', '٫'));
+  /** بطاقة عائمة بعد كل تسميع تدريب */
+  function hmPop(html) {
+    document.querySelector('.hm-pop')?.remove();
+    const el = document.createElement('div'); el.className = 'hm-pop'; el.setAttribute('role', 'status'); el.innerHTML = html;
+    document.body.appendChild(el); setTimeout(() => el.classList.add('out'), 3800); setTimeout(() => el.remove(), 4300);
+  }
+  /** شريط أعلى التدريب: همّة اليوم، وشرفه، وكم تفصله عن نقطة الشرف التالية */
+  function paintHmBar() {
+    const el = $('#hmBar', app); if (!el) return;
+    const t = himmaToday(me.id, riyadhDay()).pts, cap = t >= HM.dayCap, rem = HM.ratio - (t % HM.ratio);
+    el.innerHTML = `<div class="hm-row"><span>🌟 همّتك اليوم <b>${ar(t)}</b><small> / ${ar(HM.dayCap)}</small></span><span>⭐ شرف اليوم <b>${arDec(t / HM.ratio)}</b></span>${HS.pts ? `<button type="button" class="btn sm ghost" id="hmEnd">إنهاء وعرض الملخص</button>` : ''}</div>
+      <div class="hm-track"><i style="width:${cap ? 100 : ((t % HM.ratio) / HM.ratio) * 100}%"></i></div>
+      <small class="muted">${cap ? '🎉 بلغت سقف اليوم، ما شاء الله! تدريبك بعده لا يزيد النقاط، وعُد غداً.' : `${rem === 1 ? 'نقطة همّة واحدة تفصلك' : rem === 2 ? 'نقطتا همّة تفصلانك' : `${ar(rem)} نقاط همّة تفصلك`} عن نقطة الشرف التالية · كل آية صحيحة (٨٠٪ فأكثر) = نقطة همّة.`}</small>`;
+    const b = $('#hmEnd', el); if (b) b.onclick = () => practiceSummary();
+  }
+  /** ملخص الجلسة عند الخروج من التدريب */
+  async function practiceSummary() {
+    if (!HS.n) return;
+    const s0 = { ...HS }; HS.pts = 0; HS.n = 0; paintHmBar();
+    const t = himmaToday(me.id, riyadhDay()).pts;
+    let rk = me.rankInfo?.lists?.hm;
+    try { rk = (await store.getMyRank(me))?.lists?.hm || rk; } catch {}
+    const rkTxt = rk?.ms ? `<div class="hm-sum-rk">🏅 ترتيبك في «صاحب الهمة العالية» هذا الشهر: <b>${ar(rk.ms)}</b> على المقرأة${rk.mc ? `، و<b>${ar(rk.mc)}</b> في صفك` : ''}<small class="muted">حسب آخر تحديث للوحة الشرف، ويُضاف تدريب اليوم عند تحديثها.</small></div>` : '<div class="hm-sum-rk small muted">يظهر ترتيبك في «صاحب الهمة العالية» بعد أن يحدّث معلمك لوحة الشرف.</div>';
+    whenModalFree(() => {
+      openModal(`<div class="stack hm-sum"><h2 style="margin:0">🎯 ملخص تدريبك</h2>
+        <div class="hm-sum-g"><div><b>${ar(s0.n)}</b><span>${s0.n === 1 ? 'تسميع' : s0.n === 2 ? 'تسميعان' : s0.n <= 10 ? 'تسميعات' : 'تسميعاً'}</span></div><div><b dir="ltr">+${ar(s0.pts)}</b><span>🌟 همّة</span></div><div><b dir="ltr">+${arDec(s0.pts / HM.ratio)}</b><span>⭐ شرف</span></div></div>
+        <p style="margin:0">مجموعك اليوم: <b>${ar(t)}</b> همّة = <b>${arDec(t / HM.ratio)}</b> نقطة شرف${t >= HM.dayCap ? ' (بلغت السقف 🎉)' : ''}.</p>
+        ${s0.pts ? '' : '<p class="small muted" style="margin:0">لم تُحسب نقاط في هذه الجلسة: تُحسب الآية إذا قرأتها بدقة ٨٠٪ فأكثر، وحتى ٣ مرات في اليوم.</p>'}
+        ${rkTxt}<div class="row" style="justify-content:center"><button class="btn primary" type="button" data-close>أحسنت، بارك الله فيك</button></div></div>`);
+      if (s0.pts) setTimeout(() => confetti(), 150);
+    });
   }
   function logAct(kind, sec) {
     const day = riyadhDay();
@@ -2063,7 +2103,7 @@ function viewStudent(app) {
   function draw() {
     comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null;
     if (tab === 'iqra' && !iqraOn) tab = 'tasks';
-    if (tab !== HB.pg) { HB.pg = tab; hbBeat(false); }
+    if (tab !== HB.pg) { if (HB.pg === 'practice') practiceSummary(); HB.pg = tab; hbBeat(false); }
     const cls = data.classes.find((c) => c.id === me.classId);
     const graded = data.subs.filter((x) => x.percent != null);
     const avg = graded.length ? Math.round(graded.reduce((n, x) => n + x.percent, 0) / graded.length) : null;
@@ -2263,7 +2303,9 @@ function viewStudent(app) {
     } catch {}
     if (tab !== 'practice') return;
     comp?.destroy();
-    comp = mountPractice(body, learn, (sec) => logAct('practice', sec), (sub) => { recordProgress(sub); earnTraining(sub); });
+    body.innerHTML = '<div class="card hm-bar" id="hmBar"></div><div id="prWrap"></div>';
+    HS.pts = 0; HS.n = 0; paintHmBar();
+    comp = mountPractice($('#prWrap', body), learn, (sec) => logAct('practice', sec), (sub) => { recordProgress(sub); earnTraining(sub); });
   }
 
   function pushInvite() {

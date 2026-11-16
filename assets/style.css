@@ -1391,3 +1391,17 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .ann-poll-res { display: grid; gap: 4px; padding: 8px 10px; border-radius: 12px; background: #f7f3e8; margin: 6px 0; }
 .poll-r { display: grid; grid-template-columns: minmax(60px, 120px) 1fr auto; gap: 8px; align-items: center; font-size: 13.5px; }
 .poll-bar { height: 10px; background: #e7e0cc; border-radius: 999px; overflow: hidden; } .poll-bar i { display: block; height: 100%; background: #0f5c46; }
+/* نقاط الهمّة والشرف أثناء التدريب */
+.hm-bar { display: grid; gap: 6px; padding: 10px 14px; margin-bottom: 14px; background: linear-gradient(135deg, #fff9e6, #f3faf6); }
+.hm-row { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.hm-row b { font-size: 18px; color: #0f5c46; } .hm-row .btn { margin-inline-start: auto; }
+.hm-track { height: 8px; border-radius: 999px; background: #ece5cf; overflow: hidden; } .hm-track i { display: block; height: 100%; background: linear-gradient(90deg, #c9a54a, #e7c66b); transition: width .5s; }
+.hm-pop { position: fixed; z-index: 900; left: 50%; top: calc(70px + env(safe-area-inset-top)); transform: translateX(-50%); display: grid; gap: 2px; text-align: center; min-width: 230px; padding: 12px 20px; border-radius: 18px; background: #0f3d2e; color: #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, .3); animation: hmIn .35s cubic-bezier(.2, 1.4, .4, 1); transition: opacity .4s, transform .4s; }
+.hm-pop b { font-size: 18px; color: #f3d48a; } .hm-pop span { font-weight: 700; } .hm-pop small { opacity: .85; } .hm-pop em { font-style: normal; font-weight: 800; color: #ffe08a; }
+.hm-pop.out { opacity: 0; transform: translate(-50%, -12px); }
+@keyframes hmIn { from { opacity: 0; transform: translate(-50%, -30px) scale(.9); } }
+.hm-sum { text-align: center; }
+.hm-sum-g { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hm-sum-g > div { background: #f7f3e8; border-radius: 14px; padding: 10px 4px; display: grid; } .hm-sum-g b { font-size: 22px; color: #0f5c46; } .hm-sum-g span { font-size: 13px; }
+.hm-sum-rk small { display: block; margin-top: 4px; }
+.hm-sum-rk { display: block; padding: 10px; border-radius: 12px; background: #f3faf6; }
