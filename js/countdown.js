@@ -21,25 +21,36 @@ function ticker(host, fn) {
   const id = setInterval(() => { if (!host.isConnected) return clearInterval(id); fn(); }, 1000);
 }
 
-/** بطاقة الكأس: العد التنازلي لإعلان الفائزين. teacher=true لنص المعلم. onHonor يفتح لوحة الشرف */
-export function mountMonthCountdown(host, { teacher = false, onHonor } = {}) {
+const DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+/** «الخميس ٢٠ نوفمبر · ٧:٣٠ م» بتوقيت البحرين */
+export function fmtWhen(ms) {
+  const d = new Date(ms + 3 * 3600e3), h = d.getUTCHours(), m = d.getUTCMinutes();
+  return `${DAYS[d.getUTCDay()]} ${AR(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} · ${AR(h % 12 || 12)}:${two(m)} ${h < 12 ? 'ص' : 'م'}`;
+}
+/** الموعد الذي حدده المعلم ما زال فعّالاً (قبله، أو خلال يوم بعده) */
+const customEnd = (cfg, now) => { const t = Date.parse(cfg?.end || ''); return t && now < t + 864e5 ? t : 0; };
+
+/** بطاقة الكأس: العد التنازلي لإعلان الفائزين. teacher=true لنص المعلم. onHonor يفتح لوحة الشرف.
+    cfg: { end, title } موعد يحدده المعلم (وإلا فبداية الشهر القادم)، onEdit: زر «تعديل الموعد» للمعلم */
+export function mountMonthCountdown(host, { teacher = false, onHonor, cfg = null, onEdit = null } = {}) {
   if (!host) return;
   let tip = Math.floor(Math.random() * 100);
   const tips = teacher ? TIPS_T : TIPS;
   host.innerHTML = `<div class="cdA" role="timer" aria-live="off"><span class="cdA-cup" aria-hidden="true">🏆</span>
-    <h3>⏳ بقي حتى إعلان الفائزين هذا الشهر</h3><p class="cdA-sub"></p>
+    <h3>⏳ ${cfg?.title && customEnd(cfg, Date.now()) ? cfg.title.replace(/[<>&]/g, '') : 'بقي حتى إعلان الفائزين هذا الشهر'}</h3><p class="cdA-sub"></p>
     <div class="cdA-boxes" dir="rtl"><div><b data-u="d">٠٠</b><span data-l="d">يوماً</span></div><div><b data-u="h">٠٠</b><span>ساعة</span></div><div><b data-u="m">٠٠</b><span>دقيقة</span></div><div><b data-u="s">٠٠</b><span>ثانية</span></div></div>
     <div class="cdA-tip"></div>
-    <div class="cdA-won" hidden></div></div>`;
+    <div class="cdA-won" hidden></div>${onEdit ? '<button type="button" class="cdA-edit" title="تعديل موعد العد التنازلي">⚙️ تعديل موعد العد التنازلي</button>' : ''}</div>`;
   const $ = (s) => host.querySelector(s);
+  const eb = $('.cdA-edit'); if (eb) eb.onclick = onEdit;
   let lastTip = 0;
   ticker(host, () => {
-    const now = Date.now(), end = nextMonthStart(now), started = thisMonthStart(now);
-    // أول يوم من الشهر: الفائزون أُعلنوا
-    const won = now - started < 864e5;
+    const now = Date.now(), ce = customEnd(cfg, now), end = ce || nextMonthStart(now), started = thisMonthStart(now);
+    // الموعد المحدد حلّ (خلال يومه)، أو أول يوم من الشهر في الوضع التلقائي
+    const won = ce ? now >= ce : now - started < 864e5;
     const prev = new Date(started - 1);
     $('.cdA-won').hidden = !won;
-    if (won) $('.cdA-won').innerHTML = `🎉 أُعلن فائزو شهر ${MONTHS[prev.getUTCMonth()]}! ${onHonor ? '<button type="button" class="btn sm">افتح لوحة الشرف</button>' : ''}`;
+    if (won) $('.cdA-won').innerHTML = `🎉 ${ce ? 'حان موعد إعلان الفائزين!' : `أُعلن فائزو شهر ${MONTHS[prev.getUTCMonth()]}!`} ${onHonor ? '<button type="button" class="btn sm">افتح لوحة الشرف</button>' : ''}`;
     const b = $('.cdA-won button'); if (b && !b.onclick) b.onclick = onHonor;
     let r = Math.max(0, Math.floor((end - now) / 1000));
     const d = Math.floor(r / 86400); r %= 86400;
@@ -48,7 +59,7 @@ export function mountMonthCountdown(host, { teacher = false, onHonor } = {}) {
     $('[data-u=h]').textContent = two(h); $('[data-u=m]').textContent = two(Math.floor(r / 60)); $('[data-u=s]').textContent = two(r % 60);
     const last = (end - now) < 3 * 864e5;
     host.firstElementChild.classList.toggle('hot', last);
-    $('.cdA-sub').textContent = last ? '🔥 الأيام الأخيرة! كل تسميع الآن له وزن' : `يُعلن الفائزون ١ ${MONTHS[new Date(end).getUTCMonth()]} بإذن الله`;
+    $('.cdA-sub').textContent = ce ? (won ? '' : `${last ? '🔥 الأيام الأخيرة! · ' : ''}الموعد: ${fmtWhen(ce)} بإذن الله`) : last ? '🔥 الأيام الأخيرة! كل تسميع الآن له وزن' : `يُعلن الفائزون ١ ${MONTHS[new Date(end).getUTCMonth()]} بإذن الله`;
     if (now - lastTip > 7000) { lastTip = now; tip++; const t = $('.cdA-tip'); t.classList.remove('in'); void t.offsetWidth; t.textContent = tips[tip % tips.length]; t.classList.add('in'); }
   });
 }

@@ -21,7 +21,7 @@ import { compressImage, blobToB64, b64ToBlob, annImage, openLightbox, pruneImage
 import { openImageEditor, openDesigner } from './imgedit.js';
 import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview, notifyOnline } from './push.js';
 import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js';
-import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
+import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts, fmtWhen } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
 import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS } from './rewards.js';
@@ -55,6 +55,7 @@ const TNAV = [['home', 'لوحة اليوم', '🏠', 1], ['subs', 'التسلي
   ['people', 'الصفوف والطلاب', '👥'], ['ann', 'الإعلانات', '📢'], ['honor', 'لوحة الشرف', '🏆'], ['iqra', 'اقرأ وارتقِ', '📖'],
   ['errors', 'الأخطاء ودرجاتها', '🎯'], ['fb', 'رأيك يهمنا', '💬'], ['reports', 'التقارير', '📊'], ['settings', 'الإعدادات', '⚙️']];
 const TBADGE = { watch: 1, iqra: 1, fb: 1 };
+const CDCFG = { v: undefined }; // موعد العد التنازلي الذي حدده المعلم (يُحمّل مرة)
 const ANN_MAX_IMGS = 4;
 const ANN_ACTS = [
   { k: 'tasks', label: 'سمّع واجباتك', btn: '📋 سمّع واجباتك' }, { k: 'practice', label: 'التدريب الحر', btn: '🎯 تدرّب الآن' },
@@ -2153,7 +2154,8 @@ function viewStudent(app) {
     if (tab === 'tasks') {
       mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
       mountPrayerTile($('#prTileW', app));
-      mountMonthCountdown($('#cdMonth', app), { onHonor: () => { tab = 'honor'; draw(); } });
+      const cdS = () => mountMonthCountdown($('#cdMonth', app), { cfg: CDCFG.v, onHonor: () => { tab = 'honor'; draw(); } });
+      cdS(); if (CDCFG.v === undefined) store.getCountdown().then((c) => { CDCFG.v = c || null; cdS(); }).catch(() => { CDCFG.v = null; });
       mountVoiceStu($('#voiceStu', app)); paintOnline();
     }
     startPrayerAlerts((m) => toast(m));
@@ -2755,7 +2757,32 @@ function viewTeacher(app) {
           </div>
         </div>
       </div>`;
-    mountMonthCountdown($('#cdMonthT', app), { teacher: true, onHonor: () => { tab = 'honor'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'honor')); drawBody(); } });
+    const cdT = () => mountMonthCountdown($('#cdMonthT', app), { teacher: true, cfg: CDCFG.v, onEdit: editCountdown, onHonor: () => goTab('honor') });
+    cdT(); store.getCountdown().then((c) => { CDCFG.v = c || null; cdT(); }).catch(() => {});
+    /** المعلم يحدد يوم وتاريخ ووقت نهاية العد التنازلي (بتوقيت البحرين) وعنوانه */
+    function editCountdown() {
+      const cur = Date.parse(CDCFG.v?.end || ''), d = new Date((cur && cur > Date.now() ? cur : Date.now() + 7 * 864e5) + 3 * 3600e3);
+      const val = d.toISOString().slice(0, 16);
+      openModal(`<div class="stack"><h3 style="margin:0">⚙️ موعد إعلان الفائزين</h3>
+        <p class="small muted" style="margin:0">اختر اليوم والتاريخ والوقت الذي ينتهي عنده العد التنازلي (بتوقيت البحرين). يراه الطلاب في صفحتهم فوراً.</p>
+        <label class="field">التاريخ والوقت<input type="datetime-local" id="cdEnd" value="${val}" min="${new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 16)}"></label>
+        <p class="small" id="cdPrev" style="margin:0"></p>
+        <label class="field">العنوان فوق العداد<input type="text" id="cdTitle" maxlength="60" value="${esc(CDCFG.v?.title || 'بقي حتى إعلان الفائزين')}"></label>
+        <p class="small muted" style="margin:0">بعد حلول الموعد يظهر للطلاب «🎉 حان موعد إعلان الفائزين!» يوماً كاملاً، ثم يعود العداد تلقائياً إلى بداية الشهر القادم.</p>
+        <div class="row"><button class="btn primary" type="button" id="cdSave">حفظ الموعد</button>${CDCFG.v?.end ? '<button class="btn" type="button" id="cdAuto">↺ رجوع للتلقائي (بداية الشهر)</button>' : ''}<button class="btn ghost" type="button" data-close>إلغاء</button></div></div>`, (m) => {
+        const inp = $('#cdEnd', m), pv = () => { const t = Date.parse(inp.value + ':00+03:00'); $('#cdPrev', m).textContent = t ? `📅 ${fmtWhen(t)}` : ''; };
+        inp.oninput = pv; pv();
+        $('#cdSave', m).onclick = async () => {
+          const t = Date.parse(inp.value + ':00+03:00');
+          if (!t || t <= Date.now()) return toast('اختر موعداً في المستقبل.');
+          const x = { end: new Date(t).toISOString(), title: $('#cdTitle', m).value.trim() || 'بقي حتى إعلان الفائزين' };
+          try { await store.setCountdown(x); CDCFG.v = x; closeModal(); cdT(); toast(`حُفظ الموعد: ${fmtWhen(t)}`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+        };
+        const a = $('#cdAuto', m); if (a) a.onclick = async () => {
+          try { await store.setCountdown({ end: '' }); CDCFG.v = null; closeModal(); cdT(); toast('رجع العداد إلى بداية الشهر القادم.'); } catch (e) { toast('تعذر: ' + (e.code || e.message)); }
+        };
+      });
+    }
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => goTab(b.dataset.tab)));
     $('#tnMore', app).onclick = openMoreSheet;

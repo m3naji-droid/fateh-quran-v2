@@ -285,6 +285,9 @@ const local = {
   async grantItem(pn, id) { const r = LS.get('roster', {}); if (r[pn]) { r[pn].owned = [...new Set([...(r[pn].owned || []), id])]; LS.set('roster', r); } },
   async grantCoins(pn, n) { const r = LS.get('roster', {}); if (r[pn]) { r[pn].wallet = { ...(r[pn].wallet || {}), bonus: (r[pn].wallet?.bonus || 0) + n }; LS.set('roster', r); } },
   async getVoice() { return LS.get('voice', null); },
+  // موعد العد التنازلي لإعلان الفائزين (يحدده المعلم، وإلا فبداية الشهر)
+  async getCountdown() { return LS.get('countdown', null); },
+  async setCountdown(x) { LS.set('countdown', x); },
   async setVoice(v) { LS.set('voice', v); const a = LS.get('voices', []); LS.set('voices', [...a.filter((x) => x.id !== v.id), v]); },
   async listVoices() { return LS.get('voices', []); },
   async archiveVoice(v) { const a = LS.get('voices', []); LS.set('voices', [...a.filter((x) => x.id !== v.id), v]); },
@@ -737,6 +740,8 @@ async function makeCloud() {
     async grantItem(pn, id) { const r = doc(db, 'roster', pn); const d = await getDoc(r); await updateDoc(r, { owned: [...new Set([...(d.data()?.owned || []), id])] }); },
     async grantCoins(pn, n) { await updateDoc(doc(db, 'roster', pn), { 'wallet.bonus': increment(n) }); },
     async getVoice() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'voice')); return d.exists() ? d.data() : null; },
+    async getCountdown() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'countdown')); return d.exists() ? d.data() : null; },
+    async setCountdown(x) { await setDoc(doc(db, 'leaderboard', 'countdown'), { ...x, at: now() }); },
     async setVoice(v) { await setDoc(doc(db, 'leaderboard', 'voice'), v); await setDoc(doc(db, 'voices', v.id), v); },
     async listVoices() { await ensureAnon(); return list('voices'); },
     async archiveVoice(v) { await setDoc(doc(db, 'voices', v.id), v); },

@@ -1526,3 +1526,5 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
   body:has(.tnav) { padding-bottom: 76px; }
   #tHome .kpis { grid-template-columns: repeat(2, 1fr); }
 }
+.cdA-edit { position: relative; z-index: 2; display: inline-block; margin-top: 10px; border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .14); color: #fff; border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.cdA-edit:hover { background: rgba(255, 255, 255, .26); }
