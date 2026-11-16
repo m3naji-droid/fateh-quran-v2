@@ -50,6 +50,11 @@ function voiceWk(v) {
   return '';
 }
 /* ---- إعلانات غنية: ألبوم صور، ورسالة صوتية، وزر ينقل الطالب ---- */
+/* أقسام المعلم: [المفتاح، الاسم، الرمز، رئيسي في شريط الجوال] */
+const TNAV = [['home', 'لوحة اليوم', '🏠', 1], ['subs', 'التسليمات', '📥', 1], ['watch', 'المتابعة', '👀', 1], ['tasks', 'الواجبات', '📝', 1],
+  ['people', 'الصفوف والطلاب', '👥'], ['ann', 'الإعلانات', '📢'], ['honor', 'لوحة الشرف', '🏆'], ['iqra', 'اقرأ وارتقِ', '📖'],
+  ['errors', 'الأخطاء ودرجاتها', '🎯'], ['fb', 'رأيك يهمنا', '💬'], ['reports', 'التقارير', '📊'], ['settings', 'الإعدادات', '⚙️']];
+const TBADGE = { watch: 1, iqra: 1, fb: 1 };
 const ANN_MAX_IMGS = 4;
 const ANN_ACTS = [
   { k: 'tasks', label: 'سمّع واجباتك', btn: '📋 سمّع واجباتك' }, { k: 'practice', label: 'التدريب الحر', btn: '🎯 تدرّب الآن' },
@@ -2577,7 +2582,7 @@ const G2 = [1, 2, 3, 4, 5].map((n) => ({ id: `g2-${n}`, name: `الثاني ال
 function viewTeacher(app) {
   const s = session.get();
   if (!s || s.role !== 'teacher') return teacherLogin(app);
-  let tab = pref.get('tTab', 'subs');
+  let tab = 'home'; // تبدأ كل زيارة من «لوحة اليوم»
   if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/review/.test(location.hash)) { tab = 'honor'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
@@ -2735,16 +2740,121 @@ function viewTeacher(app) {
         <div class="row"><a class="btn" href="#/practice">معاينة التدريب</a><button class="btn" id="tOut" type="button">تسجيل الخروج</button></div>
       </div>
       <div id="dbWarn"></div>
-      <div id="monthBar"></div>
-      <div class="kpis" id="tKpis"></div>
-      <div id="cdMonthT" style="margin-top:12px"></div>
-      <div id="attn"></div>
-      <div class="tabs" role="tablist">${[['subs', 'التسليمات'], ['watch', '👀 المتابعة'], ['tasks', 'الواجبات'], ['people', 'الصفوف والطلاب'], ['ann', 'الإعلانات'], ['errors', 'الأخطاء ودرجاتها'], ['honor', 'لوحة الشرف'], ['iqra', 'اقرأ وارتقِ'], ['fb', 'رأيك يهمنا'], ['reports', 'التقارير'], ['settings', 'الإعدادات']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'watch' ? '<span class="tab-n on-n" id="wTabN"></span>' : k === 'fb' ? '<span class="tab-n" id="fbTabN"></span>' : k === 'iqra' ? '<span class="tab-n" id="iqTabN"></span>' : ''}</button>`).join('')}</div>
-      <div id="tBody" style="margin-top:16px"></div>`;
+      <div class="tshell">
+        <nav class="tnav" aria-label="أقسام المعلم">${TNAV.map(([k, l, i, main]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}${main ? ' tn-main' : ''}"><i aria-hidden="true">${i}</i><span>${l}</span>${TBADGE[k] ? `<b class="tab-n${k === 'watch' ? ' on-n' : ''}" data-badge="${k}"></b>` : ''}</button>`).join('')}
+          <button type="button" class="tn-more" id="tnMore"><i aria-hidden="true">☰</i><span>المزيد</span><b class="tab-n" data-badge="more"></b></button></nav>
+        <div class="tmain">
+          <div class="tsearch"><input type="search" id="tSearch" placeholder="🔍 ابحث عن طالب أو قسم… (مثلاً: يوسف، الإعلانات)" autocomplete="off" aria-label="بحث"><div class="tsr" id="tSR" hidden></div></div>
+          <div id="tHero"></div>
+          <div id="tHomeTop"><div id="monthBar"></div><div id="attn"></div></div>
+          <div id="tBody" style="margin-top:16px"></div>
+          <div id="tHome">
+            <h3 class="th-sub">📈 أرقام المقرأة</h3>
+            <div class="kpis" id="tKpis"></div>
+            <div id="cdMonthT" style="margin-top:12px"></div>
+          </div>
+        </div>
+      </div>`;
     mountMonthCountdown($('#cdMonthT', app), { teacher: true, onHonor: () => { tab = 'honor'; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === 'honor')); drawBody(); } });
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
-    $$('[data-tab]', app).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; pref.set('tTab', tab); $$('[data-tab]', app).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); }));
+    $$('[data-tab]', app).forEach((b) => (b.onclick = () => goTab(b.dataset.tab)));
+    $('#tnMore', app).onclick = openMoreSheet;
+    wireSearch();
     drawBody();
+  }
+  /** الانتقال إلى قسم من أي مكان (الشريط، والمربعات، والبحث) */
+  function goTab(k) {
+    tab = k; pref.set('tTab', tab);
+    $$('.tnav [data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === k));
+    $('#tnMore', app)?.classList.toggle('on', !TNAV.find((t) => t[0] === k)?.[3]);
+    closeModal(); drawBody(); scrollTo({ top: 0 });
+  }
+  /** «☰ المزيد» على الجوال: بقية الأقسام */
+  function openMoreSheet() {
+    openModal(`<div class="stack"><h3 style="margin:0">☰ كل الأقسام</h3><div class="more-g">${TNAV.filter((t) => !t[3]).map(([k, l, i]) => `<button type="button" data-go="${k}" class="${tab === k ? 'on' : ''}"><i>${i}</i><span>${l}</span>${TBADGE[k] ? `<b class="tab-n" data-badge="${k}">${esc(badgeVal[k] || '')}</b>` : ''}</button>`).join('')}</div></div>`, (m) => {
+      m.classList.add('sheet-modal');
+      $$('[data-go]', m).forEach((b) => (b.onclick = () => goTab(b.dataset.go)));
+    });
+  }
+  /** شارات الأرقام على الأقسام (في الشريط والمزيد والمربعات) */
+  const badgeVal = {};
+  function setBadge(k, n) {
+    badgeVal[k] = n ? ar(n) : '';
+    $$(`[data-badge="${k}"]`).forEach((b) => (b.textContent = badgeVal[k]));
+    const more = TNAV.filter((t) => !t[3] && t[0] !== 'watch').reduce((x, t) => x + (+String(badgeVal[t[0]] || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)) || 0), 0);
+    $$('[data-badge="more"]').forEach((b) => (b.textContent = more ? ar(more) : ''));
+  }
+  /* --- البحث السريع: طالب أو قسم --- */
+  function wireSearch() {
+    const inp = $('#tSearch', app), out = $('#tSR', app); if (!inp) return;
+    const norm = (x) => String(x || '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[\u064B-\u0652]/g, '').trim();
+    const show = () => {
+      const q = norm(inp.value); if (!q) { out.hidden = true; return; }
+      const secs = TNAV.filter(([, l]) => norm(l).includes(q)).slice(0, 4);
+      const stus = D.students.filter((x) => norm(x.name).includes(q) || x.id.includes(inp.value.trim())).slice(0, 6);
+      out.innerHTML = [...secs.map(([k, l, i]) => `<button type="button" data-go="${k}"><i>${i}</i> ${esc(l)} <small class="muted">قسم</small></button>`),
+        ...stus.map((x) => `<button type="button" data-stu="${esc(x.id)}">${isOnline(D.presence?.[x.id]) ? '<span class="on-dot"></span>' : '👤'} <b data-lk="${esc(x.id)}" data-lk-no-title>${esc(x.name)}</b> <small class="muted">${esc(className(x.classId))} · ${esc(x.id)}</small></button>`)].join('') || '<div class="muted small" style="padding:10px">لا نتائج.</div>';
+      out.hidden = false;
+      $$('[data-go]', out).forEach((b) => (b.onclick = () => { inp.value = ''; out.hidden = true; goTab(b.dataset.go); }));
+      $$('[data-stu]', out).forEach((b) => (b.onclick = () => { inp.value = ''; out.hidden = true; openStudentQuick(b.dataset.stu); }));
+    };
+    inp.oninput = show; inp.onfocus = show;
+    inp.onkeydown = (e) => { if (e.key === 'Enter') out.querySelector('button')?.click(); if (e.key === 'Escape') { inp.value = ''; out.hidden = true; } };
+    document.addEventListener('click', (e) => { if (!e.target.closest('.tsearch')) out.hidden = true; });
+  }
+  /** بطاقة سريعة لطالب من البحث */
+  function openStudentQuick(pn) {
+    const st = D.students.find((x) => x.id === pn); if (!st) return;
+    const P = D.presence?.[pn], miss = missingOf(st, doneMap()), subs = D.subs.filter((x) => x.pn === pn).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const pend = subs.filter((x) => !x.teacher).length, last = subs[0];
+    openModal(`<div class="stack"><h2 style="margin:0"><span data-lk="${esc(pn)}">${esc(st.name)}</span></h2>
+      <p class="small muted" style="margin:0">${esc(className(st.classId))} · الرقم ${esc(pn)} · ${isOnline(P) ? '<span class="on-dot"></span> متصل الآن' : P ? 'آخر ظهور ' + esc(agoTxt(Math.min(P.t || 0, P.off || Infinity))) : 'لم يظهر منذ تفعيل المتابعة'}</p>
+      <div class="wu-kpi"><div><b>${ar(subs.length)}</b><span>تسميعاً</span></div><div><b>${ar(pend)}</b><span>بانتظار تقييمك</span></div><div><b>${ar(miss.length)}</b><span>واجبات ناقصة</span></div></div>
+      ${last ? `<p class="small" style="margin:0">آخر تسميع: ${esc(rangeLabel(last.surah, last.from, last.to))} · ${last.percent != null ? ar(last.percent) + '٪ · ' : ''}${esc(timeAgo(last.createdAt))}</p>` : ''}
+      ${miss.length ? `<div class="wm-ts">${miss.map((t) => `<span class="wm-t${taskClosed(t) ? ' closed' : ''}">${esc(t.title)}</span>`).join('')}</div>` : ''}
+      <div class="row"><button class="btn" type="button" id="sqM">📖 مصحفه وأخطاؤه</button>${miss.length ? '<button class="btn" type="button" id="sqR">🔔 ذكّره بواجباته</button>' : ''}<button class="btn" type="button" id="sqS">📥 تسليماته</button><button class="btn" type="button" id="sqW">👀 في المتابعة</button><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+      $('#sqM', m).onclick = () => { closeModal(); openStudentMushaf(st); };
+      $('#sqW', m).onclick = () => goTab('watch');
+      $('#sqS', m).onclick = () => { filters = { cls: 'all', task: 'all', q: st.name, status: 'all' }; goTab('subs'); };
+      const r = $('#sqR', m); if (r) r.onclick = async () => {
+        r.disabled = true;
+        const names = miss.slice(0, 3).map((t) => `«${t.title}»`).join('، ') + (miss.length > 3 ? ` و${ar(miss.length - 3)} غيرها` : '');
+        const nid = await store.addStudentNotif(pn, { type: 'remind', title: '📋 تذكير من معلمك', body: `بقي عليك ${nWord(miss.length, 'واجب واحد', 'واجبان', 'واجبات', 'واجباً')}: ${names}.`, link: './#/student', tag: 'remind-' + pn + '-' + riyadhDay() }).catch(() => null);
+        if (nid) sendPush(nid, pn).catch(() => {});
+        r.textContent = nid ? '✓ ذُكّر' : 'تعذر';
+      };
+    });
+  }
+  /* --- «لوحة اليوم»: ملخّص اليوم ومربع لكل قسم بحاله --- */
+  function drawHome(body) {
+    const dm = doneMap(), pending = D.subs.filter((x) => !x.teacher).length;
+    const missStu = D.students.filter((x) => missingOf(x, dm).length).length;
+    const online = Object.values(D.presence || {}).filter(isOnline).length;
+    const open = D.tasks.filter((t) => taskStarted(t) && !taskClosed(t));
+    const soon = open.map((t) => taskEnd(t)).filter(Boolean).sort()[0];
+    const today = new Date(Date.now() + 3 * 3600e3), ymEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    const daysLeft = Math.ceil((ymEnd - today) / 864e5);
+    const hr = today.getUTCHours(), hi = hr < 12 ? 'صباح الخير' : 'مساء الخير';
+    const hero = $('#tHero', app);
+    if (hero) hero.innerHTML = `<div class="th-hero"><div><b>${hi} يا ${esc((s.name || 'أستاذ').split(' ')[0])}</b><small>${esc(ar(new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Bahrain' })))}</small></div>
+      <div class="th-k"><button type="button" data-hk="subs"><b>${ar(pending)}</b>تنتظر تقييمك</button><button type="button" data-hk="watch"><b>${ar(missStu)}</b>لم يسمّعوا</button><button type="button" data-hk="watch"><b>${ar(online)}</b><span>${online ? '<span class="on-dot"></span>' : ''}متصل الآن</span></button></div></div>`;
+    $$('[data-hk]', hero || body).forEach((b) => (b.onclick = () => goTab(b.dataset.hk)));
+    const relDay = (iso) => { const d = Math.round((Date.parse(riyadhDay(new Date(iso))) - Date.parse(riyadhDay())) / 864e5); return d <= 0 ? 'اليوم' : d === 1 ? 'غداً' : `بعد ${nWord(d, 'يوم', 'يومين', 'أيام', 'يوماً')}`; };
+    const T = {
+      subs: [pending ? `${ar(pending)} تنتظر التقييم` : 'لا شيء ينتظرك ✓', pending, 'r'],
+      watch: [`${missStu ? `${ar(missStu)} لم يسمّعوا` : 'سمّع الجميع ✓'}${online ? ` · ${ar(online)} متصل` : ''}`, online, 'g'],
+      tasks: [open.length ? `${ar(open.length)} مفتوحة${soon ? ` · ينتهي أحدها ${relDay(soon)}` : ''}` : 'لا واجبات مفتوحة'],
+      people: [`${ar(D.students.length)} طالباً · ${ar(D.classes.length)} صفوف`],
+      ann: ['أرسل إعلاناً أو صمّمه'],
+      honor: [`الفائزون بعد ${nWord(daysLeft, 'يوم', 'يومين', 'أيام', 'يوماً')} · المتجر وصوت الأسبوع`],
+      iqra: [badgeVal.iqra ? `${badgeVal.iqra} بانتظار مراجعتك` : 'خطة الضعاف في القراءة', badgeVal.iqra ? 1 : 0, 'r'],
+      errors: ['أكثر الأخطاء ودرجاتها'],
+      fb: [badgeVal.fb ? `${badgeVal.fb} رسائل جديدة` : 'آراء الطلاب وشكاواهم', badgeVal.fb ? 1 : 0, 'r'],
+      reports: ['تقارير وتصدير Excel'],
+      settings: ['الإعداد والمساحة والتنبيهات'],
+    };
+    body.innerHTML = `<div class="th-tiles">${TNAV.filter((t) => t[0] !== 'home').map(([k, l, i, main]) => `<button type="button" class="th-tile${main ? ' big' : ''}" data-go="${k}">${T[k]?.[1] ? `<b class="th-n ${T[k][2]}">${k === 'iqra' || k === 'fb' ? esc(badgeVal[k]) : ar(T[k][1])}</b>` : ''}<i>${i}</i><b>${l}</b><small>${esc(T[k]?.[0] || '')}</small></button>`).join('')}</div>`;
+    $$('[data-go]', body).forEach((b) => (b.onclick = () => goTab(b.dataset.go)));
   }
   function drawHead() {
     const k = $('#tKpis', app); if (!k) return;
@@ -2795,14 +2905,16 @@ function viewTeacher(app) {
       schedulePublish();
       const R = await Promise.all(pns.map((p) => store.listIqraRev(p).catch(() => [])));
       const n = R.flat().filter((r) => r.status === 'pending').length;
-      const b = $('#iqTabN', app); if (b) b.textContent = n ? ar(n) : '';
+      setBadge('iqra', n); if (tab === 'home' && $('#tBody', app)) drawHome($('#tBody', app));
     } catch (e) { console.warn('iqra', e); }
   }
   function drawBody() {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
     offIqraT?.(); offIqraT = null;
-    ({ subs: drawSubs, watch: drawWatch, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+    $('#tHome', app)?.toggleAttribute('hidden', tab !== 'home'); $('#tHomeTop', app)?.toggleAttribute('hidden', tab !== 'home');
+    if (tab !== 'home') { const h = $('#tHero', app); if (h) h.innerHTML = ''; }
+    ({ home: drawHome, subs: drawSubs, watch: drawWatch, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
     sectionize(body);
   }
 
@@ -2971,9 +3083,8 @@ function viewTeacher(app) {
     if (tab === 'fb') drawBody();
   }
   function paintFbTab() {
-    const el = $('#fbTabN', app); if (!el) return;
     const n = (FB || []).filter((x) => !x.seen).length + (SP || []).filter((x) => (x.status || 'new') === 'new').length;
-    el.textContent = n ? (n > 9 ? '+٩' : ar(n)) : '';
+    setBadge('fb', n);
   }
   function drawFb(body) {
     if (!FB) { body.innerHTML = '<div class="loading">جارٍ تحميل الملاحظات…</div>'; return; }
@@ -5064,8 +5175,9 @@ function viewTeacher(app) {
         was[p.pn] = on;
       });
       first = false;
-      const n = L.filter(isOnline).length, b = $('#wTabN', app); if (b) b.textContent = n ? ar(n) : '';
+      const n = L.filter(isOnline).length; setBadge('watch', n);
       if (tab === 'watch') paintOnlineT();
+      if (tab === 'home' && $('#tHero', app)) drawHome($('#tBody', app));
     });
     setInterval(() => { if (tab === 'watch') paintOnlineT(); }, 30e3); // يتجدد «منذ…» ويخرج من انقطعت نبضته
   }
