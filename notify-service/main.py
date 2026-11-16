@@ -1070,6 +1070,28 @@ def online(req: OnlineReq, authorization: str | None = Header(None)):
     return {**out, "missing": len(miss)}
 
 
+def run_round_end(local: dt.datetime) -> dict | None:
+    """انتهى العداد الذي حدده المعلم ولم تُعلن النتائج: نبّه المعلم ليفتح المقرأة (فتُحسب وتُعلن تلقائياً إن اختار)."""
+    ref = db.collection("leaderboard").document("countdown")
+    snap = ref.get()
+    c = snap.to_dict() if snap.exists else None
+    if not c or not c.get("start") or not c.get("end"):
+        return None
+    try:
+        end = dt.datetime.fromisoformat(c["end"].replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.datetime.now(dt.timezone.utc) < end or c.get("pushedEnd") == c["end"]:
+        return None
+    ref.set({"pushedEnd": c["end"]}, merge=True)
+    key = "r" + end.astimezone(TZ).strftime("%Y%m%d%H%M")
+    if db.collection("results").document(key).get().exists:
+        return {"already": True}
+    if c.get("auto"):
+        return to_teachers("⏰ انتهى العداد", "حان موعد إعلان الفائزين. افتح المقرأة الآن لتُحسب النقاط ويُعلن الفائزون تلقائياً.", "round-" + key, "./#/teacher")
+    return to_teachers("⏰ انتهى العداد", "نتائج الجولة جاهزة. افتح المقرأة لتراجعها وتعلنها.", "round-" + key, "./#/teacher")
+
+
 def run_week_usage(local: dt.datetime) -> dict | None:
     """كل سبت بعد الثامنة مساءً، مرة واحدة: ملخّص استخدام الأسبوع للمعلم."""
     if local.weekday() != 5 or local.hour < 20 or quiet(local):
@@ -1144,6 +1166,10 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         teacher = {"error": str(e)[:200]}
     try:
+        rnd = run_round_end(local)
+    except Exception as e:
+        rnd = {"error": str(e)[:200]}
+    try:
         week = run_week_usage(local)
     except Exception as e:
         week = {"error": str(e)[:200]}
@@ -1152,4 +1178,4 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         aiq = [{"error": str(e)[:200]}]
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders), "aiQueue": len(aiq)})
-    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "deferredSent": flushed}
+    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "round": rnd, "deferredSent": flushed}

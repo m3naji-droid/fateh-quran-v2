@@ -25,7 +25,7 @@ import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts, fmtWhen } from
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
 import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS } from './rewards.js';
-import { dayTimes } from './prayer.js';
+import { dayTimes, thisMonthStart } from './prayer.js';
 /** الاحتفال، ومعه تأثير الطالب الخاص من المتجر إن اختاره */
 const FX = { kind: '' };
 function confetti(...a) { confetti0(...a); if (FX.kind) setTimeout(() => playFx(FX.kind), 250); }
@@ -1495,7 +1495,7 @@ function viewStudent(app) {
     const r = n.r || {}, w = n.win, cp = n.classPos;
     const tile = (label, val, sub = '') => `<div><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
     openModal(`<div class="stack month-modal">
-      <h2>${n.type === 'season' ? `${esc(n.icon || '🏆')} نتائجك في ${esc(n.label || '')}` : `نتائج شهرك · ${esc(n.label || '')}`}</h2>
+      <h2>${n.type === 'season' ? `${esc(n.icon || '🏆')} نتائجك في ${esc(n.label || '')}` : n.round ? `🏁 نتائجك في ${esc(n.label || '')}` : `نتائج شهرك · ${esc(n.label || '')}`}</h2>
       ${w ? `<div class="month-win"><div class="mw-badge">${rankBadge(w.rank)}</div><div><b>${esc(w.key === 'stage1' ? 'شيخ المرحلة' : w.key === 'cls1' ? 'قارئ الصف' : w.title)}</b><span>${esc(w.line)}. ما شاء الله تبارك الله!</span></div></div>` : `<p style="margin:0">${esc(n.body || '')}</p>`}
       <div class="usage-grid">
         ${tile('ترتيبك في الصف', r.cls ? `${ar(r.cls)} من ${ar(r.clsOf)}` : '—')}
@@ -2757,32 +2757,9 @@ function viewTeacher(app) {
           </div>
         </div>
       </div>`;
-    const cdT = () => mountMonthCountdown($('#cdMonthT', app), { teacher: true, cfg: CDCFG.v, onEdit: editCountdown, onHonor: () => goTab('honor') });
-    cdT(); store.getCountdown().then((c) => { CDCFG.v = c || null; cdT(); }).catch(() => {});
-    /** المعلم يحدد يوم وتاريخ ووقت نهاية العد التنازلي (بتوقيت البحرين) وعنوانه */
-    function editCountdown() {
-      const cur = Date.parse(CDCFG.v?.end || ''), d = new Date((cur && cur > Date.now() ? cur : Date.now() + 7 * 864e5) + 3 * 3600e3);
-      const val = d.toISOString().slice(0, 16);
-      openModal(`<div class="stack"><h3 style="margin:0">⚙️ موعد إعلان الفائزين</h3>
-        <p class="small muted" style="margin:0">اختر اليوم والتاريخ والوقت الذي ينتهي عنده العد التنازلي (بتوقيت البحرين). يراه الطلاب في صفحتهم فوراً.</p>
-        <label class="field">التاريخ والوقت<input type="datetime-local" id="cdEnd" value="${val}" min="${new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 16)}"></label>
-        <p class="small" id="cdPrev" style="margin:0"></p>
-        <label class="field">العنوان فوق العداد<input type="text" id="cdTitle" maxlength="60" value="${esc(CDCFG.v?.title || 'بقي حتى إعلان الفائزين')}"></label>
-        <p class="small muted" style="margin:0">بعد حلول الموعد يظهر للطلاب «🎉 حان موعد إعلان الفائزين!» يوماً كاملاً، ثم يعود العداد تلقائياً إلى بداية الشهر القادم.</p>
-        <div class="row"><button class="btn primary" type="button" id="cdSave">حفظ الموعد</button>${CDCFG.v?.end ? '<button class="btn" type="button" id="cdAuto">↺ رجوع للتلقائي (بداية الشهر)</button>' : ''}<button class="btn ghost" type="button" data-close>إلغاء</button></div></div>`, (m) => {
-        const inp = $('#cdEnd', m), pv = () => { const t = Date.parse(inp.value + ':00+03:00'); $('#cdPrev', m).textContent = t ? `📅 ${fmtWhen(t)}` : ''; };
-        inp.oninput = pv; pv();
-        $('#cdSave', m).onclick = async () => {
-          const t = Date.parse(inp.value + ':00+03:00');
-          if (!t || t <= Date.now()) return toast('اختر موعداً في المستقبل.');
-          const x = { end: new Date(t).toISOString(), title: $('#cdTitle', m).value.trim() || 'بقي حتى إعلان الفائزين' };
-          try { await store.setCountdown(x); CDCFG.v = x; closeModal(); cdT(); toast(`حُفظ الموعد: ${fmtWhen(t)}`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
-        };
-        const a = $('#cdAuto', m); if (a) a.onclick = async () => {
-          try { await store.setCountdown({ end: '' }); CDCFG.v = null; closeModal(); cdT(); toast('رجع العداد إلى بداية الشهر القادم.'); } catch (e) { toast('تعذر: ' + (e.code || e.message)); }
-        };
-      });
-    }
+    mountCdT();
+    if (CDCFG.v === undefined) store.getCountdown().then((c) => { CDCFG.v = c || null; mountCdT(); checkMonthBar(); roundTick(); }).catch(() => { CDCFG.v = null; });
+    if (!window.__roundT) window.__roundT = setInterval(() => roundTick(), 30e3);
     $('#tOut', app).onclick = async () => { unsub?.(); if (pushState('teacher') === 'on') await disablePush().catch(() => {}); await store.signOut(); session.set(null); render(); };
     $$('[data-tab]', app).forEach((b) => (b.onclick = () => goTab(b.dataset.tab)));
     $('#tnMore', app).onclick = openMoreSheet;
@@ -4644,7 +4621,7 @@ function viewTeacher(app) {
   async function publishBoard() {
     if (!D.students.length) return;
     const all = boardSubs();
-    const { board, ranks } = computeBoard(all, D.students, D.classes);
+    const { board, ranks } = computeBoard(all, D.students, D.classes, new Date(), roundPer());
     // الموسم الجاري: ترتيب كل طالب، وأوائل المرحلة وكل صف للطلاب
     const ss = activeSeason(D.seasons || []);
     if (ss) {
@@ -4692,13 +4669,14 @@ function viewTeacher(app) {
     XLSX.writeFile(wb, `${kind === 'ch' ? 'المتحدي-الأكبر' : 'الهمة-العالية'}-${per || 'الكل'}.xlsx`);
   }
   function drawHonorT(body) {
-    const { board } = computeBoard(boardSubs(), D.students, D.classes);
+    const { board } = computeBoard(boardSubs(), D.students, D.classes, new Date(), roundPer());
     const months = [...new Set(D.subs.map((x) => (x.createdAt || '').slice(0, 7)).filter(Boolean))].sort().reverse();
     const cur = new Date().toISOString().slice(0, 7);
     body.innerHTML = `<div class="card stack" style="gap:10px;margin-bottom:16px" id="revT"></div><div class="card stack" style="gap:10px;margin-bottom:16px" id="voiceT"></div><div class="card stack" style="gap:10px;margin-bottom:16px" id="shopT"></div><div class="card stack month-card" style="gap:10px;margin-bottom:16px">
-        <div class="row" style="justify-content:space-between"><h3>📅 نتائج الشهر والشهادات</h3><span class="small muted" id="mStat"></span></div>
-        <p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>
-        <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}</div>
+        <div class="row" style="justify-content:space-between"><h3>📅 النتائج والشهادات والأرشيف</h3><span class="small muted" id="mStat"></span></div>
+        ${CDCFG.v?.start ? `<p class="small" style="margin:0">🏁 أنت على <b>نظام الجولات</b>: تُحسب النتائج عند موعد العداد ${CDCFG.v.auto ? 'وتُعلن تلقائياً' : 'ثم تراجعها وتعلنها'}، ${CDCFG.v.reset === false ? 'وتستمر النقاط في التراكم بعدها' : 'ثم تُصفَّر النقاط وتبدأ جولة جديدة'}. تعدّل ذلك من «⚙️ تعديل موعد العد التنازلي» في لوحة اليوم.</p>` : '<p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>'}
+        <p class="small muted" style="margin:0">كل نتيجة معلنة (شهراً كانت أو جولة) تُحفظ مع فائزيها وشهاداتهم في «📚 أرشيف النتائج».</p>
+        <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}<button class="btn" type="button" id="mArch">📚 أرشيف النتائج</button></div>
       </div>
       <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
@@ -4715,6 +4693,7 @@ function viewTeacher(app) {
     { const L = computeLists(D.challenges || [], D.himma || [], D.students);
       mountLists($('#lsT', body), L.lists, { classes: D.classes, onExport: (k, st) => exportList(L.lists, k, st) }); }
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
+    $('#mArch', body).onclick = openResultsArchive;
     const pick = $('#mPick', body);
     if (pick) {
       const stat = () => store.getMonthResult(pick.value).then((r) => { const el = $('#mStat', body); if (el) el.innerHTML = r ? `<span class="pill ok">أُعلنت ${esc(fmtDate(r.announcedAt))}</span>` : '<span class="pill warn">لم تُعلن بعد</span>'; }).catch(() => {});
@@ -5091,7 +5070,7 @@ function viewTeacher(app) {
 
   /* --- وضع عرض الفصل --- */
   function startClassroom(scope) {
-    const { board } = computeBoard(boardSubs(), D.students, D.classes);
+    const { board } = computeBoard(boardSubs(), D.students, D.classes, new Date(), roundPer());
     const m = board.month, isStage = scope === 'stage';
     const cls = D.classes.find((c) => c.id === scope);
     const inScope = (pn) => { const s = D.students.find((x) => x.id === pn); return s && (isStage || s.classId === scope); };
@@ -5613,6 +5592,8 @@ function viewTeacher(app) {
   async function checkMonthBar() {
     const ym = prevYm();
     const host = $('#monthBar', app); if (!host) return;
+    if (CDCFG.v === undefined) return; // ينتظر تحميل إعداد الجولات
+    if (CDCFG.v?.start) { paintRoundBar(); return; } // نظام الجولات: لا إعلان شهري
     if (!D.subs.some((x) => (x.createdAt || '').slice(0, 7) === ym)) { host.innerHTML = ''; return; }
     let r = null; try { r = await store.getMonthResult(ym); } catch {}
     if (r || pref.get('monthBarOff_' + ym, false)) { host.innerHTML = ''; return; }
@@ -5623,17 +5604,18 @@ function viewTeacher(app) {
   }
   function certFor(res, st, r) {
     const w = monthTitle(r); if (!w) return null;
-    return { ym: res.ym, name: st.name, title: w.title, line: w.line, rank: w.rank, month: monthLabel(res.ym), points: r.points, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+    return { ym: res.ym, name: st.name, title: w.title, line: w.line, rank: w.rank, month: res.label && /^جولة/.test(res.label) ? res.label : monthLabel(res.ym), points: r.points, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
   }
-  async function openMonthReview(ym) {
-    const res = computeMonth(boardSubs(), D.students, D.classes, ym);
-    const ungraded = D.subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym && x.taskId && !x.teacher).length;
+  async function openMonthReview(ym, per = null, onDone = null) {
+    const res = computeMonth(boardSubs(), D.students, D.classes, ym, per);
+    const inP = (x) => (per ? Date.parse(x.createdAt) >= Date.parse(per.from) && Date.parse(x.createdAt) < Date.parse(per.to) : (x.createdAt || '').slice(0, 7) === ym);
+    const ungraded = D.subs.filter((x) => inP(x) && x.taskId && !x.teacher).length;
     let done = null; try { done = await store.getMonthResult(ym); } catch {}
-    const isCur = ym === new Date().toISOString().slice(0, 7);
+    const isCur = !per && ym === new Date().toISOString().slice(0, 7);
     const winners = D.students.map((st) => certFor(res, st, res.ranks[st.id])).filter(Boolean);
     const row = (x, i) => `<li><span class="mr-n">${ar(i + 1)}</span><span>${esc(x.name)}</span><b class="num">${fmt10(x.points)}</b></li>`;
     openModal(`<div class="stack month-review">
-      <h2>📅 نتائج شهر ${esc(monthLabel(ym))}</h2>
+      <h2>${per ? `🏁 نتائج ${esc(per.label)}` : `📅 نتائج شهر ${esc(monthLabel(ym))}`}</h2>
       ${isCur ? '<div class="notice">هذا الشهر لم ينتهِ بعد. الأفضل إعلان نتائجه في أول الشهر القادم.</div>' : ''}
       ${ungraded ? `<div class="notice">يوجد ${ar(ungraded)} من تسليمات هذا الشهر لم تقيّمها بعد، فتُحسب بدرجتها الآلية. قيّمها أولاً إن أردت.</div>` : ''}
       ${done ? `<div class="pill ok" style="align-self:flex-start">أُعلنت هذه النتائج ${esc(fmtDate(done.announcedAt))}</div>` : ''}
@@ -5653,7 +5635,7 @@ function viewTeacher(app) {
         catch (x) { toast('تعذر التجهيز: ' + x.message); }
         b.disabled = false; b.textContent = 'شهادات الفائزين (PDF)';
       };
-      $('#mrGo', m).onclick = () => announceMonth(res, ym);
+      $('#mrGo', m).onclick = async () => { const ok = await announceMonth(res, ym, per ? { label: per.label, from: per.from, to: per.to } : {}); if (ok) { closeModal(); onDone?.(); } };
     });
   }
   /** أطول سلسلة للطالب في الشهر */
@@ -5665,28 +5647,125 @@ function viewTeacher(app) {
     days.forEach((d) => { if (!days.has(addDays(d, -1))) { let n = 0, k = d; while (days.has(k)) { n++; k = addDays(k, 1); } best = Math.max(best, n); } });
     return best;
   }
-  async function announceMonth(res, ym) {
-    if (!(await confirmBox(`إعلان نتائج شهر ${monthLabel(ym)} لكل الطلاب (${ar(D.students.length)})؟ يصل لكل طالب إشعار بنتيجته.`, 'أعلن النتائج'))) return;
-    const label = monthLabel(ym), items = [];
+  async function announceMonth(res, ym, opts = {}) {
+    const label = opts.label || monthLabel(ym), items = [], ofL = opts.label ? label : `شهر ${label}`, inL = opts.label ? `في ${label}` : `لشهر ${label}`;
+    if (!opts.silent && !(await confirmBox(`إعلان نتائج ${ofL} لكل الطلاب (${ar(D.students.length)})؟ يصل لكل طالب إشعار بنتيجته.`, 'أعلن النتائج'))) return false;
     const { ok, fail } = await runBulk('إعلان نتائج الشهر', D.students, async (st) => {
       const r = res.ranks[st.id] || { points: 0 };
       const w = monthTitle(r);
       const streak = await bestStreak(st, ym);
       const cp = res.classPos[st.classId] || null;
-      const title = w ? (w.key === 'stage1' ? `👑 مبارك! أنت شيخ المرحلة لشهر ${label}` : w.key === 'cls1' ? `🏆 مبارك! أنت قارئ الصف لشهر ${label}` : `🏅 مبارك! ${w.title} لشهر ${label}`) : `📊 نتائج شهر ${label}`;
+      const title = w ? (w.key === 'stage1' ? `👑 مبارك! أنت شيخ المرحلة ${inL}` : w.key === 'cls1' ? `🏆 مبارك! أنت قارئ الصف ${inL}` : `🏅 مبارك! ${w.title} ${inL}`) : `📊 نتائج ${ofL}`;
       const body = w ? `${w.line} بـ${fmt10(r.points)} نقطة. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.`
-        : r.points > 0 ? `ترتيبك ${ar(r.cls)} في صفك بـ${fmt10(r.points)} نقطة. الشهر الجديد فرصة جديدة، وكل واجب ترفع به ترتيبك.`
-        : 'لم تُحسب لك نقاط هذا الشهر. ابدأ الشهر الجديد بواجب واحد، وستجد اسمك في لوحة الشرف بإذن الله.';
+        : r.points > 0 ? `ترتيبك ${ar(r.cls)} في صفك بـ${fmt10(r.points)} نقطة. ${opts.label ? 'الجولة الجديدة' : 'الشهر الجديد'} فرصة جديدة، وكل واجب ترفع به ترتيبك.`
+        : `لم تُحسب لك نقاط ${opts.label ? 'في هذه الجولة' : 'هذا الشهر'}. ابدأ ${opts.label ? 'الجولة الجديدة' : 'الشهر الجديد'} بواجب واحد، وستجد اسمك في لوحة الشرف بإذن الله.`;
       const id = 'month-' + ym;
-      await store.addStudentNotifId(st.id, id, { type: 'month', ym, label, title, body, link: './#/student/month/' + ym, tag: id, r: { points: r.points, cls: r.cls || null, clsOf: r.clsOf || null, stage: r.stage || null, stageOf: r.stageOf || null }, classPos: cp, streak, win: w, teacher: s.name || '', className: className(st.classId) });
+      await store.addStudentNotifId(st.id, id, { type: 'month', ym, label, round: !!opts.label, title, body, link: './#/student/month/' + ym, tag: id, r: { points: r.points, cls: r.cls || null, clsOf: r.clsOf || null, stage: r.stage || null, stageOf: r.stageOf || null }, classPos: cp, streak, win: w, teacher: s.name || '', className: className(st.classId) });
       items.push({ notif: id, student: st.id });
     });
-    await store.saveMonthResult(ym, { ym, label, stage: res.stage, byClass: res.byClass, challenge: res.challenge, announcedAt: new Date().toISOString(), teacher: s.name || '', students: ok });
+    await store.saveMonthResult(ym, { ym, label, round: !!opts.label, from: opts.from || null, to: opts.to || null, stage: res.stage, byClass: res.byClass, challenge: res.challenge, announcedAt: new Date().toISOString(), teacher: s.name || '', students: ok, auto: !!opts.silent });
     let pushed = null;
     try { for (let i = 0; i < items.length; i += 200) { const r = await sendPushBatch(items.slice(i, i + 200)); if (r) pushed = { sent: (pushed?.sent || 0) + r.sent, deferred: (pushed?.deferred || 0) + (r.deferred || 0) }; } } catch (e) { console.warn(e); }
     toast(`أُعلنت نتائج ${label} لـ${nWord(ok, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}${pushed && pushed.sent ? `، ووصل إشعار إلى ${ar(pushed.sent)} جهازاً` : ''}${deferNote(pushed)}${fail ? `، وتعذر ${ar(fail)}` : ''}.`);
     checkMonthBar();
     if (tab === 'honor') drawBody();
+    return true;
+  }
+  function mountCdT() { mountMonthCountdown($('#cdMonthT', app), { teacher: true, cfg: CDCFG.v, onEdit: editCountdown, onHonor: () => goTab('honor') }); }
+/** المعلم يحدد يوم وتاريخ ووقت نهاية العد التنازلي (بتوقيت البحرين) وعنوانه */
+  function editCountdown() {
+    const cur = Date.parse(CDCFG.v?.end || ''), d = new Date((cur && cur > Date.now() ? cur : Date.now() + 7 * 864e5) + 3 * 3600e3);
+    const val = d.toISOString().slice(0, 16);
+    openModal(`<div class="stack"><h3 style="margin:0">⚙️ موعد إعلان الفائزين</h3>
+      <p class="small muted" style="margin:0">اختر اليوم والتاريخ والوقت الذي ينتهي عنده العد التنازلي (بتوقيت البحرين). يراه الطلاب في صفحتهم فوراً.</p>
+      <label class="field">التاريخ والوقت<input type="datetime-local" id="cdEnd" value="${val}" min="${new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 16)}"></label>
+      <p class="small" id="cdPrev" style="margin:0"></p>
+      <label class="field">العنوان فوق العداد<input type="text" id="cdTitle" maxlength="60" value="${esc(CDCFG.v?.title || 'بقي حتى إعلان الفائزين')}"></label>
+      <div class="cd-opts">
+        <label class="ie-check"><input type="checkbox" id="cdAutoA" ${CDCFG.v?.auto ? 'checked' : ''}> <span><b>احسب الفائزين وأعلنهم تلقائياً عند انتهاء العداد</b><br><small class="muted">تُجمَّد النقاط عند الموعد بالضبط، ويُرسل لكل طالب إشعار بنتيجته وشهادته دون مراجعة منك. إن لم تحدده ظهر لك عند الموعد «راجع وأعلن».</small></span></label>
+        <label class="ie-check"><input type="checkbox" id="cdReset" ${CDCFG.v && CDCFG.v.start && CDCFG.v.reset === false ? '' : 'checked'}> <span><b>صفّر النقاط بعد الإعلان وابدأ جولة جديدة</b><br><small class="muted">إن لم تحدده تستمر النقاط في التراكم بعد الإعلان حتى الموعد القادم.</small></span></label>
+      </div>
+      <p class="small" style="margin:0">📌 سيتم احتساب النقاط بعد انتهاء العداد مباشرة. وتُحفظ كل نتيجة مع فائزيها في «📚 أرشيف النتائج» (لوحة الشرف).</p>
+      <p class="small muted" style="margin:0">تُحسب الجولة من ${esc(dShort(CDCFG.v?.start || new Date(thisMonthStart()).toISOString()))} حتى الموعد الذي تختاره.</p>
+      <div class="row"><button class="btn primary" type="button" id="cdSave">حفظ الموعد</button>${CDCFG.v?.start || CDCFG.v?.end ? '<button class="btn" type="button" id="cdAuto">↺ رجوع للنظام الشهري</button>' : ''}<button class="btn ghost" type="button" data-close>إلغاء</button></div></div>`, (m) => {
+      const inp = $('#cdEnd', m), pv = () => { const t = Date.parse(inp.value + ':00+03:00'); $('#cdPrev', m).textContent = t ? `📅 ${fmtWhen(t)}` : ''; };
+      inp.oninput = pv; pv();
+      $('#cdSave', m).onclick = async () => {
+        const t = Date.parse(inp.value + ':00+03:00');
+        if (!t || t <= Date.now()) return toast('اختر موعداً في المستقبل.');
+        const x = { end: new Date(t).toISOString(), title: $('#cdTitle', m).value.trim() || 'بقي حتى إعلان الفائزين', auto: $('#cdAutoA', m).checked, reset: $('#cdReset', m).checked, start: CDCFG.v?.start || new Date(thisMonthStart()).toISOString(), lastEnd: CDCFG.v?.lastEnd || '', lastKey: CDCFG.v?.lastKey || '' };
+        try { await store.setCountdown(x); CDCFG.v = x; closeModal(); mountCdT(); lastBoardJson = ''; schedulePublish(); checkMonthBar(); toast(`حُفظ الموعد: ${fmtWhen(t)}${x.auto ? ' · يُعلن الفائزون تلقائياً' : ''}`); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+      };
+      const a = $('#cdAuto', m); if (a) a.onclick = async () => {
+        if (!(await confirmBox('الرجوع للنظام الشهري: تُحسب النقاط من أول الشهر الميلادي، ويُعلن الفائزون أول كل شهر بعد مراجعتك. نتائج الجولات السابقة تبقى في الأرشيف.', 'ارجع'))) return;
+        try { await store.setCountdown({ end: '' }); CDCFG.v = null; closeModal(); mountCdT(); lastBoardJson = ''; schedulePublish(); checkMonthBar(); toast('رجع العداد إلى بداية الشهر القادم.'); } catch (e) { toast('تعذر: ' + (e.code || e.message)); }
+      };
+    });
+  }
+
+  /* --- الجولات: موعد يحدده المعلم يُحسب عنده الفائزون (ويُعلَنون تلقائياً إن اختار)، ثم تُصفَّر النقاط أو تكتمل --- */
+  const dShort = (iso) => { const d = new Date(Date.parse(iso) + 3 * 3600e3); return `${ar(d.getUTCDate())} ${['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'][d.getUTCMonth()]}`; };
+  const roundKey = (end) => 'r' + new Date(Date.parse(end) + 3 * 3600e3).toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const roundLabel = (c) => `جولة ${dShort(c.start)} – ${c.end ? dShort(c.end) : 'الآن'}`;
+  /** فترة لوحة الشرف الحالية في نظام الجولات (وإلا null = الشهر الميلادي) */
+  function roundPer(c = CDCFG.v) {
+    if (!c?.start) return null;
+    return { from: c.start, to: c.end || null, key: 'r-cur', label: c.end ? roundLabel(c) : `الجولة الحالية (منذ ${dShort(c.start)})` };
+  }
+  /** بعد إعلان الجولة: تبدأ جولة جديدة من موعد الانتهاء (تصفير) أو تكتمل النقاط */
+  async function closeRound(c, key) {
+    const next = { title: c.title, auto: !!c.auto, reset: c.reset !== false, start: c.reset !== false ? c.end : c.start, end: '', lastEnd: c.end, lastKey: key };
+    await store.setCountdown(next); CDCFG.v = next;
+    mountCdT();
+    lastBoardJson = ''; schedulePublish(); paintRoundBar();
+  }
+  let roundBusy = false, roundT0 = Date.now();
+  /** يُفحص كل ٣٠ ثانية: انتهى العداد؟ */
+  async function roundTick() {
+    const c = CDCFG.v, end = Date.parse(c?.end || '');
+    if (!end || Date.now() < end || roundBusy || !c.start) return;
+    if (D.challenges === undefined || D.seasons === undefined || D.khatmas === undefined || Date.now() - roundT0 < 15e3) return; // ننتظر تحميل كل مصادر النقاط
+    roundBusy = true;
+    try {
+      const key = roundKey(c.end);
+      if (await store.getMonthResult(key).catch(() => null)) { await closeRound(c, key); return; } // أعلنها جهاز آخر
+      if (!c.auto) { paintRoundBar(); return; }
+      const per = { from: c.start, to: c.end, label: roundLabel(c) };
+      const res = computeMonth(boardSubs(), D.students, D.classes, key, per);
+      const ok = await announceMonth(res, key, { label: per.label, silent: true, from: c.start, to: c.end });
+      if (ok) { await closeRound(c, key); toast('🏆 انتهى العداد، فحُسبت النقاط وأُعلن الفائزون تلقائياً.'); }
+    } catch (e) { console.warn('round', e); } finally { roundBusy = false; }
+  }
+  /** شريط «انتهت الجولة: راجع وأعلن» حين لا يكون الإعلان تلقائياً */
+  function paintRoundBar() {
+    const host = $('#monthBar', app); if (!host) return;
+    const c = CDCFG.v, end = Date.parse(c?.end || '');
+    if (!end || Date.now() < end || c.auto) { host.innerHTML = ''; return; }
+    const key = roundKey(c.end), per = { from: c.start, to: c.end, label: roundLabel(c) };
+    host.innerHTML = `<div class="month-bar"><span>⏰ <b>انتهى العداد، ونتائج ${esc(per.label)} جاهزة.</b> راجعها ثم أعلنها.</span><span class="row" style="gap:6px"><button class="btn sm primary" type="button" id="rbGo">راجع وأعلن</button></span></div>`;
+    $('#rbGo', host).onclick = () => openMonthReview(key, per, async () => closeRound(c, key));
+  }
+  /** أرشيف الجولات والأشهر المعلنة مع فائزيها */
+  async function openResultsArchive() {
+    let L = [];
+    try { L = (await store.listResults()).sort((a, b) => (b.announcedAt || '').localeCompare(a.announcedAt || '')); } catch (e) { return toast('تعذر التحميل: ' + (e.code || e.message)); }
+    const top = (arr, n) => (arr || []).slice(0, n).map((x, i) => `${['🥇', '🥈', '🥉', '٤', '٥'][i]} ${esc(x.name)} <small class="muted">${fmt10(x.points)}</small>`).join(' · ');
+    openModal(`<div class="stack"><h2 style="margin:0">📚 أرشيف النتائج</h2>
+      ${L.length ? L.map((r, i) => `<details class="arch-it"${i ? '' : ' open'}><summary><b>${r.round ? '🏁' : '📅'} ${esc(r.round ? r.label : 'شهر ' + r.label)}</b> <span class="small muted">أُعلنت ${esc(fmtDate(r.announcedAt))}${r.auto ? ' · تلقائياً' : ''}</span></summary>
+        <div class="small"><b>👑 شيخ المرحلة:</b> ${top(r.stage, 5) || '—'}</div>
+        ${Object.entries(r.byClass || {}).filter(([, a]) => a?.length).map(([cid, a]) => `<div class="small"><b>🏆 ${esc(className(cid))}:</b> ${top(a, 3)}</div>`).join('')}
+        ${(r.challenge || []).length ? `<div class="small"><b>🏁 تحدي الصفوف:</b> ${r.challenge.slice(0, 3).map((c, k) => `${['🥇', '🥈', '🥉'][k]} ${esc(c.name)}`).join(' · ')}</div>` : ''}
+        <button class="btn sm" type="button" data-cert="${esc(r.ym)}">🎓 شهادات الفائزين (PDF)</button></details>`).join('') : '<p class="muted">لا نتائج معلنة بعد.</p>'}
+      <div class="row"><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+      $$('[data-cert]', m).forEach((b) => (b.onclick = async () => {
+        const r = L.find((x) => x.ym === b.dataset.cert); if (!r) return;
+        const ranksOf = {}; (r.stage || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).stage = i + 1)); Object.values(r.byClass || {}).forEach((a) => (a || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).cls = i + 1)));
+        const res = { ym: r.ym, label: r.round ? r.label : null };
+        const winners = D.students.map((st) => ranksOf[st.id] && certFor(res, st, ranksOf[st.id])).filter(Boolean);
+        if (!winners.length) return toast('لا فائزون في هذه النتائج.');
+        b.disabled = true; try { await downloadCertificatesPDF(winners, `maqraa-certificates-${r.ym}.pdf`); } catch (x) { toast('تعذر: ' + x.message); } b.disabled = false;
+      }));
+    });
   }
 
   /* --- إشعارات جوال المعلم --- */

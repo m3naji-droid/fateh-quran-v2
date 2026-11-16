@@ -1528,3 +1528,8 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 }
 .cdA-edit { position: relative; z-index: 2; display: inline-block; margin-top: 10px; border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .14); color: #fff; border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12.5px; cursor: pointer; }
 .cdA-edit:hover { background: rgba(255, 255, 255, .26); }
+.cd-opts { display: grid; gap: 10px; padding: 10px 12px; border-radius: 14px; background: #f7f3e8; }
+.cd-opts .ie-check { align-items: flex-start; } .cd-opts input { margin-top: 5px; }
+.arch-it { border: 1px solid var(--line, #e5e1d6); border-radius: 12px; padding: 8px 12px; display: grid; gap: 6px; }
+.arch-it > summary { cursor: pointer; }
+.cdA-note { position: relative; z-index: 1; font-size: 12.5px; margin: 6px 0 0; opacity: .92; }

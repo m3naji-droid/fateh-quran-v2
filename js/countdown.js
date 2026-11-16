@@ -17,8 +17,10 @@ const TIPS_T = ['يُعلن الفائزون تلقائياً، ويصل الط�
 
 /** حلقة تحديث كل ثانية تتوقف وحدها حين تُزال البطاقة من الصفحة */
 function ticker(host, fn) {
-  fn();
-  const id = setInterval(() => { if (!host.isConnected) return clearInterval(id); fn(); }, 1000);
+  const card = host.firstElementChild; // تتوقف الحلقة إن أُزيلت البطاقة أو استُبدلت
+  const run = () => { try { fn(); } catch (e) { clearInterval(id); console.warn('ticker', e); } };
+  const id = setInterval(() => { if (!card?.isConnected) return clearInterval(id); run(); }, 1000);
+  run();
 }
 
 const DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -28,17 +30,32 @@ export function fmtWhen(ms) {
   return `${DAYS[d.getUTCDay()]} ${AR(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} · ${AR(h % 12 || 12)}:${two(m)} ${h < 12 ? 'ص' : 'م'}`;
 }
 /** الموعد الذي حدده المعلم ما زال فعّالاً (قبله، أو خلال يوم بعده) */
-const customEnd = (cfg, now) => { const t = Date.parse(cfg?.end || ''); return t && now < t + 864e5 ? t : 0; };
+// في نظام الجولات (start) يبقى الموعد فعّالاً حتى يُعلَن الفائزون؛ وفي الموعد البسيط يوماً بعده
+const customEnd = (cfg, now) => { const t = Date.parse(cfg?.end || ''); return t && (cfg.start || now < t + 864e5) ? t : 0; };
 
 /** بطاقة الكأس: العد التنازلي لإعلان الفائزين. teacher=true لنص المعلم. onHonor يفتح لوحة الشرف.
     cfg: { end, title } موعد يحدده المعلم (وإلا فبداية الشهر القادم)، onEdit: زر «تعديل الموعد» للمعلم */
 export function mountMonthCountdown(host, { teacher = false, onHonor, cfg = null, onEdit = null } = {}) {
   if (!host) return;
+  const now0 = Date.now(), lastEnd = Date.parse(cfg?.lastEnd || '');
+  // بين جولتين: لا موعد قادم بعد
+  if (cfg?.start && !cfg.end) {
+    const justWon = lastEnd && now0 < lastEnd + 864e5;
+    host.innerHTML = `<div class="cdA idle"><span class="cdA-cup" aria-hidden="true">🏁</span>
+      <h3>${justWon ? '🎉 أُعلنت نتائج الجولة!' : '🏁 الجولة الحالية جارية'}</h3>
+      <p class="cdA-sub">${justWon ? 'مبارك للفائزين، وبدأت الآن جولة جديدة.' : teacher ? 'حدد موعد إعلان الفائزين ليبدأ العد التنازلي للطلاب.' : 'سيحدد معلمك موعد إعلان الفائزين قريباً بإذن الله. كل تسميع الآن يُحسب لك.'}</p>
+      ${justWon && onHonor ? '<button type="button" class="btn sm cdA-h">افتح لوحة الشرف</button>' : ''}
+      ${onEdit ? '<div><button type="button" class="cdA-edit">⚙️ حدد موعد إعلان الفائزين</button></div>' : ''}</div>`;
+    const e = host.querySelector('.cdA-edit'); if (e) e.onclick = onEdit;
+    const h = host.querySelector('.cdA-h'); if (h) h.onclick = onHonor;
+    return;
+  }
   let tip = Math.floor(Math.random() * 100);
   const tips = teacher ? TIPS_T : TIPS;
   host.innerHTML = `<div class="cdA" role="timer" aria-live="off"><span class="cdA-cup" aria-hidden="true">🏆</span>
     <h3>⏳ ${cfg?.title && customEnd(cfg, Date.now()) ? cfg.title.replace(/[<>&]/g, '') : 'بقي حتى إعلان الفائزين هذا الشهر'}</h3><p class="cdA-sub"></p>
     <div class="cdA-boxes" dir="rtl"><div><b data-u="d">٠٠</b><span data-l="d">يوماً</span></div><div><b data-u="h">٠٠</b><span>ساعة</span></div><div><b data-u="m">٠٠</b><span>دقيقة</span></div><div><b data-u="s">٠٠</b><span>ثانية</span></div></div>
+    ${cfg?.start && cfg.end ? '<p class="cdA-note">📌 سيتم احتساب النقاط بعد انتهاء العداد مباشرة</p>' : ''}
     <div class="cdA-tip"></div>
     <div class="cdA-won" hidden></div>${onEdit ? '<button type="button" class="cdA-edit" title="تعديل موعد العد التنازلي">⚙️ تعديل موعد العد التنازلي</button>' : ''}</div>`;
   const $ = (s) => host.querySelector(s);
@@ -50,7 +67,7 @@ export function mountMonthCountdown(host, { teacher = false, onHonor, cfg = null
     const won = ce ? now >= ce : now - started < 864e5;
     const prev = new Date(started - 1);
     $('.cdA-won').hidden = !won;
-    if (won) $('.cdA-won').innerHTML = `🎉 ${ce ? 'حان موعد إعلان الفائزين!' : `أُعلن فائزو شهر ${MONTHS[prev.getUTCMonth()]}!`} ${onHonor ? '<button type="button" class="btn sm">افتح لوحة الشرف</button>' : ''}`;
+    if (won) $('.cdA-won').innerHTML = ce && cfg.start ? `⏳ انتهى العداد، وتُحسب النقاط الآن. تُعلن النتائج خلال لحظات بإذن الله.` : `🎉 ${ce ? 'حان موعد إعلان الفائزين!' : `أُعلن فائزو شهر ${MONTHS[prev.getUTCMonth()]}!`} ${onHonor ? '<button type="button" class="btn sm">افتح لوحة الشرف</button>' : ''}`;
     const b = $('.cdA-won button'); if (b && !b.onclick) b.onclick = onHonor;
     let r = Math.max(0, Math.floor((end - now) / 1000));
     const d = Math.floor(r / 86400); r %= 86400;

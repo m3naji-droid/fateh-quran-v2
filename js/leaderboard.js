@@ -6,6 +6,8 @@
 import { autoGrade } from './grading.js';
 
 const TOP = 5;
+/** داخل الفترة [from, to) بالتاريخ الفعلي (لا بمقارنة النصوص، لاختلاف صيغ المناطق الزمنية) */
+const inPer = (x, per) => { const t = Date.parse(x.createdAt || ''); return t >= Date.parse(per.from) && (!per.to || t < Date.parse(per.to)); };
 const round1 = (v) => Math.round(v * 10) / 10;
 
 export function subScore(x) {
@@ -61,11 +63,12 @@ function period(students, subs, classes) {
 }
 
 /** يحسب لوحة الشرف للشهر الحالي ومنذ البداية، ومرتبة كل طالب */
-export function computeBoard(subs, students, classes, now = new Date()) {
-  const ym = now.toISOString().slice(0, 7);
-  const monthName = now.toLocaleDateString('ar', { month: 'long', year: 'numeric' });
+/** per (اختياري): جولة يحددها المعلم { from, to, label, key } بدل الشهر الميلادي */
+export function computeBoard(subs, students, classes, now = new Date(), per = null) {
+  const ym = per?.key || now.toISOString().slice(0, 7);
+  const monthName = per?.label || now.toLocaleDateString('ar', { month: 'long', year: 'numeric' });
   const all = period(students, subs, classes);
-  const month = period(students, subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym), classes);
+  const month = period(students, per ? subs.filter((x) => inPer(x, per)) : subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym), classes);
   const ranks = {};
   const fill = (p, key) => {
     const list = p._list;
@@ -192,8 +195,8 @@ export function boardHtml(p, opts = {}) {
 }
 
 /** نتائج شهر محدد (YYYY-MM) للإعلان: الخمسة الأوائل في كل صف وفي المرحلة، وتحدي الصفوف، ومرتبة كل طالب */
-export function computeMonth(subs, students, classes, ym) {
-  const p = period(students, subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym), classes);
+export function computeMonth(subs, students, classes, ym, per = null) {
+  const p = period(students, per ? subs.filter((x) => inPer(x, per)) : subs.filter((x) => (x.createdAt || '').slice(0, 7) === ym), classes);
   const list = p._list;
   const allClasses = classes.map((c) => {
     const m = list.filter((s) => s.classId === c.id);
@@ -207,7 +210,7 @@ export function computeMonth(subs, students, classes, ym) {
     ranks[s.id] = { points: s.points, tasks: s.tasks, stage: s.points > 0 ? i + 1 : null, stageOf: list.length, cls: s.points > 0 ? cls.findIndex((x) => x.id === s.id) + 1 : null, clsOf: cls.length };
   });
   const [y, m] = ym.split('-').map(Number);
-  const label = new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('ar', { month: 'long', year: 'numeric' });
+  const label = per?.label || new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('ar', { month: 'long', year: 'numeric' });
   delete p._list;
   return { ym, label, ...p, challenge: allClasses.slice(0, TOP), classPos, ranks };
 }
