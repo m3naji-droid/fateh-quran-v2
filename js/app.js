@@ -51,9 +51,13 @@ function voiceWk(v) {
 }
 /* ---- إعلانات غنية: ألبوم صور، ورسالة صوتية، وزر ينقل الطالب ---- */
 /* أقسام المعلم: [المفتاح، الاسم، الرمز، رئيسي في شريط الجوال] */
-const TNAV = [['home', 'لوحة اليوم', '🏠', 1], ['subs', 'التسليمات', '📥', 1], ['watch', 'المتابعة', '👀', 1], ['tasks', 'الواجبات', '📝', 1],
-  ['people', 'الصفوف والطلاب', '👥'], ['ann', 'الإعلانات', '📢'], ['honor', 'لوحة الشرف', '🏆'], ['iqra', 'اقرأ وارتقِ', '📖'],
-  ['errors', 'الأخطاء ودرجاتها', '🎯'], ['fb', 'رأيك يهمنا', '💬'], ['reports', 'التقارير', '📊'], ['settings', 'الإعدادات', '⚙️']];
+const TNAV = [['home', 'لوحة اليوم', '🏠', 1], ['subs', 'الواجبات والتسليم', '📥', 1], ['watch', 'المتابعة', '👀', 1], ['honor', 'لوحة الشرف', '🏆', 1],
+  ['ann', 'الإعلانات', '📢'], ['fb', 'رأيك يهمنا', '💬'], ['reports', 'التقارير', '📊'], ['settings', 'الإعدادات', '⚙️']];
+/* أقسام «الواجبات والتسليم» الداخلية: [المفتاح، الاسم، الرمز] */
+const TSUB = [['subs', 'التسليمات', '📥'], ['tasks', 'الواجبات', '📝'], ['people', 'الصفوف والطلاب', '👥'], ['errors', 'الأخطاء والدرجات', '🎯'], ['iqra', 'اقرأ وارتقِ', '📖']];
+const TGROUP = Object.fromEntries(TSUB.map(([k]) => [k, 'subs']));
+/** كل الأقسام (للوحة اليوم والبحث) */
+const TALL = [...TNAV.slice(0, 2), ...TSUB.slice(1).map(([k, l, i]) => [k, l, i]), ...TNAV.slice(2)];
 const TBADGE = { watch: 1, iqra: 1, fb: 1 };
 const CDCFG = { v: undefined }; // موعد العد التنازلي الذي حدده المعلم (يُحمّل مرة)
 const ANN_MAX_IMGS = 4;
@@ -2743,12 +2747,13 @@ function viewTeacher(app) {
       </div>
       <div id="dbWarn"></div>
       <div class="tshell">
-        <nav class="tnav" aria-label="أقسام المعلم">${TNAV.map(([k, l, i, main]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}${main ? ' tn-main' : ''}"><i aria-hidden="true">${i}</i><span>${l}</span>${TBADGE[k] ? `<b class="tab-n${k === 'watch' ? ' on-n' : ''}" data-badge="${k}"></b>` : ''}</button>`).join('')}
+        <nav class="tnav" aria-label="أقسام المعلم">${TNAV.map(([k, l, i, main]) => `<button type="button" data-tab="${k}" class="${(TGROUP[tab] || tab) === k ? 'on' : ''}${main ? ' tn-main' : ''}"><i aria-hidden="true">${i}</i><span>${l}</span>${TBADGE[k] || k === 'subs' ? `<b class="tab-n${k === 'watch' ? ' on-n' : ''}" data-badge="${k === 'subs' ? 'subsg' : k}"></b>` : ''}</button>`).join('')}
           <button type="button" class="tn-more" id="tnMore"><i aria-hidden="true">☰</i><span>المزيد</span><b class="tab-n" data-badge="more"></b></button></nav>
         <div class="tmain">
           <div class="tsearch"><input type="search" id="tSearch" placeholder="🔍 ابحث عن طالب أو قسم… (مثلاً: يوسف، الإعلانات)" autocomplete="off" aria-label="بحث"><div class="tsr" id="tSR" hidden></div></div>
           <div id="tHero"></div>
           <div id="tHomeTop"><div id="monthBar"></div><div id="attn"></div></div>
+          <div class="tsub" id="tSub" hidden></div>
           <div id="tBody" style="margin-top:16px"></div>
           <div id="tHome">
             <h3 class="th-sub">📈 أرقام المقرأة</h3>
@@ -2769,8 +2774,8 @@ function viewTeacher(app) {
   /** الانتقال إلى قسم من أي مكان (الشريط، والمربعات، والبحث) */
   function goTab(k) {
     tab = k; pref.set('tTab', tab);
-    $$('.tnav [data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === k));
-    $('#tnMore', app)?.classList.toggle('on', !TNAV.find((t) => t[0] === k)?.[3]);
+    $$('.tnav [data-tab]', app).forEach((x) => x.classList.toggle('on', x.dataset.tab === (TGROUP[k] || k)));
+    $('#tnMore', app)?.classList.toggle('on', !TNAV.find((t) => t[0] === (TGROUP[k] || k))?.[3]);
     closeModal(); drawBody(); scrollTo({ top: 0 });
   }
   /** «☰ المزيد» على الجوال: بقية الأقسام */
@@ -2785,6 +2790,7 @@ function viewTeacher(app) {
   function setBadge(k, n) {
     badgeVal[k] = n ? ar(n) : '';
     $$(`[data-badge="${k}"]`).forEach((b) => (b.textContent = badgeVal[k]));
+    if (k === 'iqra') $$('[data-badge="subsg"]').forEach((b) => (b.textContent = badgeVal[k]));
     const more = TNAV.filter((t) => !t[3] && t[0] !== 'watch').reduce((x, t) => x + (+String(badgeVal[t[0]] || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)) || 0), 0);
     $$('[data-badge="more"]').forEach((b) => (b.textContent = more ? ar(more) : ''));
   }
@@ -2794,7 +2800,7 @@ function viewTeacher(app) {
     const norm = (x) => String(x || '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[\u064B-\u0652]/g, '').trim();
     const show = () => {
       const q = norm(inp.value); if (!q) { out.hidden = true; return; }
-      const secs = TNAV.filter(([, l]) => norm(l).includes(q)).slice(0, 4);
+      const secs = TALL.filter(([, l]) => norm(l).includes(q)).slice(0, 4);
       const stus = D.students.filter((x) => norm(x.name).includes(q) || x.id.includes(inp.value.trim())).slice(0, 6);
       out.innerHTML = [...secs.map(([k, l, i]) => `<button type="button" data-go="${k}"><i>${i}</i> ${esc(l)} <small class="muted">قسم</small></button>`),
         ...stus.map((x) => `<button type="button" data-stu="${esc(x.id)}">${isOnline(D.presence?.[x.id]) ? '<span class="on-dot"></span>' : '👤'} <b data-lk="${esc(x.id)}" data-lk-no-title>${esc(x.name)}</b> <small class="muted">${esc(className(x.classId))} · ${esc(x.id)}</small></button>`)].join('') || '<div class="muted small" style="padding:10px">لا نتائج.</div>';
@@ -2845,7 +2851,7 @@ function viewTeacher(app) {
     $$('[data-hk]', hero || body).forEach((b) => (b.onclick = () => goTab(b.dataset.hk)));
     const relDay = (iso) => { const d = Math.round((Date.parse(riyadhDay(new Date(iso))) - Date.parse(riyadhDay())) / 864e5); return d <= 0 ? 'اليوم' : d === 1 ? 'غداً' : `بعد ${nWord(d, 'يوم', 'يومين', 'أيام', 'يوماً')}`; };
     const T = {
-      subs: [pending ? `${ar(pending)} تنتظر التقييم` : 'لا شيء ينتظرك ✓', pending, 'r'],
+      subs: [pending ? `${ar(pending)} تسليماً ينتظر التقييم` : 'لا شيء ينتظرك ✓', pending, 'r'],
       watch: [`${missStu ? `${ar(missStu)} لم يسمّعوا` : 'سمّع الجميع ✓'}${online ? ` · ${ar(online)} متصل` : ''}`, online, 'g'],
       tasks: [open.length ? `${ar(open.length)} مفتوحة${soon ? ` · ينتهي أحدها ${relDay(soon)}` : ''}` : 'لا واجبات مفتوحة'],
       people: [`${ar(D.students.length)} طالباً · ${ar(D.classes.length)} صفوف`],
@@ -2857,7 +2863,7 @@ function viewTeacher(app) {
       reports: ['تقارير وتصدير Excel'],
       settings: ['الإعداد والمساحة والتنبيهات'],
     };
-    body.innerHTML = `<div class="th-tiles">${TNAV.filter((t) => t[0] !== 'home').map(([k, l, i, main]) => `<button type="button" class="th-tile${main ? ' big' : ''}" data-go="${k}">${T[k]?.[1] ? `<b class="th-n ${T[k][2]}">${k === 'iqra' || k === 'fb' ? esc(badgeVal[k]) : ar(T[k][1])}</b>` : ''}<i>${i}</i><b>${l}</b><small>${esc(T[k]?.[0] || '')}</small></button>`).join('')}</div>`;
+    body.innerHTML = `<div class="th-tiles">${TALL.filter((t) => t[0] !== 'home').map(([k, l, i, main]) => `<button type="button" class="th-tile${main ? ' big' : ''}" data-go="${k}">${T[k]?.[1] ? `<b class="th-n ${T[k][2]}">${k === 'iqra' || k === 'fb' ? esc(badgeVal[k]) : ar(T[k][1])}</b>` : ''}<i>${i}</i><b>${l}</b><small>${esc(T[k]?.[0] || '')}</small></button>`).join('')}</div>`;
     $$('[data-go]', body).forEach((b) => (b.onclick = () => goTab(b.dataset.go)));
   }
   function drawHead() {
@@ -2917,6 +2923,15 @@ function viewTeacher(app) {
     const body = $('#tBody', app); if (!body) return;
     offIqraT?.(); offIqraT = null;
     $('#tHome', app)?.toggleAttribute('hidden', tab !== 'home'); $('#tHomeTop', app)?.toggleAttribute('hidden', tab !== 'home');
+    const sub = $('#tSub', app);
+    if (sub) {
+      sub.hidden = !TGROUP[tab];
+      if (TGROUP[tab]) {
+        sub.innerHTML = TSUB.map(([k, l, i]) => `<button type="button" data-st="${k}" class="${tab === k ? 'on' : ''}"><i>${i}</i><span>${l}</span>${k === 'iqra' ? `<b class="tab-n" data-badge="iqra">${esc(badgeVal.iqra || '')}</b>` : k === 'subs' && D.subs.filter((x) => !x.teacher).length ? `<b class="tab-n">${ar(D.subs.filter((x) => !x.teacher).length)}</b>` : ''}</button>`).join('');
+        $$('[data-st]', sub).forEach((b) => (b.onclick = () => goTab(b.dataset.st)));
+        sub.querySelector('.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+      }
+    }
     if (tab !== 'home') { const h = $('#tHero', app); if (h) h.innerHTML = ''; }
     ({ home: drawHome, subs: drawSubs, watch: drawWatch, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
     sectionize(body);
@@ -2924,6 +2939,7 @@ function viewTeacher(app) {
 
   /* --- الأقسام مربعات: التبويبات الطويلة تُعرض أقسامها مربعات في الأعلى، والنقر يفتح القسم وحده --- */
   const SECT_TABS = new Set(['iqra', 'settings', 'honor', 'reports', 'watch']);
+  const FIXED_SEC = new Set(['honor']); // أقسام ثابتة الشريط، يظهر قسم واحد دائماً
   let secObs = null;
   let secGen = 0;
   function sectionize(body) {
@@ -2950,19 +2966,20 @@ function viewTeacher(app) {
       const S = sections();
       if (S.length < 2) { bar.hidden = true; S.forEach((x) => (x.el.style.display = '')); return; }
       bar.hidden = false;
-      const sel = pref.get(key, null);
-      const cur = S.find((x) => keyOf(x.t) === sel);
+      const sel = pref.get(key, null), fixed = FIXED_SEC.has(myTab);
+      const cur = S.find((x) => keyOf(x.t) === sel) || (fixed ? S[0] : null); // الأقسام الثابتة: يُفتح الأول افتراضاً
       const sig = (cur ? keyOf(cur.t) : '') + '|' + S.map((x) => x.t + x.b).join('|');
       if (sig !== last) {
         last = sig;
-        bar.className = 'sec-bar' + (cur ? ' strip' : '');
-        bar.innerHTML = (cur ? '<button type="button" class="sec-all" data-sec="">☰ كل الأقسام</button>' : '') + S.map((x) => {
+        bar.className = 'sec-bar' + (cur ? ' strip' : '') + (fixed ? ' fixed' : '');
+        bar.innerHTML = (cur && !fixed ? '<button type="button" class="sec-all" data-sec="">☰ كل الأقسام</button>' : '') + S.map((x) => {
           const m = x.t.match(/^(\p{Extended_Pictographic}\uFE0F?)\s*/u);
           const ICON = [[/مساحة/, '💾'], [/حفظ/, '🗄️'], [/استهلاك/, '📊'], [/إشعار/, '🔔'], [/خادم/, '🤖'], [/شيخ/, '👑'], [/متوسط|دقة/, '📈'], [/خريطة/, '🗺️'], [/طلاب|الطالب/, '👥'], [/أخطاء/, '⚠️']];
           const ic = m ? m[1] : (ICON.find(([r]) => r.test(x.t)) || [0, '📌'])[1], name = (m ? x.t.slice(m[0].length) : x.t).replace(/\s*[·•].*$/, '').replace(/\s*\([^)]*\)\s*/g, ' ').trim();
           return `<button type="button" class="sec-tile${cur && cur.el === x.el ? ' on' : ''}" data-sec="${esc(keyOf(x.t))}"><span class="sec-ic">${ic}</span><span class="sec-name">${esc(name)}</span>${x.b ? `<span class="sec-b">${esc(x.b)}</span>` : ''}</button>`;
         }).join('');
-        bar.querySelectorAll('[data-sec]').forEach((b) => (b.onclick = () => { pref.set(key, b.dataset.sec || null); last = ''; render(); body.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+        bar.querySelectorAll('[data-sec]').forEach((b) => (b.onclick = () => { pref.set(key, b.dataset.sec || null); last = ''; render(); if (fixed) { if (bar.getBoundingClientRect().top < 0 || body.getBoundingClientRect().top < 0) bar.scrollIntoView({ block: 'start' }); } else body.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+        if (fixed) bar.querySelector('.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
       }
       S.forEach((x) => (x.el.style.display = cur && cur.el === x.el ? '' : 'none'));
     };
@@ -4672,18 +4689,24 @@ function viewTeacher(app) {
     const { board } = computeBoard(boardSubs(), D.students, D.classes, new Date(), roundPer());
     const months = [...new Set(D.subs.map((x) => (x.createdAt || '').slice(0, 7)).filter(Boolean))].sort().reverse();
     const cur = new Date().toISOString().slice(0, 7);
-    body.innerHTML = `<div class="card stack" style="gap:10px;margin-bottom:16px" id="revT"></div><div class="card stack" style="gap:10px;margin-bottom:16px" id="voiceT"></div><div class="card stack" style="gap:10px;margin-bottom:16px" id="shopT"></div><div class="card stack month-card" style="gap:10px;margin-bottom:16px">
-        <div class="row" style="justify-content:space-between"><h3>📅 النتائج والشهادات والأرشيف</h3><span class="small muted" id="mStat"></span></div>
-        ${CDCFG.v?.start ? `<p class="small" style="margin:0">🏁 أنت على <b>نظام الجولات</b>: تُحسب النتائج عند موعد العداد ${CDCFG.v.auto ? 'وتُعلن تلقائياً' : 'ثم تراجعها وتعلنها'}، ${CDCFG.v.reset === false ? 'وتستمر النقاط في التراكم بعدها' : 'ثم تُصفَّر النقاط وتبدأ جولة جديدة'}. تعدّل ذلك من «⚙️ تعديل موعد العد التنازلي» في لوحة اليوم.</p>` : '<p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>'}
-        <p class="small muted" style="margin:0">كل نتيجة معلنة (شهراً كانت أو جولة) تُحفظ مع فائزيها وشهاداتهم في «📚 أرشيف النتائج».</p>
-        <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}<button class="btn" type="button" id="mArch">📚 أرشيف النتائج</button></div>
-      </div>
-      <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
-        <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
+    // الأقسام بترتيب ثابت: شيخ المرحلة، التحدي الأكبر، تحدي الزملاء، صوت الأسبوع، المتجر، ثم البقية، والشهادات أخيراً
+    body.innerHTML = `<div class="card stack" style="gap:10px;margin-bottom:16px"><h3>👑 شيخ المرحلة</h3><p class="small muted" style="margin:0">لوحة الشرف كما يراها الطلاب: شيخ المرحلة، وقارئ كل صف، وتحدي الصفوف.</p><div id="hbBoard"></div></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px"><h3>🗡️ التحدي الأكبر</h3><p class="small muted" style="margin:0">قائمتا «المتحدي الأكبر» و«صاحب الهمة العالية».</p><div id="lsT" class="lists-wrap"></div></div>
+      <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="voiceT"></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="shopT"></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="revT"></div>
       <div class="card stack hero-adm" style="gap:10px;margin-bottom:16px" id="hrAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="ssAdm"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
-      <div class="card stack" style="gap:8px;margin-bottom:16px" id="chAdm"></div><div id="lsT" class="lists-wrap" style="margin-bottom:16px"></div><div id="hbBoard"></div>`;
+      <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
+        <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
+      <div class="card stack month-card" style="gap:10px;margin-bottom:16px">
+        <div class="row" style="justify-content:space-between"><h3>🎓 الشهادات والنتائج والأرشيف</h3><span class="small muted" id="mStat"></span></div>
+        ${CDCFG.v?.start ? `<p class="small" style="margin:0">🏁 أنت على <b>نظام الجولات</b>: تُحسب النتائج عند موعد العداد ${CDCFG.v.auto ? 'وتُعلن تلقائياً' : 'ثم تراجعها وتعلنها'}، ${CDCFG.v.reset === false ? 'وتستمر النقاط في التراكم بعدها' : 'ثم تُصفَّر النقاط وتبدأ جولة جديدة'}. تعدّل ذلك من «⚙️ تعديل موعد العد التنازلي» في لوحة اليوم.</p>` : '<p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>'}
+        <p class="small muted" style="margin:0">كل نتيجة معلنة (شهراً كانت أو جولة) تُحفظ مع فائزيها وشهاداتهم في «📚 أرشيف النتائج».</p>
+        <div class="row">${months.length ? `<select id="mPick" style="max-width:220px">${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}${m === cur ? ' (الشهر الحالي)' : ''}</option>`).join('')}</select><button class="btn primary" type="button" id="mGo">راجع النتائج</button>` : '<span class="muted small">لا توجد تسليمات بعد.</span>'}<button class="btn" type="button" id="mArch">📚 الأرشيف والشهادات</button><button class="btn gold" type="button" id="mAllC">⬇️ كل الشهادات دفعة واحدة</button></div>
+      </div>`;
     drawRevT($('#revT', body)); drawVoiceT($('#voiceT', body)); drawShopT($('#shopT', body));
     drawKhAdmin($('#khAdm', body));
     drawHeroAdmin($('#hrAdm', body));
@@ -4694,6 +4717,7 @@ function viewTeacher(app) {
       mountLists($('#lsT', body), L.lists, { classes: D.classes, onExport: (k, st) => exportList(L.lists, k, st) }); }
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
     $('#mArch', body).onclick = openResultsArchive;
+    $('#mAllC', body).onclick = (e) => downloadAllCerts(e.currentTarget);
     const pick = $('#mPick', body);
     if (pick) {
       const stat = () => store.getMonthResult(pick.value).then((r) => { const el = $('#mStat', body); if (el) el.innerHTML = r ? `<span class="pill ok">أُعلنت ${esc(fmtDate(r.announcedAt))}</span>` : '<span class="pill warn">لم تُعلن بعد</span>'; }).catch(() => {});
@@ -5687,7 +5711,7 @@ function viewTeacher(app) {
       </div>
       <p class="small" style="margin:0">📌 سيتم احتساب النقاط بعد انتهاء العداد مباشرة. وتُحفظ كل نتيجة مع فائزيها في «📚 أرشيف النتائج» (لوحة الشرف).</p>
       <p class="small muted" style="margin:0">تُحسب الجولة من ${esc(dShort(CDCFG.v?.start || new Date(thisMonthStart()).toISOString()))} حتى الموعد الذي تختاره.</p>
-      <div class="row"><button class="btn primary" type="button" id="cdSave">حفظ الموعد</button>${CDCFG.v?.start || CDCFG.v?.end ? '<button class="btn" type="button" id="cdAuto">↺ رجوع للنظام الشهري</button>' : ''}<button class="btn ghost" type="button" data-close>إلغاء</button></div></div>`, (m) => {
+      <div class="row modal-actions"><button class="btn primary" type="button" id="cdSave">حفظ الموعد</button>${CDCFG.v?.start || CDCFG.v?.end ? '<button class="btn" type="button" id="cdAuto">↺ رجوع للنظام الشهري</button>' : ''}<button class="btn ghost" type="button" data-close>إلغاء</button></div></div>`, (m) => {
       const inp = $('#cdEnd', m), pv = () => { const t = Date.parse(inp.value + ':00+03:00'); $('#cdPrev', m).textContent = t ? `📅 ${fmtWhen(t)}` : ''; };
       inp.oninput = pv; pv();
       $('#cdSave', m).onclick = async () => {
@@ -5745,29 +5769,61 @@ function viewTeacher(app) {
     host.innerHTML = `<div class="month-bar"><span>⏰ <b>انتهى العداد، ونتائج ${esc(per.label)} جاهزة.</b> راجعها ثم أعلنها.</span><span class="row" style="gap:6px"><button class="btn sm primary" type="button" id="rbGo">راجع وأعلن</button></span></div>`;
     $('#rbGo', host).onclick = () => openMonthReview(key, per, async () => closeRound(c, key));
   }
-  /** أرشيف الجولات والأشهر المعلنة مع فائزيها */
+  /* --- الشهادات: لكل مسابقة (الأشهر والجولات، والمواسم، والأبطال) أو كلها دفعة واحدة --- */
+  function resultCerts(r) {
+    const ranksOf = {};
+    (r.stage || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).stage = i + 1));
+    Object.values(r.byClass || {}).forEach((a) => (a || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).cls = i + 1)));
+    const res = { ym: r.ym, label: r.round ? r.label : null };
+    return D.students.map((st) => ranksOf[st.id] && certFor(res, st, ranksOf[st.id])).filter(Boolean);
+  }
+  function seasonCerts(x) {
+    const [f, to] = seasonRange(x), res = computeRange(boardSubs(), D.students, D.classes, f, to);
+    return D.students.map((st) => { const w = monthTitle(res.ranks[st.id]); return w && { ym: 'season-' + x.id, name: st.name, title: w.title, line: w.line, rank: w.rank, month: x.name, season: x.name, period: `في ${x.name}`, color: x.color, points: res.ranks[st.id].points, className: className(st.classId), teacher: s.name || '', date: ar(new Date(x.announcedAt || Date.now()).toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) }; }).filter(Boolean);
+  }
+  /** كل المسابقات المنتهية التي لها شهادات */
+  async function allCompetitions() {
+    let R = [];
+    try { R = await store.listResults(); } catch (e) { console.warn('results', e); }
+    if (D.tourneys === undefined) await loadHeroesT().catch(() => {});
+    const out = R.map((r) => ({ kind: r.round ? 'round' : 'month', id: r.ym, icon: r.round ? '🏁' : '📅', label: r.round ? r.label : 'شهر ' + r.label, at: r.announcedAt, r, certs: () => resultCerts(r) }));
+    (D.seasons || []).filter((x) => x.announcedAt).forEach((x) => out.push({ kind: 'season', id: x.id, icon: x.icon || '🏆', label: x.name, at: x.announcedAt, certs: () => seasonCerts(x) }));
+    (D.tourneys || []).filter((x) => x.champion).forEach((x) => out.push({ kind: 'hero', id: x.id, icon: '⚔️', label: 'الأبطال: ' + x.name, at: x.doneAt || x.createdAt, certs: () => heroCerts(x) }));
+    return out.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+  }
+  async function downloadAllCerts(btn) {
+    const t0 = btn.textContent; btn.disabled = true; btn.textContent = 'جارٍ الجمع…';
+    try {
+      const C = await allCompetitions(), all = C.flatMap((c) => c.certs());
+      if (!all.length) { toast('لا شهادات بعد: أعلن نتائج شهر أو جولة أو موسم أولاً.'); return; }
+      await downloadCertificatesPDF(all, 'maqraa-all-certificates.pdf', (i, n) => (btn.textContent = `جارٍ التجهيز ${ar(i)} من ${ar(n)}…`));
+      toast(`حُمّلت ${ar(all.length)} شهادة من ${ar(C.length)} مسابقة.`);
+    } catch (e) { toast('تعذر: ' + e.message); } finally { btn.disabled = false; btn.textContent = t0; }
+  }
+  /** الأرشيف: كل النتائج المعلنة مع فائزيها، وشهادات كل مسابقة أو كلها */
   async function openResultsArchive() {
-    let L = [];
-    try { L = (await store.listResults()).sort((a, b) => (b.announcedAt || '').localeCompare(a.announcedAt || '')); } catch (e) { return toast('تعذر التحميل: ' + (e.code || e.message)); }
+    let C = [];
+    try { C = await allCompetitions(); } catch (e) { return toast('تعذر التحميل: ' + (e.code || e.message)); }
     const top = (arr, n) => (arr || []).slice(0, n).map((x, i) => `${['🥇', '🥈', '🥉', '٤', '٥'][i]} ${esc(x.name)} <small class="muted">${fmt10(x.points)}</small>`).join(' · ');
-    openModal(`<div class="stack"><h2 style="margin:0">📚 أرشيف النتائج</h2>
-      ${L.length ? L.map((r, i) => `<details class="arch-it"${i ? '' : ' open'}><summary><b>${r.round ? '🏁' : '📅'} ${esc(r.round ? r.label : 'شهر ' + r.label)}</b> <span class="small muted">أُعلنت ${esc(fmtDate(r.announcedAt))}${r.auto ? ' · تلقائياً' : ''}</span></summary>
-        <div class="small"><b>👑 شيخ المرحلة:</b> ${top(r.stage, 5) || '—'}</div>
-        ${Object.entries(r.byClass || {}).filter(([, a]) => a?.length).map(([cid, a]) => `<div class="small"><b>🏆 ${esc(className(cid))}:</b> ${top(a, 3)}</div>`).join('')}
-        ${(r.challenge || []).length ? `<div class="small"><b>🏁 تحدي الصفوف:</b> ${r.challenge.slice(0, 3).map((c, k) => `${['🥇', '🥈', '🥉'][k]} ${esc(c.name)}`).join(' · ')}</div>` : ''}
-        <button class="btn sm" type="button" data-cert="${esc(r.ym)}">🎓 شهادات الفائزين (PDF)</button></details>`).join('') : '<p class="muted">لا نتائج معلنة بعد.</p>'}
+    const total = C.reduce((n, c) => n + c.certs().length, 0);
+    const group = (title, L) => L.length ? `<h4 style="margin:6px 0 0">${title}</h4>${L.map((c, i) => `<details class="arch-it"${i || title.includes('المواسم') || title.includes('الأبطال') ? '' : ' open'}><summary><b>${esc(c.icon)} ${esc(c.label)}</b> <span class="small muted">${c.at ? esc(fmtDate(c.at)) : ''}${c.r?.auto ? ' · تلقائياً' : ''} · ${ar(c.certs().length)} شهادة</span></summary>
+        ${c.r ? `<div class="small"><b>👑 شيخ المرحلة:</b> ${top(c.r.stage, 5) || '—'}</div>${Object.entries(c.r.byClass || {}).filter(([, a]) => a?.length).map(([cid, a]) => `<div class="small"><b>🏆 ${esc(className(cid))}:</b> ${top(a, 3)}</div>`).join('')}${(c.r.challenge || []).length ? `<div class="small"><b>🏁 تحدي الصفوف:</b> ${c.r.challenge.slice(0, 3).map((x, k) => `${['🥇', '🥈', '🥉'][k]} ${esc(x.name)}`).join(' · ')}</div>` : ''}`
+          : `<div class="small">${c.certs().map((x) => `${x.rank === 1 ? '🥇' : x.rank === 2 ? '🥈' : '🏅'} ${esc(x.name)} <small class="muted">${esc(x.title)}</small>`).join(' · ') || '—'}</div>`}
+        <button class="btn sm" type="button" data-cert="${esc(c.kind + ':' + c.id)}" ${c.certs().length ? '' : 'disabled'}>🎓 شهادات هذه المسابقة (PDF)</button></details>`).join('')}` : '';
+    openModal(`<div class="stack"><h2 style="margin:0">🎓 الشهادات والأرشيف</h2>
+      <div class="row"><button class="btn gold" type="button" id="arAll" ${total ? '' : 'disabled'}>⬇️ كل الشهادات دفعة واحدة (${ar(total)})</button></div>
+      ${C.length ? group('📅 الأشهر والجولات', C.filter((c) => c.kind === 'month' || c.kind === 'round')) + group('🏆 المواسم والمسابقات', C.filter((c) => c.kind === 'season')) + group('⚔️ الأبطال', C.filter((c) => c.kind === 'hero')) : '<p class="muted">لا نتائج معلنة بعد.</p>'}
       <div class="row"><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+      $('#arAll', m).onclick = (e) => downloadAllCerts(e.currentTarget);
       $$('[data-cert]', m).forEach((b) => (b.onclick = async () => {
-        const r = L.find((x) => x.ym === b.dataset.cert); if (!r) return;
-        const ranksOf = {}; (r.stage || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).stage = i + 1)); Object.values(r.byClass || {}).forEach((a) => (a || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).cls = i + 1)));
-        const res = { ym: r.ym, label: r.round ? r.label : null };
-        const winners = D.students.map((st) => ranksOf[st.id] && certFor(res, st, ranksOf[st.id])).filter(Boolean);
-        if (!winners.length) return toast('لا فائزون في هذه النتائج.');
-        b.disabled = true; try { await downloadCertificatesPDF(winners, `maqraa-certificates-${r.ym}.pdf`); } catch (x) { toast('تعذر: ' + x.message); } b.disabled = false;
+        const c = C.find((x) => x.kind + ':' + x.id === b.dataset.cert); if (!c) return;
+        const L = c.certs(); if (!L.length) return toast('لا فائزون في هذه المسابقة.');
+        const t0 = b.textContent; b.disabled = true;
+        try { await downloadCertificatesPDF(L, `certificates-${c.id}.pdf`, (i, n) => (b.textContent = `${ar(i)}/${ar(n)}…`)); } catch (x) { toast('تعذر: ' + x.message); }
+        b.disabled = false; b.textContent = t0;
       }));
     });
   }
-
   /* --- إشعارات جوال المعلم --- */
   const tOwner = { id: 'teacher', info: { role: 'teacher' } };
   function drawTeacherPush(body) {

@@ -1533,3 +1533,36 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .arch-it { border: 1px solid var(--line, #e5e1d6); border-radius: 12px; padding: 8px 12px; display: grid; gap: 6px; }
 .arch-it > summary { cursor: pointer; }
 .cdA-note { position: relative; z-index: 1; font-size: 12.5px; margin: 6px 0 0; opacity: .92; }
+/* أقسام «الواجبات والتسليم» الداخلية: شريط ثابت أعلى المحتوى */
+.tsub { position: sticky; top: 60px; z-index: 30; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px; margin-top: 4px; border-radius: 16px; background: var(--card, #fff); border: 1px solid var(--line, #e5e1d6); box-shadow: 0 6px 16px rgba(0, 0, 0, .05); }
+.tsub::-webkit-scrollbar { display: none; }
+.tsub button { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 0; border-radius: 12px; background: #f4f0e4; font: inherit; font-size: 14px; color: inherit; cursor: pointer; white-space: nowrap; position: relative; }
+.tsub button i { font-style: normal; }
+.tsub button.on { background: #0f5c46; color: #fff; font-weight: 700; }
+.tsub .tab-n:empty { display: none; }
+@media (max-width: 900px) { .tsub { top: 56px; } .tsub button { padding: 7px 11px; font-size: 13px; } }
+/* النوافذ فوق شريط الأقسام السفلي، ولا تتجاوز الشاشة */
+.modal { z-index: 120; }
+.modal-card { max-height: calc(100dvh - 32px); }
+@media (max-width: 900px) { .modal { padding: 10px; } .modal-card { padding: 18px 16px; } }
+/* شريط أقسام ثابت (لوحة الشرف) */
+.sec-bar.strip.fixed { position: sticky; top: 60px; z-index: 30; padding: 8px; border-radius: 16px; background: var(--card, #fff); border: 1px solid var(--line, #e5e1d6); box-shadow: 0 6px 16px rgba(0, 0, 0, .05); }
+@media (max-width: 900px) { .sec-bar.strip.fixed { top: 56px; } }
+/* وضع عرض الفصل على الجوال: يتسع للشاشة ويمكن تمريره */
+.cr { height: 100vh; height: 100dvh; }
+@media (max-width: 760px), (max-height: 560px) {
+  .cr-stage { overflow-y: auto; place-items: start center; padding: 2vh 4vw 1vh; -webkit-overflow-scrolling: touch; }
+  .cr-slide { gap: 1.2vh; padding-bottom: 2vh; }
+  .cr-title { font-size: clamp(26px, 8vw, 44px); }
+  .cr-sub { font-size: clamp(14px, 4vw, 18px); }
+  .cr-podium { gap: 2vw; margin-top: 1.5vh; }
+  .cr-step { width: 31vw; }
+  .cr-medal { font-size: 30px; } .cr-name { font-size: clamp(14px, 4.2vw, 20px); } .cr-cls { font-size: 11px; } .cr-pts { font-size: 15px; }
+  .cr-block { font-size: 28px; } .s1 .cr-block { height: 15vh; } .s2 .cr-block { height: 11vh; } .s3 .cr-block { height: 8vh; }
+  .cr-rest { flex-wrap: wrap; justify-content: center; gap: 2vw; font-size: 14px; }
+  .cr-lane { grid-template-columns: 26px minmax(80px, 30vw) 1fr 46px; font-size: 14px; gap: 6px; }
+  .cr-ayah { font-size: clamp(22px, 6.4vw, 34px); }
+  .cr-bar { padding: 1vh 3vw calc(1vh + env(safe-area-inset-bottom)); flex-wrap: wrap; gap: 6px; }
+}
+.modal-actions { position: sticky; bottom: -18px; z-index: 2; margin: 0 -16px -18px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--card, #fff); border-top: 1px solid var(--line, #e5e1d6); }
+@media (min-width: 901px) { .modal-actions { bottom: -24px; margin: 0 -24px -24px; padding: 14px 24px; } }
