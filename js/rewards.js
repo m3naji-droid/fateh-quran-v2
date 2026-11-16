@@ -6,8 +6,8 @@ const ar = (n) => String(n).replace(/\d/g, (c) => '٠١٢٣٤٥٦٧٨٩'[c]);
 
 /* ---------------- المتجر ---------------- */
 // kind: frame إطار | title لقب | color لون الاسم | icon رمز | fx تأثير احتفال | badge وسام (يمنحه المعلم أو يُشترى)
-export const KINDS = { frame: '🖼️ إطارات', title: '🏷️ ألقاب', color: '🎨 ألوان الاسم', icon: '✨ رموز', fx: '🎆 تأثيرات الاحتفال', badge: '🏅 أوسمة خاصة' };
-export const SLOT = { frame: 'f', title: 't', color: 'c', icon: 'i', fx: 'x' }; // مكان كل نوع في زينة الاسم
+export const KINDS = { frame: '🖼️ إطارات', title: '🏷️ ألقاب', color: '🎨 ألوان الاسم', icon: '✨ رموز', glow: '💡 أنوار', fx: '🎆 تأثيرات الاحتفال', badge: '🏅 أوسمة خاصة' };
+export const SLOT = { frame: 'f', title: 't', color: 'c', icon: 'i', fx: 'x', glow: 'g' }; // مكان كل نوع في زينة الاسم
 export const CATALOG = [
   { id: 'f-green', kind: 'frame', name: 'إطار زمردي', v: 'green', price: 30 },
   { id: 'f-silver', kind: 'frame', name: 'إطار فضي', v: 'silver', price: 40 },
@@ -42,6 +42,19 @@ export const CATALOG = [
   { id: 'i-gem', kind: 'icon', name: 'جوهرة', v: '💎', price: 25 },
   { id: 'i-lion', kind: 'icon', name: 'أسد', v: '🦁', price: 25 },
   { id: 'i-dove', kind: 'icon', name: 'حمامة', v: '🕊️', price: 20 },
+  // 💡 أنوار متحركة على الاسم (نور واحد). كلها مخفية حتى يقرر المعلم: تُباع، أو تُنال بإنجاز، أو يمنحها
+  { id: 'g-lantern', kind: 'glow', name: 'فانوس رمضان', v: 'lantern', price: 60, hidden: true },
+  { id: 'g-bulbs', kind: 'glow', name: 'أضواء الزينة', v: 'bulbs', price: 50, hidden: true },
+  { id: 'g-pulse', kind: 'glow', name: 'نبض ذهبي', v: 'pulse', price: 40, hidden: true },
+  { id: 'g-twinkle', kind: 'glow', name: 'نجوم تتلألأ', v: 'twinkle', price: 50, hidden: true },
+  { id: 'g-shine', kind: 'glow', name: 'بريق الذهب', v: 'shine', price: 60, hidden: true },
+  { id: 'g-star8', kind: 'glow', name: 'زخرفة دوّارة', v: 'star8', price: 50, hidden: true },
+  { id: 'g-mihrab', kind: 'glow', name: 'قوس المحراب', v: 'mihrab', price: 70, hidden: true },
+  { id: 'g-hang', kind: 'glow', name: 'أهلّة ونجوم معلّقة', v: 'hang', price: 70, hidden: true },
+  { id: 'g-neon', kind: 'glow', name: 'حروف من نور', v: 'neon', price: 80, hidden: true },
+  { id: 'g-flow', kind: 'glow', name: 'إطار متدفّق', v: 'flow', price: 80, hidden: true },
+  { id: 'g-crown', kind: 'glow', name: 'تاج النور', v: 'crown', price: 0, earn: 'top:1', hidden: true, rare: true },
+  { id: 'g-halo', kind: 'glow', name: 'هالة البطل', v: 'halo', price: 0, earn: 'goldt:1', hidden: true, rare: true },
   { id: 'x-fire', kind: 'fx', name: 'ألعاب نارية', v: 'fire', price: 40 },
   { id: 'x-stars', kind: 'fx', name: 'مطر النجوم', v: 'stars', price: 40 },
   { id: 'x-moon', kind: 'fx', name: 'أهلّة ذهبية', v: 'moon', price: 50 },
@@ -52,7 +65,7 @@ export function shopItems(shop) {
   const mods = shop?.items || {};
   const base = CATALOG.map((x) => ({ ...x, ...(mods[x.id] || {}) }));
   const extra = Object.values(mods).filter((x) => x && x.custom && !CATALOG.some((c) => c.id === x.id));
-  return [...base, ...extra].filter((x) => !x.deleted).map((x) => (x.kind === 'title' ? { ...x, price: 0, grantOnly: !x.earn } : x));
+  return [...base, ...extra].filter((x) => !x.deleted).map((x) => (x.kind === 'title' ? { ...x, price: 0, grantOnly: !x.earn } : x.earn ? { ...x, price: 0, grantOnly: false } : x));
 }
 
 /* ---------------- شروط الألقاب ومستوياتها ---------------- */
@@ -77,8 +90,16 @@ export const EARN = {
   champ: { txt: (n) => `يفوز بنهائي مسابقة الأبطال ${times(n)}` },
   top: { txt: (n) => `يكون الأول في لوحة الشرف (في صفه أو على المرحلة) ${n === 1 ? 'شهراً' : n === 2 ? 'شهرين' : ar(n) + ' أشهر'}` },
   iqra: { txt: (n) => `يُتقن ${cnt(n, 'درساً', 'درسين', 'دروس', 'درساً')} في «اقرأ وارتقِ»` },
+  goldt: { need: (n, k) => n * k, txt: (n) => `ينال ${n === 1 ? 'لقباً ذهبياً 🥇' : cnt(n, 'لقباً ذهبياً', 'لقبين ذهبيين', 'ألقاب ذهبية', 'لقباً ذهبياً') + ' 🥇'}` },
   fixed: { txt: (n) => `يُصلح ${cnt(n, 'خطأً', 'خطأين', 'أخطاء', 'خطأً')} من دفتر الأخطاء (يعيد الموضع صحيحاً)` },
 };
+/** الإنجازات التي يختار منها المعلم شرط نيل عنصر (مثل الأنوار) */
+export const EARN_KEYS = [
+  ['days', 'أيام مراجعة (متفرقة)'], ['streak', 'أيام مراجعة متتالية'], ['perfect', 'تسميعات بدقة ١٠٠٪'], ['fajr', 'أيام تسميع وقت الفجر'],
+  ['night', 'ليالٍ بعد العشاء'], ['back', 'أيام مواظبة بعد انقطاع'], ['amma', 'ختم جزء عمّ (مرات)'], ['wins', 'فوز في التحديات (أكثر من)'],
+  ['brave', 'تحديات شارك فيها'], ['champ', 'بطولة الأبطال (مرات)'], ['top', 'الأول في لوحة الشرف (أشهر)'], ['voices', 'صوت الأسبوع (مرات)'],
+  ['iqra', 'دروس «اقرأ وارتقِ»'], ['fixed', 'أخطاء أصلحها'], ['goldt', 'ألقاب ذهبية 🥇'],
+];
 const parseEarn = (e) => { const [k, n] = String(e || '').split(':'); return EARN[k] ? { k, n: +n || 1, E: EARN[k] } : null; };
 const needOf = (e, k) => (e.E.need ? e.E.need(e.n, k) : e.n * k);
 const valOf = (e, ctx) => (e.E.val ? e.E.val(ctx) : ctx?.[e.k] || 0);
@@ -144,19 +165,21 @@ export function balance(points, wallet) {
 }
 
 /* ---------------- زينة الاسم ---------------- */
+// مفاتيح المعاينة __pv_<نور>: اسم تجريبي يلبس كل نور (في المتجر وعند المعلم)
+const PV = () => Object.fromEntries(Object.keys(GLOW).map((g) => ['__pv_' + g, { g }]));
 let LOOKS = {};
-export const setLooks = (m) => { LOOKS = m || {}; decorateAll(); };
+export const setLooks = (m) => { LOOKS = { ...PV(), ...(m || {}) }; decorateAll(); };
 export const lookOf = (pn) => LOOKS[pn] || null;
 export function setLook(pn, look) { LOOKS = { ...LOOKS, [pn]: look }; decorateAll(); }
 
 /** يُطبّق الزينة على كل عنصر يحمل data-lk="رقم الطالب" (الاسم يبقى نصاً كما هو) */
 function decorate(el) {
-  const pn = el.dataset.lk, L = LOOKS[pn];
+  const pn = el.dataset.lk, L = LOOKS[pn] || (pn.startsWith('__pv_') && GLOW[pn.slice(5)] != null ? { g: pn.slice(5) } : undefined);
   const sig = JSON.stringify(L || {});
   if (el.dataset.lkSig === sig) return;
   el.dataset.lkSig = sig;
-  el.querySelectorAll(':scope > .lk-i, :scope > .lk-t').forEach((x) => x.remove());
-  el.classList.remove('lk', 'lk-f-green', 'lk-f-silver', 'lk-f-stars', 'lk-f-gold', 'lk-f-crown');
+  el.querySelectorAll(':scope > .lk-i, :scope > .lk-t, :scope > .lk-gx').forEach((x) => x.remove());
+  el.classList.remove('lk', 'lk-f-green', 'lk-f-silver', 'lk-f-stars', 'lk-f-gold', 'lk-f-crown', 'lk-g', ...[...el.classList].filter((c) => c.startsWith('lk-g-')));
   el.style.removeProperty('--lkc');
   if (!L) return;
   el.classList.add('lk');
@@ -164,7 +187,28 @@ function decorate(el) {
   if (L.c) el.style.setProperty('--lkc', L.c);
   if (L.i) el.insertAdjacentHTML('afterbegin', `<span class="lk-i" aria-hidden="true">${esc(L.i)}</span>`);
   if (L.t && el.dataset.lkNoTitle == null) el.insertAdjacentHTML('beforeend', `<span class="lk-t${L.tl ? ' tl' + L.tl : ''}">${L.tl ? MEDALS[L.tl - 1] + ' ' : ''}${esc(L.t)}</span>`);
+  if (L.g && GLOW[L.g] != null) { el.classList.add('lk-g', 'lk-g-' + L.g); if (GLOW[L.g]) el.insertAdjacentHTML(L.g === 'lantern' || L.g === 'star8' ? 'afterbegin' : 'beforeend', `<span class="lk-gx" aria-hidden="true">${GLOW[L.g]}</span>`); glowIO ? glowIO.observe(el) : el.classList.add('lk-on'); }
 }
+/* ---------------- الأنوار: عناصر إضافية لكل نور (والحركة في CSS) ---------------- */
+const STAR8 = '<svg viewBox="0 0 24 24"><path d="M12 1l2.6 4.7L19.8 4.2 18.3 9.4 23 12l-4.7 2.6 1.5 5.2-5.2-1.5L12 23l-2.6-4.7-5.2 1.5 1.5-5.2L1 12l4.7-2.6L4.2 4.2l5.2 1.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/></svg>';
+const LANTERN = '<svg viewBox="0 0 20 30"><path d="M10 0v3M6 3h8l2 4H4z" stroke="#a87b1d" stroke-width="1.2" fill="#c9971f"/><path d="M4 7h12l-1.5 15h-9z" fill="#3a2a0a" stroke="#c9971f" stroke-width="1.2"/><ellipse class="fl" cx="10" cy="15" rx="3" ry="4.6" fill="#ffd56a"/><path d="M5.5 22h9l-1.5 4h-6z" fill="#c9971f"/><path d="M8 26h4l-2 3z" fill="#a87b1d"/></svg>';
+const GLOW = {
+  lantern: LANTERN,
+  bulbs: '<i></i><i></i><i></i><i></i><i></i><i></i><i></i>',
+  pulse: '',
+  twinkle: '<i>✦</i><i>✧</i><i>✦</i><i>✧</i>',
+  shine: '<i></i>',
+  star8: STAR8,
+  mihrab: '<i></i>',
+  hang: '<i>🌙</i><i>⭐</i>',
+  neon: '',
+  flow: '<i></i>',
+  crown: '<i>👑</i>',
+  halo: '<i></i>',
+};
+export const GLOWS = Object.keys(GLOW);
+// تتحرك الأنوار في الأسماء الظاهرة على الشاشة فقط، حفاظاً على الجوالات الضعيفة
+const glowIO = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((es) => es.forEach((e) => e.target.classList.toggle('lk-on', e.isIntersecting)), { rootMargin: '40px' }) : null;
 let dq = 0;
 export function decorateAll(root = document) {
   root.querySelectorAll?.('[data-lk]').forEach(decorate);

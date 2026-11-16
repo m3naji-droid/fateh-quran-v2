@@ -24,7 +24,7 @@ import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js'
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
-import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx } from './rewards.js';
+import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS } from './rewards.js';
 import { dayTimes } from './prayer.js';
 /** الاحتفال، ومعه تأثير الطالب الخاص من المتجر إن اختاره */
 const FX = { kind: '' };
@@ -1138,6 +1138,7 @@ function viewStudent(app) {
     return {
       days: L.length, streak: bestStreak(days), wins: myCh.filter((c) => chWinner(c) === me.id).length,
       voices: badges.filter((b) => String(b.id || '').startsWith('voice-')).length,
+      goldt: shopItems(SHOP).filter((x) => x.kind === 'title' && x.earn && (RW?.ach?.[x.id] || 0) >= 3).length,
       perfect: data.subs.filter((x) => (x.percent ?? 0) >= 100).length, fajr: fajr.size, night: night.size, back, amma,
       brave: myCh.filter((c) => chView(c, me.id).mine).length,
       champ: badges.filter((b) => String(b.id || '').startsWith('hero-')).length,
@@ -1155,22 +1156,28 @@ function viewStudent(app) {
       const old = titleLv(x), lv = earnLevel(x, ctx);
       if (lv > old) { up.push({ t: x, lv, old }); ach[x.id] = lv; own.add(x.id); }
     });
+    // الأنوار (وغيرها) التي جعلها المعلم تُنال بإنجاز: مستوى واحد
+    shopItems(SHOP).filter((x) => x.kind !== 'title' && x.earn && !x.hidden && !own.has(x.id)).forEach((x) => {
+      if (earnLevel(x, ctx) >= 1) { up.push({ t: x, lv: 1, old: 0 }); own.add(x.id); }
+    });
     if (!up.length) return;
     const owned = [...own], patch = { owned, ach };
-    const worn = up.find((u) => RW.look?.t === u.t.v);
+    const worn = up.find((u) => u.t.kind === 'title' && RW.look?.t === u.t.v);
     if (worn) patch.look = { ...RW.look, tl: worn.lv };
     await store.saveRewards(me.id, patch);
     RW = { ...RW, ...patch };
     if (worn) { await store.setMyLook(me.id, RW.look).catch(() => {}); setLook(me.id, RW.look); }
     const { t, lv, old } = up[up.length - 1], isWorn = worn && worn.t === t;
     whenModalFree(() => {
-      openModal(`<div class="stack ach-new" style="text-align:center;align-items:center"><div class="ach-big">${MEDALS[lv - 1]}</div><span class="srn-tag">${old ? 'ارتقى لقبك' : 'لقب جديد'}</span>
-        <h2 style="margin:0">«${esc(t.v)}» · ${esc(LEVELS[lv - 1])}</h2><p style="margin:0">نلته لأنك ${esc(earnText(t, lv).replace(/^يُختار صوته/, 'اختير صوتك').replace(/^ي/, 'ت').replace(' ثم يواظب', ' ثم تواظب'))}. ما شاء الله!</p>
-        ${lv < 3 ? `<p class="small muted" style="margin:0">المستوى التالي ${esc(LEVELS[lv])}: ${esc(earnText(t, lv + 1))}</p>` : '<p class="small" style="margin:0">🏆 بلغت أعلى مستوى!</p>'}
+      const isT = t.kind === 'title', why = esc(earnText(t, lv).replace(/^يُختار صوته/, 'اختير صوتك').replace(/^ي/, 'ت').replace(' ثم يواظب', ' ثم تواظب'));
+      openModal(`<div class="stack ach-new" style="text-align:center;align-items:center"><div class="ach-big">${isT ? MEDALS[lv - 1] : t.kind === 'glow' ? `<span data-lk="__pv_${esc(t.v)}" style="font-size:24px">${esc(me.name)}</span>` : '🎁'}</div><span class="srn-tag">${isT ? (old ? 'ارتقى لقبك' : 'لقب جديد') : t.kind === 'glow' ? '✨ نور جديد لاسمك' : '🎁 مكافأة جديدة'}</span>
+        <h2 style="margin:0">«${esc(isT ? t.v : t.name)}»${isT ? ` · ${esc(LEVELS[lv - 1])}` : ''}</h2><p style="margin:0">نلته لأنك ${why}. ما شاء الله!</p>
+        ${!isT ? '' : lv < 3 ? `<p class="small muted" style="margin:0">المستوى التالي ${esc(LEVELS[lv])}: ${esc(earnText(t, lv + 1))}</p>` : '<p class="small" style="margin:0">🏆 بلغت أعلى مستوى!</p>'}
         ${up.length > 1 ? `<p class="small muted" style="margin:0">ومعه ${up.length === 2 ? 'لقب آخر' : ar(up.length - 1) + ' ألقاب أخرى'} في خزانتك</p>` : ''}
         <div class="row" style="justify-content:center">${isWorn ? '' : '<button class="btn primary" type="button" id="ttWear">ضعه تحت اسمي</button>'}<button class="btn" type="button" data-close>${isWorn ? 'الحمد لله' : 'لاحقاً'}</button></div></div>`, (m) => {
         const w = m.querySelector('#ttWear'); if (w) w.onclick = async () => {
-          const lk = { ...(RW.look || {}), t: t.v, tl: lv };
+          const slot = SLOT[t.kind]; if (!slot) { closeModal(); tab = 'rewards'; draw(); return; }
+          const lk = isT ? { ...(RW.look || {}), t: t.v, tl: lv } : { ...(RW.look || {}), [slot]: t.v };
           try { await store.saveRewards(me.id, { look: lk }); await store.setMyLook(me.id, lk).catch(() => {}); RW = { ...RW, look: lk }; setLook(me.id, lk); } catch {}
           closeModal(); tab = 'rewards'; draw();
         };
@@ -1310,11 +1317,11 @@ function viewStudent(app) {
         ${next ? `<div class="ach-bar"><i style="width:${Math.min(100, Math.round((cur[a.id] / next) * 100))}%"></i></div><small class="muted">${ar(Math.min(cur[a.id], next))} / ${ar(next)} · التالي ${LEVELS[n]}</small>` : '<small>🏆 أعلى مستوى</small>'}</div>`;
     };
     const myBadges = [...(me.rankInfo?._badges || []), ...items.filter((x) => x.kind === 'badge' && owned.has(x.id)).map((x) => ({ icon: x.v || '🏅', label: x.name, color: x.color }))];
-    const preview = (it) => it.kind === 'frame' ? `<span class="lk lk-f-${esc(it.v)}">${esc(me.name)}</span>` : it.kind === 'title' ? `<span class="lk-t" style="display:inline-block">${esc(it.v)}</span>`
+    const preview = (it) => it.kind === 'glow' ? `<span data-lk="__pv_${esc(it.v)}">${esc(me.name)}</span>` : it.kind === 'frame' ? `<span class="lk lk-f-${esc(it.v)}">${esc(me.name)}</span>` : it.kind === 'title' ? `<span class="lk-t" style="display:inline-block">${esc(it.v)}</span>`
       : it.kind === 'color' ? `<b style="color:${esc(it.v)}">${esc(me.name)}</b>` : it.kind === 'icon' || it.kind === 'badge' ? `<span style="font-size:30px">${esc(it.v || '🏅')}</span>` : `<span style="font-size:28px">${it.v === 'stars' ? '⭐✨' : it.v === 'moon' ? '🌙✨' : '🎆🎇'}</span>`;
     const card = (it) => {
-      const has = owned.has(it.id), slot = SLOT[it.kind], worn = slot && look[slot] === it.v, can = meetsNeed(it, RW.ach), pr = it.earn ? earnProgress(it, ectx) : null, tl = titleLv(it);
-      const prog = pr && pr.next ? `<small class="muted">${has ? `التالي ${LEVELS[pr.next - 1]}: ` : '🔒 '}${esc(pr.txt)}</small><div class="ach-bar"><i style="width:${Math.round((pr.have / pr.need) * 100)}%"></i></div><small class="muted">${ar(pr.have)} / ${ar(pr.need)}${pr.unit ? ' ' + pr.unit : ''}</small>` : '';
+      const has = owned.has(it.id), slot = SLOT[it.kind], worn = slot && look[slot] === it.v, can = meetsNeed(it, RW.ach), pr = it.earn && (it.kind === 'title' || !has) ? earnProgress(it, ectx) : null, tl = it.kind === 'title' ? titleLv(it) : 0;
+      const prog = pr && pr.next ? `<small class="muted">${has ? `التالي ${LEVELS[pr.next - 1]}: ` : it.kind === 'title' ? '🔒 ' : '🏆 يُنال: '}${esc(pr.txt)}</small><div class="ach-bar"><i style="width:${Math.round((pr.have / pr.need) * 100)}%"></i></div><small class="muted">${ar(pr.have)} / ${ar(pr.need)}${pr.unit ? ' ' + pr.unit : ''}</small>` : '';
       const btn = has ? (it.earn && tl ? `<span class="tl-lv tl${tl}">${esc(LEVELS[tl - 1])}</span>` : '') + (slot ? `<button class="btn sm ${worn ? 'primary' : ''}" type="button" data-wear="${esc(it.id)}">${worn ? '✓ مستخدَم' : 'استخدِم'}</button>` : '<span class="pill ok">✓ لك</span>') + (pr && !pr.next ? '<small>🏆 أعلى مستوى</small>' : prog)
         : pr ? prog
         : it.grantOnly ? '<span class="small muted">🎖️ يمنحه المعلم</span>'
@@ -5201,8 +5208,16 @@ function viewTeacher(app) {
     const L = all.filter((x) => x.kind === shopKind && !x.deleted);
     const valLabel = { frame: 'الشكل', title: 'نص اللقب', color: 'اللون', icon: 'الرمز', fx: 'التأثير', badge: 'رمز الوسام' };
     host.innerHTML = `<h3>🛍️ المتجر والمكافآت</h3>
-      <p class="small muted" style="margin:0">الطلاب يكسبون 🪙 مكافأة لكل نقطة في لوحة الشرف، ومع الأوسمة. عدّل الأسعار، أو أخفِ ما لا تريده، أو أضف أوسمة ورموزاً خاصة تُباع أو تمنحها أنت. <b>الألقاب لا تُشترى</b>: يُنال بعضها بالإنجاز تلقائياً، وما تضيفه أنت تمنحه لمن تشاء.</p>
+      <p class="small muted" style="margin:0">الطلاب يكسبون 🪙 مكافأة لكل نقطة في لوحة الشرف، ومع الأوسمة. عدّل الأسعار، أو أخفِ ما لا تريده، أو أضف أوسمة ورموزاً خاصة تُباع أو تمنحها أنت. <b>الألقاب لا تُشترى</b>: يُنال بعضها بالإنجاز تلقائياً، وما تضيفه أنت تمنحه لمن تشاء. و<b>💡 الأنوار</b> مخفية حتى تقرر طريقة نيلها.</p>
       <div class="seg" role="tablist">${kinds.map((k) => `<button type="button" class="${k === shopKind ? 'on' : ''}" data-sk="${k}">${KINDS[k]}</button>`).join('')}</div>
+      ${shopKind === 'glow' ? `<p class="small" style="margin:0">💡 <b>الأنوار</b> تتحرك على اسم الطالب في كل مكان، ويلبس الطالب نوراً واحداً. كلها <b>مخفية</b> حتى تختار لكل نور: يُباع بسعر تحدده، أو يُنال بإنجاز تختاره، أو تمنحه أنت لمن تشاء.</p>
+      <div class="glow-mgr">${L.map((x) => { const md = x.hidden ? 'hide' : x.earn ? 'earn' : x.grantOnly ? 'grant' : 'sell', [ek, en] = (x.earn || CATALOG.find((c) => c.id === x.id)?.earn || 'days:10').split(':');
+        return `<div class="glow-row" data-it="${esc(x.id)}" data-glow><div class="glow-pv"><span data-lk="__pv_${esc(x.v)}">${esc(D.students[0]?.name || 'عبدالله')}</span></div>
+          <div class="glow-ctl"><b>${esc(x.name)}</b>${x.rare ? ' <span class="pill">نادر</span>' : ''}
+            <select data-mode aria-label="طريقة الحصول"><option value="hide" ${md === 'hide' ? 'selected' : ''}>🙈 مخفي</option><option value="sell" ${md === 'sell' ? 'selected' : ''}>🛒 يُباع</option><option value="earn" ${md === 'earn' ? 'selected' : ''}>🏆 يُنال بإنجاز</option><option value="grant" ${md === 'grant' ? 'selected' : ''}>🎖️ أمنحه أنا</option></select>
+            <label class="glow-f" data-show="sell" ${md === 'sell' ? '' : 'hidden'}>السعر 🪙 <input type="number" min="0" max="5000" value="${x.price || 0}" data-price></label>
+            <span class="glow-f" data-show="earn" ${md === 'earn' ? '' : 'hidden'}><select data-ek aria-label="الإنجاز">${EARN_KEYS.map(([k, l]) => `<option value="${k}" ${k === ek ? 'selected' : ''}>${l}</option>`).join('')}</select><input type="number" min="1" max="500" value="${+en || 1}" data-en aria-label="العدد"></span>
+            <small class="muted" data-etxt>${md === 'earn' ? '🏆 ' + esc(earnText({ earn: `${ek}:${en}` })) : ''}</small></div></div>`; }).join('')}</div>` : `
       <div class="table-wrap"><table class="table"><thead><tr><th>العنصر</th><th>${shopKind === 'title' ? 'كيف يُنال' : 'السعر 🪙'}</th><th>${shopKind === 'title' ? 'الظهور' : 'في المتجر'}</th><th></th></tr></thead><tbody>
         ${L.map((x) => `<tr data-it="${esc(x.id)}"><td>${x.kind === 'icon' || x.kind === 'badge' ? esc(x.v) + ' ' : x.kind === 'color' ? `<span class="sw" style="background:${esc(x.v)}"></span> ` : ''}<b>${esc(x.name)}</b>${x.kind === 'title' ? ` <span class="small muted">«${esc(x.v)}»</span>` : ''}${x.need ? ' <span class="pill">نادر</span>' : ''}</td>
           ${x.kind === 'title' ? `<td class="small">${x.earn ? `🏆 ${esc(earnText(x))}<div class="muted">${esc(earnSteps(x))}</div>` : '🎖️ تمنحه أنت'}<input type="hidden" data-price value="0"></td>
@@ -5210,7 +5225,7 @@ function viewTeacher(app) {
           : `<td><input type="number" min="0" max="5000" value="${x.price || 0}" data-price style="width:90px" aria-label="السعر"></td>
           <td><select data-mode aria-label="طريقة الحصول"><option value="sell" ${!x.hidden && !x.grantOnly ? 'selected' : ''}>يُباع</option><option value="grant" ${x.grantOnly ? 'selected' : ''}>يمنحه المعلم فقط</option><option value="hide" ${x.hidden ? 'selected' : ''}>مخفي</option></select></td>`}
           <td>${x.custom ? '<button class="btn sm danger" type="button" data-del>حذف</button>' : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا عناصر.</td></tr>'}
-      </tbody></table></div>
+      </tbody></table></div>`}
       <details class="sp-box"><summary><b>➕ إضافة لقب أو وسام أو رمز</b></summary>
         <div class="row" style="margin-top:10px">
           <label class="field" style="flex:1 1 130px">النوع<select id="shK">${['title', 'badge', 'icon', 'color'].map((k) => `<option value="${k}" ${k === shopKind ? 'selected' : ''}>${KINDS[k]}</option>`).join('')}</select></label>
@@ -5235,12 +5250,22 @@ function viewTeacher(app) {
     };
     kk.onchange();
     $$('[data-sk]', host).forEach((b) => (b.onclick = () => { shopKind = b.dataset.sk; drawShopT(host); }));
+    // الأنوار: إظهار حقل السعر أو حقل الإنجاز حسب الاختيار
+    $$('[data-glow]', host).forEach((r) => {
+      const upd = () => {
+        const md = r.querySelector('[data-mode]').value;
+        r.querySelectorAll('[data-show]').forEach((f) => (f.hidden = f.dataset.show !== md));
+        r.querySelector('[data-etxt]').textContent = md === 'earn' ? '🏆 ' + earnText({ earn: `${r.querySelector('[data-ek]').value}:${Math.max(1, +r.querySelector('[data-en]').value || 1)}` }) : md === 'hide' ? '' : md === 'grant' ? 'تمنحه من «منح طالب عنصراً» أسفل الصفحة.' : '';
+      };
+      r.querySelectorAll('select, input').forEach((i) => (i.oninput = i.onchange = upd));
+    });
     const collect = () => {
       const m = { ...(D.shop.items || {}) };
       $$('[data-it]', host).forEach((tr) => {
         const id = tr.dataset.it, base = CATALOG.find((c) => c.id === id), cur = m[id] || {};
         const price = Math.max(0, Math.min(5000, +tr.querySelector('[data-price]').value || 0)), mode = tr.querySelector('[data-mode]').value;
         const patch = { price, hidden: mode === 'hide', grantOnly: mode === 'grant' };
+        if (tr.dataset.glow != null) patch.earn = mode === 'earn' ? `${tr.querySelector('[data-ek]').value}:${Math.max(1, Math.min(500, +tr.querySelector('[data-en]').value || 1))}` : '';
         m[id] = base ? { ...cur, ...patch } : { ...cur, ...patch };
       });
       return m;

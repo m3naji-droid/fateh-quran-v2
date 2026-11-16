@@ -1405,3 +1405,70 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .hm-sum-g > div { background: #f7f3e8; border-radius: 14px; padding: 10px 4px; display: grid; } .hm-sum-g b { font-size: 22px; color: #0f5c46; } .hm-sum-g span { font-size: 13px; }
 .hm-sum-rk small { display: block; margin-top: 4px; }
 .hm-sum-rk { display: block; padding: 10px; border-radius: 12px; background: #f3faf6; }
+/* ================= 💡 الأنوار على الاسم (تتحرك فقط حين يظهر الاسم: .lk-on) ================= */
+.lk-g { --gc: #e0b23a; }
+.lk-gx { pointer-events: none; }
+.lk-g:not(.lk-on) *, .lk-g:not(.lk-on)::before, .lk-g:not(.lk-on)::after { animation-play-state: paused !important; }
+.lk-g:not(.lk-on) { animation-play-state: paused !important; }
+/* ١ فانوس رمضان: لهب يخفت ويتوهّج */
+.lk-g-lantern .lk-gx { display: inline-flex; width: .8em; height: 1.2em; }
+.lk-g-lantern .lk-gx svg { width: 100%; height: 100%; overflow: visible; }
+.lk-g-lantern .fl { animation: gFlame 2.4s ease-in-out infinite; filter: drop-shadow(0 0 3px #ffcc4d); }
+@keyframes gFlame { 0%, 100% { opacity: .35; } 45% { opacity: 1; filter: drop-shadow(0 0 6px #ffd56a); } 60% { opacity: .8; } }
+/* ٢ أضواء الزينة: مصابيح تحت الاسم تُضاء واحدة تلو الأخرى */
+.lk-g-bulbs { padding-bottom: 7px; }
+.lk-g-bulbs .lk-gx { position: absolute; inset-inline: 2px; bottom: -1px; height: 7px; display: flex; justify-content: space-between; border-top: 1px solid rgba(120, 100, 60, .35); border-radius: 50% 50% 0 0 / 6px 6px 0 0; }
+.lk-g-bulbs .lk-gx i { width: 5px; height: 5px; margin-top: 1px; border-radius: 50%; opacity: .25; animation: gBulb 2.1s infinite; }
+.lk-g-bulbs .lk-gx i:nth-child(7n+1) { background: #ff5a5a; } .lk-g-bulbs .lk-gx i:nth-child(7n+2) { background: #ffd23f; animation-delay: .3s; } .lk-g-bulbs .lk-gx i:nth-child(7n+3) { background: #3ddc84; animation-delay: .6s; }
+.lk-g-bulbs .lk-gx i:nth-child(7n+4) { background: #4db5ff; animation-delay: .9s; } .lk-g-bulbs .lk-gx i:nth-child(7n+5) { background: #ff8ad8; animation-delay: 1.2s; } .lk-g-bulbs .lk-gx i:nth-child(7n+6) { background: #ffd23f; animation-delay: 1.5s; } .lk-g-bulbs .lk-gx i:nth-child(7n) { background: #3ddc84; animation-delay: 1.8s; }
+@keyframes gBulb { 0%, 70%, 100% { opacity: .25; box-shadow: none; } 15%, 40% { opacity: 1; box-shadow: 0 0 6px currentColor, 0 0 5px rgba(255, 230, 150, .9); } }
+/* ٣ نبض ذهبي: هالة خلف الاسم */
+.lk-g-pulse { border-radius: 999px; animation: gPulse 2.2s ease-in-out infinite; }
+@keyframes gPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(224, 178, 58, 0); background-color: transparent; } 50% { box-shadow: 0 0 14px 3px rgba(224, 178, 58, .55); background-color: rgba(255, 224, 138, .18); } }
+/* ٤ نجوم تتلألأ حول الاسم */
+.lk-g-twinkle .lk-gx i { position: absolute; font-style: normal; font-size: 10px; color: #e0b23a; opacity: 0; animation: gTw 2.6s ease-in-out infinite; text-shadow: 0 0 4px #ffd56a; }
+.lk-g-twinkle .lk-gx i:nth-child(1) { top: -8px; inset-inline-start: -4px; } .lk-g-twinkle .lk-gx i:nth-child(2) { top: -9px; inset-inline-end: 20%; animation-delay: .65s; font-size: 8px; }
+.lk-g-twinkle .lk-gx i:nth-child(3) { bottom: -7px; inset-inline-end: -5px; animation-delay: 1.3s; } .lk-g-twinkle .lk-gx i:nth-child(4) { bottom: -8px; inset-inline-start: 30%; animation-delay: 1.95s; font-size: 8px; }
+@keyframes gTw { 0%, 100% { opacity: 0; transform: scale(.4) rotate(0); } 40% { opacity: 1; transform: scale(1.15) rotate(25deg); } 60% { opacity: .8; transform: scale(1) rotate(35deg); } }
+/* ٥ بريق يمرّ على الحروف */
+.lk-g-shine .lk-gx { position: absolute; inset: 0; overflow: hidden; border-radius: 6px; }
+.lk-g-shine .lk-gx i { position: absolute; top: -20%; bottom: -20%; width: 40%; left: -60%; background: linear-gradient(100deg, transparent, rgba(255, 245, 200, .85), transparent); transform: skewX(-18deg); mix-blend-mode: screen; animation: gShine 3.4s ease-in-out infinite; }
+@keyframes gShine { 0%, 55% { left: -60%; } 100% { left: 130%; } }
+/* ٦ زخرفة إسلامية دوّارة */
+.lk-g-star8 .lk-gx { display: inline-flex; width: .95em; height: .95em; color: #c9971f; animation: gSpin 9s linear infinite; filter: drop-shadow(0 0 2px rgba(224, 178, 58, .6)); }
+.lk-g-star8 .lk-gx svg { width: 100%; height: 100%; }
+@keyframes gSpin { to { transform: rotate(360deg); } }
+/* ٧ قوس المحراب فوق الاسم */
+.lk-g-mihrab { padding-top: 6px; }
+.lk-g-mihrab .lk-gx i { position: absolute; top: -7px; inset-inline: -5px; height: 16px; border: 2px solid #c9971f; border-bottom: 0; border-radius: 50% 50% 0 0 / 100% 100% 0 0; animation: gArch 2.8s ease-in-out infinite; }
+.lk-g-mihrab .lk-gx i::after { content: ""; position: absolute; top: -6px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #ffd56a; box-shadow: 0 0 6px #ffd56a; }
+@keyframes gArch { 0%, 100% { box-shadow: none; border-color: #b8891c; } 50% { box-shadow: 0 -3px 10px rgba(255, 213, 106, .8); border-color: #ffd56a; } }
+/* ٨ أهلّة ونجوم معلّقة تتأرجح */
+.lk-g-hang { margin-top: 10px; }
+.lk-g-hang .lk-gx i { position: absolute; top: -17px; font-style: normal; font-size: 10px; transform-origin: 50% -8px; animation: gSwing 3s ease-in-out infinite; filter: drop-shadow(0 0 3px rgba(255, 213, 106, .8)); }
+.lk-g-hang .lk-gx i::before { content: ""; position: absolute; left: 50%; top: -8px; height: 8px; border-left: 1px solid rgba(160, 130, 60, .7); }
+.lk-g-hang .lk-gx i:nth-child(1) { inset-inline-start: 15%; } .lk-g-hang .lk-gx i:nth-child(2) { inset-inline-end: 15%; top: -14px; font-size: 9px; animation-delay: -1.4s; }
+@keyframes gSwing { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } }
+/* ٩ حروف من نور */
+.lk-g-neon { animation: gNeon 2.6s ease-in-out infinite; }
+@keyframes gNeon { 0%, 100% { text-shadow: 0 0 2px rgba(224, 178, 58, .3); } 50% { text-shadow: 0 0 6px var(--lkc, #e0b23a), 0 0 12px rgba(255, 213, 106, .9), 0 0 20px rgba(255, 213, 106, .5); } }
+/* ١٠ إطار متدفّق الألوان */
+.lk-g-flow { padding: 1px 9px; border-radius: 999px; }
+.lk-g-flow .lk-gx i { position: absolute; inset: -2px; border-radius: 999px; padding: 2px; background: linear-gradient(90deg, #c9971f, #0f8a5f, #ffd56a, #2554c7, #c9971f) 0 0 / 300% 100%; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: gFlow 4s linear infinite; }
+@keyframes gFlow { to { background-position: 300% 0; } }
+/* ١١ تاج النور (نادر) */
+.lk-g-crown { margin-top: 12px; }
+.lk-g-crown .lk-gx i { position: absolute; top: -17px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 13px; animation: gCrown 2.4s ease-in-out infinite; }
+.lk-g-crown .lk-gx i::before { content: ""; position: absolute; inset: -7px; z-index: -1; border-radius: 50%; background: repeating-conic-gradient(rgba(255, 213, 106, .75) 0 12deg, transparent 12deg 30deg); -webkit-mask: radial-gradient(circle, #000 30%, transparent 70%); mask: radial-gradient(circle, #000 30%, transparent 70%); animation: gSpin 7s linear infinite; }
+@keyframes gCrown { 0%, 100% { filter: drop-shadow(0 0 2px #ffd56a); } 50% { filter: drop-shadow(0 0 8px #ffd56a); } }
+/* ١٢ هالة البطل (نادر) */
+.lk-g-halo { margin-top: 8px; }
+.lk-g-halo .lk-gx i { position: absolute; top: -9px; left: 50%; width: 46%; min-width: 26px; height: 7px; transform: translateX(-50%); border: 2px solid #ffd56a; border-radius: 50%; animation: gHalo 2.4s ease-in-out infinite; }
+@keyframes gHalo { 0%, 100% { box-shadow: 0 0 4px rgba(255, 213, 106, .5); opacity: .75; } 50% { box-shadow: 0 0 12px 2px rgba(255, 213, 106, .95), inset 0 0 6px rgba(255, 213, 106, .8); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lk-g, .lk-g *, .lk-g::before, .lk-g::after { animation: none !important; } }
+.glow-mgr { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.glow-row { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--line, #e5e1d6); border-radius: 14px; background: #fffdf8; }
+.glow-pv { display: flex; align-items: center; justify-content: center; min-height: 64px; padding: 14px 6px 8px; border-radius: 10px; background: #f6f2e6; font-weight: 700; font-size: 15px; text-align: center; }
+.glow-ctl { display: grid; gap: 6px; } .glow-ctl select, .glow-ctl input { font: inherit; }
+.glow-f { display: flex; gap: 6px; align-items: center; font-size: 13px; } .glow-f input[type=number] { width: 72px; } .glow-f select { flex: 1; min-width: 0; }
+.shop-it .shop-pv [data-lk^="__pv_"] { padding-top: 10px; }
