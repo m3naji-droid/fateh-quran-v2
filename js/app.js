@@ -5573,7 +5573,7 @@ function viewTeacher(app) {
   const chWhenTxt = (c) => {
     const yr = (iso) => (new Date(iso).getUTCFullYear() !== new Date().getUTCFullYear() ? ` ${ar(new Date(iso).getUTCFullYear())}` : '');
     const t0 = Date.parse(c.createdAt || ''), e = chEndAt(c), t1 = e && c.ra?.at && c.rb?.at ? Date.parse(e) : 0;
-    return `${t0 ? `📅 ${fmtWhen(t0)}${yr(c.createdAt)}` : ''}${t1 ? ` · ✅ انتهى ${riyadhDay(new Date(t1)) === riyadhDay(new Date(t0)) ? fmtWhen(t1).split(' · ')[1] : fmtWhen(t1)}` : ''}`;
+    return `${t0 ? `📅 ${fmtWhen(t0)}${yr(c.createdAt)}` : ''}${t1 ? ` · ✅ انتهى ${riyadhDay(new Date(t1)) === riyadhDay(new Date(t0)) ? fmtWhen(t1).split('، ')[1] : fmtWhen(t1)}` : ''}`;
   };
   /** سجل التحديات كاملاً: كل الأشهر، مع تصفية بالشهر والصف والطالب، وتصدير Excel */
   function openChLog() {
@@ -5605,7 +5605,7 @@ function viewTeacher(app) {
       $('#clX', m).onclick = () => {
         if (!window.XLSX) { toast('مكتبة Excel لم تُحمّل بعد. أعد المحاولة بعد لحظات.'); return; }
         const data = rows().map((c) => { const w = chWinner(c); return {
-          'التاريخ': fmtDate(c.createdAt), 'الوقت': c.createdAt ? fmtWhen(Date.parse(c.createdAt)).split(' · ')[1] : '', 'وقت الانتهاء': chEndAt(c) && c.ra?.at && c.rb?.at ? fmtWhen(Date.parse(chEndAt(c))) : '', 'الصف': c.className || className(c.classId) || '', 'المقطع': c.label || '',
+          'التاريخ': fmtDate(c.createdAt), 'الوقت': c.createdAt ? fmtWhen(Date.parse(c.createdAt)).split('، الساعة ')[1] : '', 'وقت الانتهاء': chEndAt(c) && c.ra?.at && c.rb?.at ? fmtWhen(Date.parse(chEndAt(c))) : '', 'الصف': c.className || className(c.classId) || '', 'المقطع': c.label || '',
           'الطالب الأول': c.a.name, 'رقمه': c.a.pn, 'دقته %': c.ra?.p ?? '', 'سرعته (كلمة/دقيقة)': c.ra?.wpm ?? '',
           'الطالب الثاني': c.b.name, 'رقمه ': c.b.pn, 'دقته % ': c.rb?.p ?? '', 'سرعته (كلمة/دقيقة) ': c.rb?.wpm ?? '',
           'النتيجة': chResult(c).replace('🏆 ', 'فاز: '), 'نقاط الأول': ptsOf(c, c.a.pn), 'نقاط الثاني': ptsOf(c, c.b.pn) }; });

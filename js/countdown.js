@@ -24,10 +24,10 @@ function ticker(host, fn) {
 }
 
 const DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-/** «الخميس ٢٠ نوفمبر · ٧:٣٠ م» بتوقيت البحرين */
+/** «الخميس ٢٠ نوفمبر، الساعة ٧:٣٠ م» بتوقيت البحرين */
 export function fmtWhen(ms) {
   const d = new Date(ms + 3 * 3600e3), h = d.getUTCHours(), m = d.getUTCMinutes();
-  return `${DAYS[d.getUTCDay()]} ${AR(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} · ${AR(h % 12 || 12)}:${two(m)} ${h < 12 ? 'ص' : 'م'}`;
+  return `${DAYS[d.getUTCDay()]} ${AR(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}، الساعة ${AR(h % 12 || 12)}:${two(m)} ${h < 12 ? 'ص' : 'م'}`;
 }
 /** الموعد الذي حدده المعلم ما زال فعّالاً (قبله، أو خلال يوم بعده) */
 // في نظام الجولات (start) يبقى الموعد فعّالاً حتى يُعلَن الفائزون؛ وفي الموعد البسيط يوماً بعده
