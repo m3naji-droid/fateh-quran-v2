@@ -1049,7 +1049,7 @@ function viewStudent(app) {
       const day = riyadhDay(), before = himmaToday(me.id, day).pts, r = earnHimma(me.id, day, sub, hasRecognition);
       HS.n++;
       if (!r.pts) { paintHmBar(); return; }
-      store.logHimma(me.id, day, r).catch((e) => console.warn('himma', e));
+      hmEnqueue(day, r); // تُحفظ في الجهاز أولاً ثم تُرسل، وتُعاد المحاولة حتى تصل
       HS.pts += r.pts;
       const total = before + r.pts, newHonor = Math.floor(total / HM.ratio) > Math.floor(before / HM.ratio);
       hmPop(`<b>🌟 <bdi dir="ltr">+${ar(r.pts)}</bdi> ${r.mins ? 'همّة (دقائق تدريب)' : 'همّة'}</b><span>⭐ <bdi dir="ltr">+${arDec(r.pts / HM.ratio)}</bdi> شرف</span><small>مجموعك اليوم: ${ar(total)} همّة${total >= HM.dayCap ? ' · بلغت سقف اليوم 🎉' : ''}</small>${newHonor ? '<em>🎉 نقطة شرف جديدة!</em>' : ''}`);
@@ -1060,6 +1060,46 @@ function viewStudent(app) {
   const HS = { pts: 0, n: 0 };
   if (store.mode === 'local') window.__earnTraining = earnTraining; // للتجارب المحلية فقط
   const arDec = (x) => ar(String(Math.round(x * 10) / 10).replace('.', '٫'));
+  /* --- حفظ نقاط الهمّة بلا ضياع: طابور في الجهاز يُرسل ويُعاد إرساله حتى يصل --- */
+  const HQ = { err: '', busy: false };
+  const hqKey = () => 'hmQ_' + me.id, hlKey = () => 'hmLog_' + me.id;
+  const hmQueue = () => pref.get(hqKey(), []);
+  function hmEnqueue(day, r) {
+    pref.set(hqKey(), [...hmQueue(), { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), day, pts: r.pts, ayat: r.ayat, mins: r.mins, t: Date.now() }].slice(-400));
+    // سجل محلي بما كُسب ووقته: لعرض «نقاطك الآن» قبل أن تُحدَّث اللوحة
+    pref.set(hlKey(), [...pref.get(hlKey(), []).filter((x) => Date.now() - x.t < 40 * 864e5), { t: Date.now(), pts: r.pts }]);
+    flushHimma(); window.__honorPaint?.();
+  }
+  async function flushHimma() {
+    if (HQ.busy || !me) return; HQ.busy = true;
+    try {
+      for (;;) {
+        const it = hmQueue()[0]; if (!it) { HQ.err = ''; break; }
+        try { await store.logHimma(me.id, it.day, it); }
+        catch (e) {
+          const c = String(e.code || e.message || '');
+          if (/permission|unauthenticated/i.test(c)) {
+            // هل المشكلة في الدخول أم في هذا السجل وحده (تجاوز سقف اليوم من جهازين)؟
+            const okAuth = await store.logHimma(me.id, it.day, { pts: 0, ayat: 0, mins: 0 }).then(() => true, () => false);
+            if (okAuth) { pref.set(hqKey(), hmQueue().filter((x) => x.id !== it.id)); continue; }
+            HQ.err = 'auth';
+          } else HQ.err = 'net';
+          console.warn('himma save', e); break;
+        }
+        pref.set(hqKey(), hmQueue().filter((x) => x.id !== it.id)); HQ.err = '';
+      }
+    } finally { HQ.busy = false; paintHmBar(); paintHmWarn(); }
+  }
+  /** تنبيه ظاهر إن لم تُحفظ النقاط لانتهاء جلسة الدخول */
+  function paintHmWarn() {
+    let el = $('#hmWarn', app);
+    const n = hmQueue().reduce((k, x) => k + (x.pts || 0), 0);
+    if (HQ.err !== 'auth' || !n) { el?.remove(); return; }
+    if (!el) { const host = $('#stBody', app); if (!host) return; el = document.createElement('div'); el.id = 'hmWarn'; el.className = 'hm-warn'; host.before(el); }
+    el.innerHTML = `<b>⚠️ نقاط تدريبك (${ar(n)} همّة) لم تُحفظ بعد</b><span>انتهت جلسة دخولك على هذا الجهاز. سجّل الدخول من جديد، وستُحفظ النقاط المعلّقة تلقائياً ولن تضيع.</span><button type="button" class="btn sm primary" id="hmRelog">سجّل الدخول من جديد</button>`;
+    $('#hmRelog', el).onclick = async () => { await store.signOut().catch(() => {}); session.set(null); render(); };
+  }
+  if (!window.__hqT) { window.__hqT = setInterval(() => { if (hmQueue().length) flushHimma(); }, 60e3); addEventListener('online', () => flushHimma()); }
   /** بطاقة عائمة بعد كل تسميع تدريب */
   function hmPop(html) {
     document.querySelector('.hm-pop')?.remove();
@@ -1072,6 +1112,7 @@ function viewStudent(app) {
     const t = himmaToday(me.id, riyadhDay()).pts, cap = t >= HM.dayCap, rem = HM.ratio - (t % HM.ratio);
     el.innerHTML = `<div class="hm-row"><span>🌟 همّتك اليوم <b>${ar(t)}</b><small> / ${ar(HM.dayCap)}</small></span><span>⭐ شرف اليوم <b>${arDec(t / HM.ratio)}</b></span>${HS.pts ? `<button type="button" class="btn sm ghost" id="hmEnd">إنهاء وعرض الملخص</button>` : ''}</div>
       <div class="hm-track"><i style="width:${cap ? 100 : ((t % HM.ratio) / HM.ratio) * 100}%"></i></div>
+      ${(() => { const q = hmQueue().reduce((k, x) => k + (x.pts || 0), 0); return q ? `<small class="hm-sync ${HQ.err === 'auth' ? 'bad' : ''}">${HQ.err === 'auth' ? `⚠️ ${ar(q)} همّة لم تُحفظ: سجّل الدخول من جديد` : `⏳ جارٍ حفظ ${ar(q)} همّة…`}</small>` : '<small class="hm-sync ok">☁️ نقاطك محفوظة وتُحسب في لوحة الشرف</small>'; })()}
       <small class="muted">${cap ? '🎉 بلغت سقف اليوم، ما شاء الله! تدريبك بعده لا يزيد النقاط، وعُد غداً.' : `${rem === 1 ? 'نقطة همّة واحدة تفصلك' : rem === 2 ? 'نقطتا همّة تفصلانك' : `${ar(rem)} نقاط همّة تفصلك`} عن نقطة الشرف التالية · كل آية صحيحة (٨٠٪ فأكثر) = نقطة همّة.`}</small>`;
     const b = $('#hmEnd', el); if (b) b.onclick = () => practiceSummary();
   }
@@ -1519,7 +1560,7 @@ function viewStudent(app) {
   }
   /* --- بطولة الأبطال --- */
   let heroT = null, hM = [], offHero = null, offLive = null, hView = null, heroPend = null, offCheer = null;
-  let iqraOn = false, offIqra = null;
+  let iqraOn = false, offIqra = null, offHonor = null;
   const stopCheer = () => { offCheer?.(); offCheer = null; };
   if (deep && deep[1] === 'hero') heroPend = deep[2];
   async function loadHeroes() {
@@ -2041,6 +2082,7 @@ function viewStudent(app) {
     RW = { wallet: { spent: 0, bonus: 0 }, owned: [], ach: {}, look: null, ...(me.rankInfo?._rw || {}) };
     hbStart();
     setTimeout(checkPopAnn, 1600);
+    setTimeout(flushHimma, 2000); // نقاط معلّقة من جلسة سابقة
     FX.kind = RW.look?.x || '';
     if (RW.look) setLook(me.id, RW.look);
     draw();
@@ -2118,7 +2160,7 @@ function viewStudent(app) {
   }
 
   function draw() {
-    comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null;
+    comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null; offHonor?.(); offHonor = null;
     if (tab === 'iqra' && !iqraOn) tab = 'tasks';
     if (tab !== HB.pg) { if (HB.pg === 'practice') practiceSummary(); HB.pg = tab; hbBeat(false); }
     const cls = data.classes.find((c) => c.id === me.classId);
@@ -2295,22 +2337,40 @@ function viewStudent(app) {
     };
   }
 
+  /** لوحة الشرف للطالب: تتحدّث لحظة نشرها، ومعها «نقاطك الآن» بما كسبه بعد آخر تحديث */
   async function drawHonor(body) {
     body.innerHTML = '<div class="loading">جارٍ تحميل لوحة الشرف…</div>';
-    let board = null, myRank = null;
-    try { [board, myRank] = await Promise.all([store.getBoard(), store.getMyRank(me).catch(() => null)]); }
-    catch (e) { body.innerHTML = `<div class="empty">تعذر تحميل لوحة الشرف: ${esc(e.code || e.message)}</div>`; return; }
-    if (tab !== 'honor') return;
-    body.innerHTML = '<div id="chCard"></div><div id="hbB"></div><div id="lsB" class="lists-wrap"></div>';
-    drawChCard($('#chCard', body));
-    mountBoard($('#hbB', body), board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
-    mountLists($('#lsB', body), board?.lists, { me: me.id, myClass: me.classId, myRank: myRank?.lists, classes: data.classes });
-    // احتفال أول مرة يدخل فيها الخمسة الأوائل في صفه أو المرحلة (لكل شهر)
-    const r = myRank?.month;
-    if (r && ((r.cls && r.cls <= 5) || (r.stage && r.stage <= 5))) {
-      const key = `lbCheer_${me.id}_${board?.month?.ym || ''}_${r.stage && r.stage <= 5 ? 's' : 'c'}`;
-      if (!pref.get(key, false)) { pref.set(key, true); setTimeout(() => confetti(), 200); toast(r.stage && r.stage <= 5 ? 'مبارك! أنت من الخمسة الأوائل في المرحلة كلها هذا الشهر.' : 'مبارك! أنت من الخمسة الأوائل في صفك هذا الشهر.'); }
-    }
+    let board, myRank, first = true;
+    const paint = () => {
+      if (tab !== 'honor' || board === undefined || myRank === undefined) return;
+      if (first) {
+        body.innerHTML = '<div id="hbLive"></div><div id="chCard"></div><div id="hbB"></div><div id="lsB" class="lists-wrap"></div>';
+        drawChCard($('#chCard', body));
+      }
+      // ما كسبه الطالب من التدريب بعد آخر نشر للوحة (يظهر فوراً، ويدخل الترتيب عند النشر)
+      const at = Date.parse(board?.at || '') || 0, pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) / HM.ratio;
+      const pts = (myRank?.month?.points || 0) + pend;
+      $('#hbLive', body).innerHTML = `<div class="hb-live"><span class="on-dot"></span><div><b>نقاطك الآن: ${fmt10(Math.round(pts * 10) / 10)}</b>${myRank?.month?.cls ? ` · ترتيبك في صفك ${ar(myRank.month.cls)}` : ''}${myRank?.month?.stage ? ` · وعلى المرحلة ${ar(myRank.month.stage)}` : ''}
+        <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك الأخير، وتدخل في الترتيب لحظة تحديث اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
+      mountBoard($('#hbB', body), board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
+      mountLists($('#lsB', body), board?.lists, { me: me.id, myClass: me.classId, myRank: myRank?.lists, classes: data.classes });
+      if (first) {
+        first = false;
+        // احتفال أول مرة يدخل فيها الخمسة الأوائل في صفه أو المرحلة (لكل شهر)
+        const r = myRank?.month;
+        if (r && ((r.cls && r.cls <= 5) || (r.stage && r.stage <= 5))) {
+          const key = `lbCheer_${me.id}_${board?.month?.ym || ''}_${r.stage && r.stage <= 5 ? 's' : 'c'}`;
+          if (!pref.get(key, false)) { pref.set(key, true); setTimeout(() => confetti(), 200); toast(r.stage && r.stage <= 5 ? 'مبارك! أنت من الخمسة الأوائل في المرحلة كلها هذا الشهر.' : 'مبارك! أنت من الخمسة الأوائل في صفك هذا الشهر.'); }
+        }
+      }
+    };
+    offHonor?.();
+    try {
+      const o1 = store.watchBoard((b) => { board = b; paint(); });
+      const o2 = store.watchMyRank(me, (r) => { myRank = r ? { ...(me.rankInfo || {}), ...r } : null; paint(); });
+      window.__honorPaint = paint;
+      offHonor = () => { o1?.(); o2?.(); window.__honorPaint = null; };
+    } catch (e) { body.innerHTML = `<div class="empty">تعذر تحميل لوحة الشرف: ${esc(e.code || e.message)}</div>`; }
   }
 
   async function drawPractice(body) {
@@ -2720,7 +2780,14 @@ function viewTeacher(app) {
     }
     refreshPush(tOwner);
     loadFb(); loadLate(); pendingAiQueue();
-    Promise.all([store.listAllChallenges(), store.getChallengeCfg().catch(() => null), store.listAllHimma().catch((e) => { console.warn('himma', e); return []; })]).then(([L, cfg, H]) => { setChPts(cfg?.pts); D.challenges = L; D.himma = H; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('challenges', e));
+    Promise.all([store.listAllChallenges(), store.getChallengeCfg().catch(() => null), store.listAllHimma().catch((e) => { console.warn('himma', e); return []; })]).then(([L, cfg, H]) => {
+      setChPts(cfg?.pts); D.challenges = L; D.himma = H; schedulePublish(); if (tab === 'honor') drawBody();
+      // بعد التحميل الأول: متابعة لحظية، فكل تدريب أو تحدٍّ يعيد حساب اللوحة ونشرها خلال ثوانٍ
+      D._offHm?.(); D._offCh?.();
+      let hj = '', cj = '';
+      D._offHm = store.watchAllHimma((H2) => { const j = JSON.stringify(H2.map((h) => [h.pn, h.d, h.hp, h.hm])); if (j === hj) return; const first = !hj; hj = j; D.himma = H2; if (!first) { liveBump('hm'); schedulePublish(1000); } });
+      D._offCh = store.watchAllChallenges((L2) => { const j = JSON.stringify(L2.map((c) => [c.id, c.status, c.ra?.p, c.rb?.p, c.cancelled])); if (j === cj) return; const first = !cj; cj = j; D.challenges = L2; if (!first) { liveBump('ch'); schedulePublish(1000); } });
+    }).catch((e) => console.warn('challenges', e));
     store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
@@ -4631,9 +4698,17 @@ function viewTeacher(app) {
     const base = D.subs.concat(voiceBonus(), D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
-  function schedulePublish() {
+  function schedulePublish(ms = 2500) {
     clearTimeout(boardTimer);
-    boardTimer = setTimeout(publishBoard, 2500);
+    boardTimer = setTimeout(publishBoard, ms);
+  }
+  /** تحديث لحظي: يُعاد رسم اللوحة المعروضة للمعلم في مكانها دون إعادة الصفحة */
+  const liveBump = () => { liveBump.n = (liveBump.n || 0) + 1; };
+  function refreshHonorInPlace() {
+    if (tab !== 'honor' || !lastBoard) return;
+    const hb = $('#hbBoard', app), ls = $('#lsT', app);
+    if (hb) mountBoard(hb, { ...lastBoard, at: null }, { classes: D.classes, pickClass: true });
+    if (ls) { const L = computeLists(D.challenges || [], D.himma || [], D.students); mountLists(ls, L.lists, { classes: D.classes, onExport: (k, st) => exportList(L.lists, k, st) }); }
   }
   async function publishBoard() {
     if (!D.students.length) return;
@@ -4658,6 +4733,7 @@ function viewTeacher(app) {
     lastBoard = board;
     const json = JSON.stringify(board);
     if (json === lastBoardJson) return;
+    refreshHonorInPlace();
     try {
       await store.setBoard({ ...board, at: new Date().toISOString() });
       await store.saveRanks(ranks, D.students);

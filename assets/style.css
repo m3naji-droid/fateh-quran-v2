@@ -1567,3 +1567,7 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .modal-actions { position: sticky; bottom: -18px; z-index: 2; margin: 0 -16px -18px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--card, #fff); border-top: 1px solid var(--line, #e5e1d6); }
 @media (min-width: 901px) { .modal-actions { bottom: -24px; margin: 0 -24px -24px; padding: 14px 24px; } }
 .ch-when { display: block; color: #0f5c46; font-weight: 600; }
+.hb-live { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; margin-bottom: 14px; border-radius: 16px; background: linear-gradient(135deg, #f3faf6, #fff9e6); border: 1px solid #d7ebe1; }
+.hb-live .on-dot { margin-top: 7px; } .hb-live > div { display: grid; gap: 2px; } .hb-live b { color: #0f5c46; }
+.hm-sync { font-weight: 700; } .hm-sync.ok { color: #15603a; } .hm-sync.bad { color: #b02a2a; }
+.hm-warn { display: grid; gap: 6px; justify-items: start; margin: 0 0 14px; padding: 12px 14px; border-radius: 16px; background: #fdecec; border: 1px solid #f3c2c2; color: #7a1d1d; }

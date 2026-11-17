@@ -175,6 +175,7 @@ const local = {
   async createChallenge(c) { const all = LS.get('challenges', []); const id = uid(); all.push({ ...c, id }); LS.set('challenges', all); return id; },
   async listMyChallenges(pn) { return LS.get('challenges', []).filter((c) => c.pns.includes(pn)); },
   async listAllChallenges() { return LS.get('challenges', []); },
+  watchAllChallenges(cb) { let last = ''; const f = () => { const v = localStorage.fp_challenges || ''; if (v !== last) { last = v; cb(LS.get('challenges', [])); } }; f(); const id = setInterval(f, 3000); return () => clearInterval(id); },
   async getChallenge(id) { return LS.get('challenges', []).find((c) => c.id === id) || null; },
   async updateChallenge(id, patch) { const all = LS.get('challenges', []); const i = all.findIndex((c) => c.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('challenges', all); } },
   // تشجيع المباريات المباشرة: مستند لكل مشجّع في كل مباراة (آخر تشجيع وعدّاده)
@@ -185,6 +186,7 @@ const local = {
   // نقاط «الهمة العالية» اليومية لكل طالب
   async logHimma(pn, day, x) { const a = LS.get('himma', {}); const k = pn + '|' + day; const c = a[k] || { pn, d: day, hp: 0, ha: 0, hm: 0 }; c.hp = Math.min(200, c.hp + (x.pts || 0)); c.ha += x.ayat || 0; c.hm = Math.min(30, c.hm + (x.mins || 0)); a[k] = c; LS.set('himma', a); },
   async listAllHimma() { return Object.values(LS.get('himma', {})); },
+  watchAllHimma(cb) { let last = ''; const f = () => { const v = localStorage.fp_himma || ''; if (v !== last) { last = v; cb(Object.values(LS.get('himma', {}))); } }; f(); const id = setInterval(f, 3000); return () => clearInterval(id); },
   async getChallengeCfg() { return LS.get('chCfg', { off: false }); },
   async setChallengeCfg(c) { LS.set('chCfg', c); },
   // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
@@ -229,6 +231,8 @@ const local = {
   async setModel(m) { LS.set('model', m); },
   // لوحة الشرف
   async getBoard() { return LS.get('board', null); },
+  watchBoard(cb) { let last = ''; const f = () => { const v = localStorage.fp_board || ''; if (v !== last) { last = v; cb(LS.get('board', null)); } }; f(); const id = setInterval(f, 3000); return () => clearInterval(id); },
+  watchMyRank(me, cb) { let last = ''; const f = () => { const r = LS.get('roster', {})[me.id]; const v = JSON.stringify(r?.rank || null); if (v !== last) { last = v; cb(r ? { ...(r.rank || {}), _badges: r.badges || [] } : null); } }; f(); const id = setInterval(f, 3000); return () => clearInterval(id); },
   async getAiUsage() { return LS.get('aiUsage', null); },
   // التنبيهات داخل الموقع (محلياً: في هذا المتصفح فقط، والإشعارات على الجوال تحتاج النسخة السحابية)
   async addNotif(n) { const all = LS.get('notifs', []); const id = uid(); all.push({ id, createdAt: now(), ...n }); LS.set('notifs', all.slice(-200)); return id; },
@@ -569,11 +573,14 @@ async function makeCloud() {
     async createChallenge(c) { const id = uid(); await setDoc(doc(db, 'challenges', id), c); return id; },
     async listMyChallenges(pn) { await ensureAnon(); return (await getDocs(query(collection(db, 'challenges'), where('pns', 'array-contains', pn), limit(200)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async listAllChallenges() { return (await getDocs(query(collection(db, 'challenges'), limit(5000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
+    watchAllChallenges(cb) { return onSnapshot(query(collection(db, 'challenges'), limit(5000)), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.warn('challenges watch', e)); },
     async getChallenge(id) { await ensureAnon(); const d = await getDoc(doc(db, 'challenges', id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
     async updateChallenge(id, patch) { await updateDoc(doc(db, 'challenges', id), patch); },
     /** نقاط «الهمة العالية»: مستند يومي لكل طالب roster/{pn}/himma/{day} */
     async logHimma(pn, day, x) { await setDoc(doc(db, 'roster', pn, 'himma', day), { d: day, hp: increment(x.pts || 0), ha: increment(x.ayat || 0), hm: increment(x.mins || 0), at: now() }, { merge: true }); },
     async listAllHimma() { await ensureAnon(); return (await getDocs(collectionGroup(db, 'himma'))).docs.map((d) => ({ pn: d.ref.parent.parent.id, ...d.data() })); },
+    // نقاط الهمّة لكل الطلاب لحظة بلحظة (للمعلم): يُعاد حساب اللوحة فور تدرّب أي طالب
+    watchAllHimma(cb) { return onSnapshot(collectionGroup(db, 'himma'), (s) => cb(s.docs.map((d) => ({ pn: d.ref.parent.parent.id, ...d.data() }))), (e) => console.warn('himma watch', e)); },
     async getCheerCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'cheerCfg')).catch(() => null); return d?.exists() ? d.data() : null; },
     async setCheerCfg(c) { await setDoc(doc(db, 'leaderboard', 'cheerCfg'), c); },
     /** مستند لكل مشجّع في المباراة داخل tourneys/{tid}/live (يكتبه كل مسجّل دخول): آخر تشجيع وعدّاده لكل لاعب */
@@ -721,6 +728,9 @@ async function makeCloud() {
     async deletePushToken(token) { if (token) await deleteDoc(doc(db, 'pushTokens', await tokenId(token))).catch(() => {}); },
     async getAiUsage(month) { const d = await getDoc(doc(db, 'usage', 'ai-' + month)); return d.exists() ? d.data() : null; },
     async getBoard() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'main')); return d.exists() ? d.data() : null; },
+    // لوحة الشرف وترتيب الطالب لحظة بلحظة
+    watchBoard(cb) { let off = () => {}; ensureAnon().then(() => { off = onSnapshot(doc(db, 'leaderboard', 'main'), (d) => cb(d.exists() ? d.data() : null), (e) => console.warn('board', e)); }); return () => off(); },
+    watchMyRank(me, cb) { return onSnapshot(doc(db, 'roster', me.id), (d) => { const x = d.exists() ? d.data() : null; cb(x ? { ...(x.rank || {}), _badges: x.badges || [] } : null); }, (e) => console.warn('rank', e)); },
     async setBoard(b) { await setDoc(doc(db, 'leaderboard', 'main'), b); },
     async saveRanks(ranks, students) {
       const changed = students.filter((s) => ranks[s.id] && JSON.stringify(s.rank || null) !== JSON.stringify(ranks[s.id]));
