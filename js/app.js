@@ -17,9 +17,10 @@ import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents, t
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
+import { mountChat, fbLast, fbClosed, fbUnreadS, fbUnreadT, fbPreview, QUICK_DEFAULT } from './fbchat.js';
 import { compressImage, blobToB64, b64ToBlob, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { openImageEditor, openDesigner } from './imgedit.js';
-import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview, notifyOnline } from './push.js';
+import { pushState, enablePush, disablePush, refreshPush, testNotification, sendPush, sendPushBatch, sendAnnouncement, pushConfigured, getMute, setMute, notifyFeedback, notifyChallenge, notifyKhatma, notifyLate, requestServerAi, notifyReview, notifyOnline, notifyFbMsg } from './push.js';
 import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js';
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts, fmtWhen } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
@@ -2004,52 +2005,65 @@ function viewStudent(app) {
   /* --- رأيك يهمنا --- */
   function paintFbCta() {
     const b = $('#stFb', app); if (!b) return;
-    const n = myFb.filter((x) => x.reply && !x.replySeen).length;
-    b.querySelector('.fb-n').textContent = n ? ` · ${n === 1 ? 'ردّ جديد' : ar(n) + ' ردود جديدة'}` : '';
+    const n = myFb.filter(fbUnreadS).length;
+    b.querySelector('.fb-n').textContent = n ? `، ${n === 1 ? 'رسالة جديدة' : ar(n) + ' محادثات فيها جديد'}` : '';
     b.classList.toggle('has', n > 0);
   }
+  /** رأيك يهمنا: قائمة محادثاتي، وملاحظة جديدة، وفتح المحادثة */
   function openFeedback(focusId = null) {
-    const mine = [...myFb].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    const fresh = new Set(mine.filter((x) => x.reply && !x.replySeen).map((x) => x.id));
-    const item = (x) => `<li class="fb-item${x.id === focusId ? ' focus' : ''}" id="fb-${esc(x.id)}">
-      <div class="row" style="justify-content:space-between;gap:8px">${fbKindChip(x.kind)}<small class="muted">${esc(timeAgo(x.createdAt))}</small></div>
-      <p class="fb-text">${esc(x.text)}</p>
-      ${x.reply ? `<div class="fb-reply${fresh.has(x.id) ? ' new' : ''}"><b>ردّ المعلم${fresh.has(x.id) ? ' <span class="pill">جديد</span>' : ''}</b><p>${esc(x.reply)}</p><small class="muted">${esc(timeAgo(x.repliedAt))}</small></div>` : '<small class="muted">✓ وصلت إلى المعلم</small>'}</li>`;
-    openModal(`<div class="stack fb-modal">
-      <h2>💬 رأيك يهمنا</h2>
-      <p class="muted" style="margin:0">ملاحظتك مهمة لتطوير الموقع. تصل إلى المعلم باسمك وصفّك، وقد يردّ عليك هنا.</p>
-      <form id="fbF" class="stack" style="gap:12px">
-        <div class="fb-kinds" role="radiogroup" aria-label="نوع الملاحظة">${Object.entries(FB_KINDS).map(([k, [i, l]], n) => `<label><input type="radio" name="fbK" value="${k}" ${n === 0 ? 'checked' : ''}><span>${i} ${l}</span></label>`).join('')}</div>
-        <label class="field">اكتب ملاحظتك<textarea id="fbT" rows="4" maxlength="1000" required placeholder="مثلاً: أقترح إضافة… / واجهت مشكلة عند…"></textarea></label>
-        <div class="row" style="justify-content:space-between"><small class="muted" id="fbC">٠ / ١٠٠٠</small><button class="btn primary" type="submit">إرسال</button></div>
-        <div id="fbErr" class="notice" hidden></div>
-      </form>
-      ${mine.length ? `<h3 style="margin:8px 0 0">ملاحظاتي السابقة</h3><ul class="fb-list">${mine.map(item).join('')}</ul>` : ''}
-    </div>`, (m) => {
-      const T = $('#fbT', m);
-      T.oninput = () => ($('#fbC', m).textContent = `${ar(T.value.length)} / ١٠٠٠`);
-      if (focusId) setTimeout(() => $('#fb-' + CSS.escape(focusId), m)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 200);
-      else setTimeout(() => T.focus(), 100);
-      $('#fbF', m).onsubmit = async (e) => {
-        e.preventDefault();
-        const btn = e.submitter, err = $('#fbErr', m), text = T.value.trim();
-        err.hidden = true;
-        if (text.length < 3) { err.hidden = false; err.textContent = 'اكتب ملاحظتك أولاً.'; return; }
-        btn.disabled = true;
-        const cls = data.classes.find((c) => c.id === me.classId);
-        const f = { name: me.name, classId: me.classId || '', className: cls?.name || '', kind: $('input[name=fbK]:checked', m).value, text };
-        try {
-          const id = await store.addFeedback(me.id, f);
-          myFb.push({ ...f, id, pn: me.id, createdAt: new Date().toISOString() });
-          notifyFeedback(me.id, id).catch(() => {});
-          closeModal(); paintFbCta();
-          toast('شكراً لك! وصلت ملاحظتك إلى المعلم 🌟');
-        } catch (x) { err.hidden = false; err.textContent = 'تعذر الإرسال: ' + (x.code || x.message); btn.disabled = false; }
-      };
-    });
-    // تسجيل قراءة الردود الجديدة
-    mine.filter((x) => fresh.has(x.id)).forEach((x) => { x.replySeen = true; store.updateFeedback(me.id, x.id, { replySeen: true }).catch(() => {}); });
-    paintFbCta();
+    const cls = data.classes.find((c) => c.id === me.classId);
+    const openChat = (x) => {
+      const m = $('#modalBody'); m.innerHTML = '<div class="fb-chat-wrap"></div>';
+      mountChat($('.fb-chat-wrap', m), {
+        store, side: 's', pn: me.id, fid: x.id, title: 'معلمك', sub: `${FB_KINDS[x.kind]?.[1] || 'ملاحظة'}، بدأت ${timeAgo(x.createdAt)}`, toast,
+        onBack: () => paintList(),
+        onState: (t) => { const i = myFb.findIndex((f) => f.id === t.id); if (i >= 0) myFb[i] = { ...myFb[i], ...t }; paintFbCta(); },
+        onSent: (msg) => notifyFbMsg(me.id, x.id, msg.id).catch(() => {}),
+      });
+    };
+    const paintList = () => {
+      const mine = [...myFb].sort((a, b) => fbLast(b).localeCompare(fbLast(a)));
+      const row = (x) => { const u = fbUnreadS(x), cl = fbClosed(x); return `<li><button type="button" class="fb-th${u ? ' unread' : ''}" data-th="${esc(x.id)}">
+        <span class="fb-th-ico">${FB_KINDS[x.kind]?.[0] || '💬'}</span>
+        <span class="fb-th-m"><span class="row" style="justify-content:space-between;gap:6px"><b>${esc(FB_KINDS[x.kind]?.[1] || 'ملاحظة')}${cl ? ' <small class="muted">🔒 مغلقة</small>' : ''}</b><small class="muted">${esc(timeAgo(fbLast(x)))}</small></span>
+        <span class="fb-th-p">${esc(fbPreview(x))}</span></span>${u ? '<span class="fb-th-n" aria-label="جديد"></span>' : ''}</button></li>`; };
+      openModal(`<div class="stack fb-modal">
+        <h2>💬 رأيك يهمنا</h2>
+        <p class="muted" style="margin:0">اكتب ملاحظتك أو شكواك أو اقتراحك، ويردّ عليك المعلم هنا، ثم تكمل معه الحديث في المحادثة نفسها.</p>
+        <details class="fb-new" ${mine.length ? '' : 'open'}><summary class="btn primary">✍️ ملاحظة جديدة</summary>
+        <form id="fbF" class="stack" style="gap:12px;margin-top:10px">
+          <div class="fb-kinds" role="radiogroup" aria-label="نوع الملاحظة">${Object.entries(FB_KINDS).map(([k, [i, l]], n) => `<label><input type="radio" name="fbK" value="${k}" ${n === 0 ? 'checked' : ''}><span>${i} ${l}</span></label>`).join('')}</div>
+          <label class="field">اكتب ملاحظتك<textarea id="fbT" rows="4" maxlength="1000" required placeholder="مثلاً: أقترح إضافة… / واجهت مشكلة عند…"></textarea></label>
+          <div class="row" style="justify-content:space-between"><small class="muted" id="fbC">٠ / ١٠٠٠</small><button class="btn primary" type="submit">إرسال</button></div>
+          <div id="fbErr" class="notice" hidden></div>
+        </form></details>
+        ${mine.length ? `<h3 style="margin:8px 0 0">محادثاتي</h3><ul class="fb-ths">${mine.map(row).join('')}</ul>` : ''}
+      </div>`, (m) => {
+        const T = $('#fbT', m);
+        T.oninput = () => ($('#fbC', m).textContent = `${ar(T.value.length)} / ١٠٠٠`);
+        $$('[data-th]', m).forEach((b) => (b.onclick = () => openChat(myFb.find((x) => x.id === b.dataset.th))));
+        $('#fbF', m).onsubmit = async (e) => {
+          e.preventDefault();
+          const btn = e.submitter, err = $('#fbErr', m), text = T.value.trim();
+          err.hidden = true;
+          if (text.length < 3) { err.hidden = false; err.textContent = 'اكتب ملاحظتك أولاً.'; return; }
+          btn.disabled = true;
+          const f = { name: me.name, classId: me.classId || '', className: cls?.name || '', kind: $('input[name=fbK]:checked', m).value, text };
+          try {
+            const id = await store.addFeedback(me.id, f);
+            const x = { ...f, id, pn: me.id, createdAt: new Date().toISOString() };
+            myFb.push(x);
+            notifyFeedback(me.id, id).catch(() => {});
+            paintFbCta(); toast('شكراً لك! وصلت ملاحظتك إلى المعلم 🌟');
+            openChat(x);
+          } catch (x) { err.hidden = false; err.textContent = 'تعذر الإرسال: ' + (x.code || x.message); btn.disabled = false; }
+        };
+      });
+    };
+    const x = focusId && myFb.find((f) => f.id === focusId);
+    if (x) { openModal('', () => {}); openChat(x); } else paintList();
+    // تحديث القائمة من الخادم (ردود وصلت بعد فتح الصفحة)
+    store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (!x && $('#modalBody .fb-ths, #modalBody .fb-modal') && !$('#modalBody .chat')) paintList(); }).catch(() => {});
   }
   function openBell() {
     const seen = pref.get(seenKey, '');
@@ -2666,7 +2680,8 @@ function viewTeacher(app) {
   const s = session.get();
   if (!s || s.role !== 'teacher') return teacherLogin(app);
   let tab = 'home'; // تبدأ كل زيارة من «لوحة اليوم»
-  if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; history.replaceState(null, '', '#/teacher'); }
+  let fbSelInit = null, fbViewInit = null;
+  if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; const k = location.hash.split('/')[3]; if (k) { fbSelInit = decodeURIComponent(k).replace('~', '|'); fbViewInit = 'fb'; } history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/review/.test(location.hash)) { tab = 'honor'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/redo/.test(location.hash)) { tab = 'subs'; history.replaceState(null, '', '#/teacher'); }
@@ -3177,24 +3192,70 @@ function viewTeacher(app) {
   }
 
   /* --- رأيك يهمنا --- */
-  let FB = null;
-  const fbF = { kind: 'all', status: 'all', cls: 'all' };
-  let SP = null, fbView = 'fb';
+  let FB = null, offFb = null, QR = null, fbSel = fbSelInit;
+  const fbF = { kind: 'all', status: 'all', cls: 'all', q: '' };
+  let SP = null, fbView = fbViewInit || 'fb';
   const spF = { status: 'open', type: 'all', dev: 'all' };
+  const fbSort = (L) => L.sort((a, b) => fbLast(b).localeCompare(fbLast(a)));
   async function loadFb() {
-    try { FB = (await store.listAllFeedback()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch (e) { FB = FB || []; console.warn(e); }
+    try { FB = fbSort(await store.listAllFeedback()); } catch (e) { FB = FB || []; console.warn(e); }
     try { SP = (await store.listAllSpeechIssues()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); } catch (e) { SP = SP || []; console.warn('speech issues', e); }
+    store.getQuickReplies().then((L) => (QR = L)).catch(() => {});
     paintFbTab();
     if (tab === 'fb') drawBody();
+    // متابعة مباشرة: رسالة جديدة من طالب تظهر فوراً في صندوق الوارد
+    if (!offFb) offFb = store.watchAllFeedback((L) => { FB = fbSort(L); paintFbTab(); paintFbList(); });
   }
   function paintFbTab() {
-    const n = (FB || []).filter((x) => !x.seen).length + (SP || []).filter((x) => (x.status || 'new') === 'new').length;
+    const n = (FB || []).filter(fbUnreadT).length + (SP || []).filter((x) => (x.status || 'new') === 'new').length;
     setBadge('fb', n);
+  }
+  const fbMatch = (x) => (fbF.kind === 'all' || x.kind === fbF.kind) && (fbF.cls === 'all' || x.classId === fbF.cls)
+    && (!fbF.q || (x.name || '').includes(fbF.q) || String(x.pn).includes(fbF.q))
+    && (fbF.status === 'all' || (fbF.status === 'new' && fbUnreadT(x)) || (fbF.status === 'wait' && !fbClosed(x) && (x.lastFrom ? x.lastFrom === 's' : !x.reply))
+      || (fbF.status === 'open' && !fbClosed(x)) || (fbF.status === 'closed' && fbClosed(x)));
+  /** صندوق الوارد: يعيد رسم القائمة فقط (المحادثة المفتوحة تبقى كما هي) */
+  function paintFbList() {
+    const box = $('#fbInbox'); if (!box || !FB) return;
+    const L = FB.filter(fbMatch);
+    const hue = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+    box.innerHTML = L.length ? L.map((x) => { const k = `${x.pn}|${x.id}`, u = fbUnreadT(x), cl = fbClosed(x), wait = !cl && (x.lastFrom ? x.lastFrom === 's' : !x.reply);
+      return `<button type="button" class="ib-row${u ? ' unread' : ''}${k === fbSel ? ' sel' : ''}" data-fb="${esc(k)}">
+        <span class="ib-av" style="--h:${hue(x.pn)}">${esc((x.name || 'ط').trim()[0])}</span>
+        <span class="ib-m"><span class="ib-top"><b>${esc(x.name || 'طالب')}</b><small class="muted">${esc(timeAgo(fbLast(x)))}</small></span>
+          <span class="ib-sub">${FB_KINDS[x.kind]?.[0] || '💬'} <span class="muted">${esc(x.className || '')}</span>${cl ? ' <span class="muted">🔒</span>' : wait && !u ? ' <span class="ib-wait">بانتظار ردك</span>' : ''}</span>
+          <span class="ib-p">${x.lastFrom === 't' ? '<span class="tk' + ((x.sSeenAt || '') >= (x.lastAt || '') ? ' read' : '') + '">✓✓</span> ' : ''}${esc(fbPreview(x).replace(/^المعلم: /, ''))}</span></span>
+        ${u ? '<span class="ib-dot" aria-label="جديد"></span>' : ''}</button>`; }).join('')
+      : `<div class="empty">${FB.length ? 'لا توجد محادثات بهذه الاختيارات.' : 'لم تصل ملاحظات بعد. يجد الطلاب زر «رأيك يهمنا» أسفل صفحتهم.'}</div>`;
+    $$('[data-fb]', box).forEach((b) => (b.onclick = () => openFbThread(b.dataset.fb)));
+  }
+  function openFbThread(k) {
+    fbSel = k; const pane = $('#fbChat'); if (!pane) return;
+    const [pn, id] = k.split('|'), x = FB.find((f) => f.id === id && f.pn === pn); if (!x) return;
+    $('.fb-inbox')?.classList.add('chatting');
+    if (!matchMedia('(min-width: 860px)').matches) setTimeout(() => $('.fb-inbox')?.scrollIntoView({ block: 'start' }), 50);
+    $$('#fbInbox [data-fb]').forEach((b) => b.classList.toggle('sel', b.dataset.fb === k));
+    mountChat(pane, {
+      store, side: 't', pn, fid: id, title: x.name || 'طالب', sub: `${x.className || ''}، ${FB_KINDS[x.kind]?.[1] || 'ملاحظة'}`, toast,
+      quick: QR, saveQuick: async (L) => { await store.saveQuickReplies(L); QR = L; },
+      onBack: () => { fbSel = null; $('.fb-inbox')?.classList.remove('chatting'); pane.innerHTML = '<div class="empty ib-empty">اختر محادثة من القائمة</div>'; paintFbList(); },
+      onState: (t) => { Object.assign(x, t); paintFbTab(); paintFbList(); },
+      onSent: async (m) => {
+        const body = m.text ? (m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text) : m.voice ? '🎙️ رسالة صوتية' : '📷 صورة';
+        try { const nid = await store.addStudentNotif(pn, { type: 'fbReply', fid: id, title: '💬 ردّ معلمك على ملاحظتك', body, link: `./#/student/fb/${id}`, tag: 'fb-' + id }); await sendPush(nid, pn); } catch (e) { console.warn(e); }
+      },
+    });
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'btn sm ghost danger'; del.textContent = '🗑'; del.title = 'حذف المحادثة';
+    del.onclick = async () => {
+      if (!(await confirmBox(`حذف محادثة ${x.name || 'الطالب'} كاملة؟`))) return;
+      try { await store.deleteFeedback(pn, id); FB = FB.filter((f) => f !== x); fbSel = null; paintFbTab(); drawFb($('#tBody', app)); toast('حُذفت المحادثة.'); } catch (e) { toast('تعذر الحذف: ' + (e.code || e.message)); }
+    };
+    $('.chat-h', pane)?.append(del);
   }
   function drawFb(body) {
     if (!FB) { body.innerHTML = '<div class="loading">جارٍ تحميل الملاحظات…</div>'; return; }
-    const spNew = (SP || []).filter((x) => (x.status || 'new') === 'new').length, fbNew = FB.filter((x) => !x.seen).length;
-    const sw = `<div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" class="${fbView === 'fb' ? 'on' : ''}" data-fv="fb">💬 الملاحظات${fbNew ? ` <span class="tab-n">${ar(fbNew)}</span>` : ''}</button><button type="button" role="tab" class="${fbView === 'sp' ? 'on' : ''}" data-fv="sp">🎙️ شكاوى التعرف على الكلام${spNew ? ` <span class="tab-n">${ar(spNew)}</span>` : ''}</button></div>`;
+    const spNew = (SP || []).filter((x) => (x.status || 'new') === 'new').length, fbNew = FB.filter(fbUnreadT).length;
+    const sw = `<div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" class="${fbView === 'fb' ? 'on' : ''}" data-fv="fb">💬 المحادثات${fbNew ? ` <span class="tab-n">${ar(fbNew)}</span>` : ''}</button><button type="button" role="tab" class="${fbView === 'sp' ? 'on' : ''}" data-fv="sp">🎙️ شكاوى التعرف على الكلام${spNew ? ` <span class="tab-n">${ar(spNew)}</span>` : ''}</button></div>`;
     const wireSw = () => $$('[data-fv]', body).forEach((b) => (b.onclick = () => { fbView = b.dataset.fv; drawFb(body); }));
     if (fbView === 'sp') {
       body.innerHTML = sw + '<div id="spT"></div>'; wireSw();
@@ -3203,58 +3264,27 @@ function viewTeacher(app) {
       return;
     }
     const opt = (v, l, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`;
-    const L = FB.filter((x) => (fbF.kind === 'all' || x.kind === fbF.kind) && (fbF.cls === 'all' || x.classId === fbF.cls)
-      && (fbF.status === 'all' || (fbF.status === 'new' && !x.seen) || (fbF.status === 'open' && !x.reply) || (fbF.status === 'done' && x.reply)));
-    const count = (k) => FB.filter((x) => x.kind === k).length;
-    body.innerHTML = sw + `<div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">ملاحظات الطلاب عن الموقع. يصلك تنبيه عند كل ملاحظة جديدة، ويصل ردّك إلى الطالب كتنبيه.</p></div><button class="btn sm" type="button" id="fbRe">⟳ تحديث</button></div>
+    const count = (k) => FB.filter((x) => x.kind === k).length, waitN = FB.filter((x) => !fbClosed(x) && (x.lastFrom ? x.lastFrom === 's' : !x.reply)).length;
+    body.innerHTML = sw + `<div class="fb-wrap"><div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">كل ملاحظة محادثة: تردّ ويكمل الطالب على ردّك. يصلك تنبيه بكل رسالة جديدة، وتُغلق المحادثة تلقائياً بعد ${ar(7)} أيام بلا رسائل.</p></div><span class="ib-sum">${waitN ? `⏳ ${ar(waitN)} بانتظار ردك` : '✓ لا شيء بانتظارك'}</span></div>
       <div class="fb-stats">${Object.entries(FB_KINDS).map(([k, [i, l]]) => `<button type="button" class="kpi kpi-btn${fbF.kind === k ? ' on' : ''}" data-fk="${k}"><b>${i} ${ar(count(k))}</b><span>${l}</span></button>`).join('')}</div>
       <div class="row" style="margin:12px 0">
-        <select id="fbK" style="flex:1 1 130px">${opt('all', 'كل الأنواع', fbF.kind)}${Object.entries(FB_KINDS).map(([k, [i, l]]) => opt(k, `${i} ${l}`, fbF.kind)).join('')}</select>
-        <select id="fbS" style="flex:1 1 130px">${opt('all', 'كل الحالات', fbF.status)}${opt('new', 'جديدة', fbF.status)}${opt('open', 'بلا رد', fbF.status)}${opt('done', 'تم الرد', fbF.status)}</select>
-        <select id="fbC" style="flex:1 1 130px">${opt('all', 'كل الصفوف', fbF.cls)}${D.classes.map((c) => opt(c.id, c.name, fbF.cls)).join('')}</select>
+        <input type="search" id="fbQ" placeholder="بحث باسم الطالب" value="${esc(fbF.q)}" style="flex:2 1 160px">
+        <select id="fbS" style="flex:1 1 120px">${opt('all', 'كل المحادثات', fbF.status)}${opt('new', 'غير مقروءة', fbF.status)}${opt('wait', 'بانتظار ردك', fbF.status)}${opt('open', 'مفتوحة', fbF.status)}${opt('closed', 'مغلقة', fbF.status)}</select>
+        <select id="fbK" style="flex:1 1 120px">${opt('all', 'كل الأنواع', fbF.kind)}${Object.entries(FB_KINDS).map(([k, [i, l]]) => opt(k, `${i} ${l}`, fbF.kind)).join('')}</select>
+        <select id="fbC" style="flex:1 1 120px">${opt('all', 'كل الصفوف', fbF.cls)}${D.classes.map((c) => opt(c.id, c.name, fbF.cls)).join('')}</select>
       </div>
-      ${L.length ? `<ul class="fb-list">${L.map((x) => `<li class="fb-item${x.seen ? '' : ' new'}" data-fb="${esc(x.pn)}|${esc(x.id)}">
-        <div class="row" style="justify-content:space-between;gap:8px">
-          <div class="row" style="gap:8px">${fbKindChip(x.kind)}<b>${esc(x.name || 'طالب')}</b><span class="small muted">${esc(x.className || '')}</span>${x.seen ? '' : '<span class="pill">جديدة</span>'}</div>
-          <small class="muted" title="${esc(fmtDate(x.createdAt))}">${esc(timeAgo(x.createdAt))}</small></div>
-        <p class="fb-text">${esc(x.text)}</p>
-        ${x.reply ? `<div class="fb-reply"><b>ردّك</b> <small class="muted">${esc(timeAgo(x.repliedAt))}${x.replySeen ? ' · قرأه الطالب ✓' : ''}</small><p>${esc(x.reply)}</p></div>` : ''}
-        <form class="fb-rf" hidden><textarea rows="3" maxlength="1000" required placeholder="اكتب ردّك على ${esc(x.name || 'الطالب')}…">${esc(x.reply || '')}</textarea><div class="row"><button class="btn primary sm" type="submit">إرسال الرد</button><button class="btn sm" type="button" data-cancel>إلغاء</button></div></form>
-        <div class="row fb-acts"><button class="btn sm" type="button" data-reply>${x.reply ? '✎ تعديل الرد' : '↩ ردّ'}</button><button class="btn sm danger" type="button" data-del>حذف</button></div>
-      </li>`).join('')}</ul>` : `<div class="empty">${FB.length ? 'لا توجد ملاحظات بهذه الاختيارات.' : 'لم تصل ملاحظات بعد. يجد الطلاب زر «رأيك يهمنا» أسفل صفحتهم.'}</div>`}`;
+      <div class="fb-inbox"><div class="ib-list" id="fbInbox"></div><div class="ib-chat" id="fbChat"><div class="empty ib-empty">اختر محادثة من القائمة</div></div></div></div>`;
     wireSw();
-    $('#fbRe', body).onclick = () => { FB = null; drawFb(body); loadFb(); };
     $$('[data-fk]', body).forEach((b) => (b.onclick = () => { fbF.kind = fbF.kind === b.dataset.fk ? 'all' : b.dataset.fk; drawFb(body); }));
     $('#fbK', body).onchange = (e) => { fbF.kind = e.target.value; drawFb(body); };
-    $('#fbS', body).onchange = (e) => { fbF.status = e.target.value; drawFb(body); };
-    $('#fbC', body).onchange = (e) => { fbF.cls = e.target.value; drawFb(body); };
-    $$('[data-fb]', body).forEach((li) => {
-      const [pn, id] = li.dataset.fb.split('|');
-      const x = FB.find((f) => f.id === id && f.pn === pn);
-      const form = $('.fb-rf', li);
-      $('[data-reply]', li).onclick = () => { form.hidden = false; $('.fb-acts', li).hidden = true; $('textarea', form).focus(); };
-      $('[data-cancel]', li).onclick = () => { form.hidden = true; $('.fb-acts', li).hidden = false; };
-      $('[data-del]', li).onclick = async () => {
-        if (!(await confirmBox(`حذف ملاحظة ${x.name || 'الطالب'}؟`))) return;
-        try { await store.deleteFeedback(pn, id); FB = FB.filter((f) => f !== x); paintFbTab(); drawFb(body); toast('حُذفت الملاحظة.'); } catch (e) { toast('تعذر الحذف: ' + (e.code || e.message)); }
-      };
-      form.onsubmit = async (e) => {
-        e.preventDefault();
-        const reply = $('textarea', form).value.trim(); if (!reply) return;
-        const btn = e.submitter; btn.disabled = true;
-        try {
-          const patch = { reply, repliedAt: new Date().toISOString(), replySeen: false, seen: true };
-          await store.updateFeedback(pn, id, patch); Object.assign(x, patch);
-          const nid = await store.addStudentNotif(pn, { type: 'fbReply', fid: id, title: '💬 ردّ معلمك على ملاحظتك', body: reply.length > 120 ? reply.slice(0, 120) + '…' : reply, link: `./#/student/fb/${id}`, tag: 'fb-' + id });
-          let msg = `أُرسل ردّك إلى ${x.name || 'الطالب'}.`;
-          try { const p = await sendPush(nid, pn); if (p?.sent) msg += ' ووصل الإشعار إلى جواله.'; else if (p?.deferred) msg += ' ويصل إشعار جواله الساعة ٦ صباحاً.'; } catch (err) { console.warn(err); }
-          toast(msg); drawFb(body);
-        } catch (err) { toast('تعذر إرسال الرد: ' + (err.code || err.message)); btn.disabled = false; }
-      };
-    });
-    // ما عُرض من الملاحظات الجديدة يُعلَّم مقروءاً (ويبقى مميزاً في هذا العرض)
-    const unseen = L.filter((x) => !x.seen);
-    if (unseen.length) setTimeout(() => { unseen.forEach((x) => { x.seen = true; store.updateFeedback(x.pn, x.id, { seen: true }).catch(() => {}); }); paintFbTab(); }, 1200);
+    $('#fbS', body).onchange = (e) => { fbF.status = e.target.value; paintFbList(); };
+    $('#fbC', body).onchange = (e) => { fbF.cls = e.target.value; paintFbList(); };
+    $('#fbQ', body).oninput = (e) => { fbF.q = e.target.value.trim(); paintFbList(); };
+    paintFbList();
+    const wide = matchMedia('(min-width: 860px)').matches, deep = fbSelInit && fbSel === fbSelInit; fbSelInit = null;
+    if (fbSel && (wide || deep) && FB.some((x) => `${x.pn}|${x.id}` === fbSel)) openFbThread(fbSel);
+    else if (wide) { const f = FB.find(fbMatch); if (f) openFbThread(`${f.pn}|${f.id}`); }
+    else fbSel = null;
   }
 
   /* --- التسليمات --- */

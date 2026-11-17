@@ -279,10 +279,25 @@ service cloud.firestore {
           && request.resource.data.kind in ['comment', 'complaint', 'suggest', 'note']
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000;
-        // الطالب يسجّل فقط أنه قرأ رد المعلم
+        // الطالب يسجّل أنه قرأ، ويحدّث «آخر رسالة» حين يكتب في المحادثة (الإغلاق وإعادة الفتح للمعلم وحده)
         allow update: if isTeacher()
-          || (isStudent(pn) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['replySeen']));
+          || (isStudent(pn) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['replySeen', 'sSeenAt', 'lastAt', 'lastFrom', 'lastText'])
+              && request.resource.data.get('lastFrom', 's') in ['s', 't']
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastFrom']) || request.resource.data.lastFrom == 's'));
         allow delete: if isTeacher();
+        // رسائل المحادثة: نص أو صورة أو رسالة صوتية (حتى ~٩٠٠ كيلوبايت بعد الترميز)
+        match /msgs/{mid} {
+          allow read: if isTeacher() || isStudent(pn);
+          allow create: if isTeacher()
+            || (isStudent(pn)
+              && request.resource.data.keys().hasOnly(['from', 'text', 'img', 'voice', 'type', 'w', 'h', 'sec', 'at'])
+              && request.resource.data.from == 's'
+              && (!('text' in request.resource.data) || (request.resource.data.text is string && request.resource.data.text.size() <= 1000))
+              && (!('img' in request.resource.data) || (request.resource.data.img is string && request.resource.data.img.size() <= 900000))
+              && (!('voice' in request.resource.data) || (request.resource.data.voice is string && request.resource.data.voice.size() <= 900000))
+              && get(/databases/$(database)/documents/roster/$(pn)/feedback/$(fid)).data.get('closed', false) != true);
+          allow update, delete: if isTeacher();
+        }
       }
       // شكاوى التعرف على الكلام: الطالب يرسل شكواه مع نوع جهازه ونتيجة الفحص، والمعلم يتابعها
       match /speechIssues/{iid} {

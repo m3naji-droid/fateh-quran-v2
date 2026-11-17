@@ -220,8 +220,15 @@ const local = {
   async addFeedback(pn, f) { const all = LS.get('feedback', []); const id = uid(); all.push({ ...f, id, pn, createdAt: now() }); LS.set('feedback', all); return id; },
   async listMyFeedback(pn) { return LS.get('feedback', []).filter((x) => x.pn === pn); },
   async listAllFeedback() { return LS.get('feedback', []); },
+  watchAllFeedback(cb) { let last = ''; const f = () => { const v = localStorage.fp_feedback || ''; if (v !== last) { last = v; cb(LS.get('feedback', [])); } }; const id = setInterval(f, 3000); return () => clearInterval(id); },
   async updateFeedback(pn, id, patch) { const all = LS.get('feedback', []); const i = all.findIndex((x) => x.id === id && x.pn === pn); if (i >= 0) { all[i] = { ...all[i], ...patch }; LS.set('feedback', all); } },
   async deleteFeedback(pn, id) { LS.set('feedback', LS.get('feedback', []).filter((x) => !(x.id === id && x.pn === pn))); },
+  // محادثة الملاحظة: رسائل متتابعة بين الطالب والمعلم
+  async listFbMsgs(pn, fid) { return LS.get('fbmsgs', []).filter((m) => m.pn === pn && m.fid === fid).sort((a, b) => a.at.localeCompare(b.at)); },
+  async addFbMsg(pn, fid, m, thread) { const id = uid(), at = now(), all = LS.get('fbmsgs', []); all.push({ ...m, id, pn, fid, at }); LS.set('fbmsgs', all); await this.updateFeedback(pn, fid, { ...thread, lastAt: at, lastFrom: m.from, lastText: m.text ? m.text.slice(0, 120) : m.voice ? '🎙️ رسالة صوتية' : '📷 صورة' }); return { id, at }; },
+  watchFbThread(pn, fid, cb) { let last = ''; const f = async () => { const t = LS.get('feedback', []).find((x) => x.pn === pn && x.id === fid) || null, ms = await this.listFbMsgs(pn, fid), v = JSON.stringify([t, ms.length]); if (v !== last) { last = v; cb(t, ms); } }; f(); const id = setInterval(f, 2000); return () => clearInterval(id); },
+  async getQuickReplies() { return LS.get('fbquick', null); },
+  async saveQuickReplies(L) { LS.set('fbquick', L); },
   // شكاوى التعرف على الكلام
   async addSpeechIssue(pn, f) { const all = LS.get('speechIssues', []); const id = uid(); all.push({ ...f, id, pn, createdAt: now() }); LS.set('speechIssues', all); return id; },
   async listMySpeechIssues(pn) { return LS.get('speechIssues', []).filter((x) => x.pn === pn); },
@@ -617,9 +624,20 @@ async function makeCloud() {
     async decideLate(pn, taskId, status, extra = {}) { await setDoc(doc(db, 'roster', pn, 'late', taskId), { ...extra, pn, status, decidedAt: now() }, { merge: true }); },
     async addFeedback(pn, f) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'feedback', id), { ...f, pn, createdAt: now() }); return id; },
     async listMyFeedback(pn) { await ensureAnon(); return list(`roster/${pn}/feedback`); },
+    watchAllFeedback(cb) { return onSnapshot(query(collectionGroup(db, 'feedback'), limit(2000)), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.warn('fb watch', e)); },
     async listAllFeedback() { return (await getDocs(query(collectionGroup(db, 'feedback'), limit(2000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async updateFeedback(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'feedback', id), patch); },
-    async deleteFeedback(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'feedback', id)); },
+    async deleteFeedback(pn, id) { const ms = await getDocs(collection(db, 'roster', pn, 'feedback', id, 'msgs')).catch(() => null); if (ms) for (const d of ms.docs) await deleteDoc(d.ref); await deleteDoc(doc(db, 'roster', pn, 'feedback', id)); },
+    async listFbMsgs(pn, fid) { await ensureAnon(); return (await getDocs(collection(db, 'roster', pn, 'feedback', fid, 'msgs'))).docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.at || '').localeCompare(b.at || '')); },
+    async addFbMsg(pn, fid, m, thread) { const id = uid(), at = now(); await setDoc(doc(db, 'roster', pn, 'feedback', fid, 'msgs', id), { ...m, at }); await updateDoc(doc(db, 'roster', pn, 'feedback', fid), { ...thread, lastAt: at, lastFrom: m.from, lastText: m.text ? m.text.slice(0, 120) : m.voice ? '🎙️ رسالة صوتية' : '📷 صورة' }); return { id, at }; },
+    watchFbThread(pn, fid, cb) {
+      let t = null, ms = null; const fire = () => t !== null && ms !== null && cb(t, ms);
+      const a = onSnapshot(doc(db, 'roster', pn, 'feedback', fid), (d) => { t = d.exists() ? { id: d.id, ...d.data() } : false; fire(); }, (e) => console.warn('fb thread', e));
+      const b = onSnapshot(collection(db, 'roster', pn, 'feedback', fid, 'msgs'), (s) => { ms = s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((x, y) => (x.at || '').localeCompare(y.at || '')); fire(); }, (e) => console.warn('fb msgs', e));
+      return () => { a(); b(); };
+    },
+    async getQuickReplies() { const d = await getDoc(doc(db, 'settings', 'fbquick')).catch(() => null); return d?.exists() ? d.data().L || null : null; },
+    async saveQuickReplies(L) { await setDoc(doc(db, 'settings', 'fbquick'), { L }); },
     async addSpeechIssue(pn, f) { const id = uid(); await setDoc(doc(db, 'roster', pn, 'speechIssues', id), { ...f, pn, createdAt: now() }); return id; },
     async listMySpeechIssues(pn) { await ensureAnon(); return list(`roster/${pn}/speechIssues`); },
     async listAllSpeechIssues() { return (await getDocs(query(collectionGroup(db, 'speechIssues'), limit(2000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },

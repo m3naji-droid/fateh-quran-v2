@@ -5,6 +5,7 @@
 - /khatma    : اكتملت ختمة صف: تنبيه واحتفال لكل الصف.
 - /challenge : تحدٍّ ودّي بين زميلين: إشعار بالتحدي الجديد، وبالنتيجة عند انتهائه.
 - /feedback  : الطالب يرسل ملاحظة (رأيك يهمنا) فيصل تنبيهها إلى أجهزة المعلم.
+- /fbmsg     : الطالب يردّ في محادثة الملاحظة فيصل تنبيه فوري للمعلم.
 - /ai        : الطالب أرسل واجباً لم يكتمل تحليل تجويده: يحلّله الخادم فوراً ويحفظ النتيجة ويُشعر الطالب.
 - /cron      : يستدعيه Cloud Scheduler كل ١٠ دقائق: الإعلانات المجدولة، وتذكيرات الواجبات، وما فات من تحليل التجويد.
 نص الإشعار يُقرأ دائماً من قاعدة البيانات لا من الطلب، فلا يستطيع أحد إرسال نص من عنده.
@@ -457,7 +458,7 @@ def run_teacher(local: dt.datetime) -> dict | None:
         return None
     out = {"subs": 0, "retakes": 0}
     if last:
-        by_class, retakes, feedbacks, total = {}, [], [], 0
+        by_class, retakes, feedbacks, fbmsgs, total = {}, [], [], [], 0
         names = {}
         for r in db.collection("roster").stream():
             names[r.id] = (r.get("name"), r.get("classId"))
@@ -474,6 +475,10 @@ def run_teacher(local: dt.datetime) -> dict | None:
                 fx = fb.to_dict()
                 if not fx.get("notified") and not fx.get("seen"):
                     feedbacks.append((fx, fb.reference))
+            for fb in where(r.reference.collection("feedback"), "lastAt", ">", last).stream():
+                fx = fb.to_dict()  # ردود الطلاب في المحادثات التي لم يصل تنبيهها (أوقات الهدوء)
+                if fx.get("lastFrom") == "s" and (fx.get("nAt") or "") < (fx.get("lastAt") or "") and (fx.get("tSeenAt") or "") < (fx.get("lastAt") or ""):
+                    fbmsgs.append((fx, fb.reference))
         if total:
             word = "تسليم جديد" if total == 1 else "تسليمان جديدان" if total == 2 else f"{num(total)} تسليمات جديدة" if total <= 10 else f"{num(total)} تسليماً جديداً"
             detail = " · ".join(f"{k or 'بلا صف'}: {num(v)}" for k, v in sorted(by_class.items()))
@@ -483,6 +488,8 @@ def run_teacher(local: dt.datetime) -> dict | None:
             to_teachers("🔁 وصلت إعادة طلبتها", f"أعاد {x.get('studentName') or 'طالب'} تسميع «{rng}» كما طلبت. استمع وقيّم.", "retake-" + str(x.get("retakeId")))
         for fx, ref in feedbacks[:10]:  # ملاحظات وصلت في أوقات الهدوء أو تعذّر تنبيهها فوراً
             feedback_push(fx, ref)
+        for fx, ref in fbmsgs[:10]:
+            fbmsg_push(fx, ref)
         try:  # تسجيلات تحديات ومباريات تنتظر التقييم ولم يصل تنبيهها (أوقات الهدوء أو تعذّر)
             for x, ref, side, kind in pending_reviews()[:10]:
                 review_push(x, ref, side, kind)
@@ -541,6 +548,12 @@ class FeedbackReq(BaseModel):
     feedback: str
 
 
+class FbMsgReq(BaseModel):
+    student: str
+    feedback: str
+    msg: str
+
+
 class ReviewReq(BaseModel):
     kind: str  # ch | m
     id: str
@@ -585,8 +598,22 @@ def feedback_push(x: dict, ref) -> dict:
     who = x.get("name") or "طالب"
     cls = f" ({x['className']})" if x.get("className") else ""
     r = to_teachers(f"{kind} جديد من {who}{cls}" if x.get("kind") in ("comment", "suggest") else f"{kind} جديدة من {who}{cls}",
-                    text[:140] + ("…" if len(text) > 140 else ""), "fb-" + ref.id, "./#/teacher/feedback")
+                    text[:140] + ("…" if len(text) > 140 else ""), "fb-" + ref.id, fb_link(ref))
     ref.update({"notified": True})
+    return r
+
+
+def fb_link(ref) -> str:
+    return f"./#/teacher/feedback/{ref.parent.parent.id}~{ref.id}"
+
+
+def fbmsg_push(x: dict, ref) -> dict:
+    """رسالة جديدة من الطالب في محادثة ملاحظة: تنبيه المعلم مرة لكل «آخر رسالة»."""
+    who = x.get("name") or "طالب"
+    cls = f" ({x['className']})" if x.get("className") else ""
+    text = (x.get("lastText") or "").strip().replace("\n", " ")
+    r = to_teachers(f"💬 ردّ {who}{cls} في المحادثة", text[:140] + ("…" if len(text) > 140 else ""), "fb-" + ref.id, fb_link(ref))
+    ref.update({"nAt": x.get("lastAt") or ""})
     return r
 
 
@@ -882,6 +909,33 @@ def feedback(req: FeedbackReq, authorization: str | None = Header(None)):
     if quiet(dt.datetime.now(TZ)):
         return {"sent": 0, "deferred": True}  # يرسلها ملخّص المعلم بعد الساعة ٦ صباحاً
     return feedback_push(x, ref)
+
+
+@app.post("/fbmsg")
+def fbmsg(req: FbMsgReq, authorization: str | None = Header(None)):
+    """رسالة من الطالب في محادثة «رأيك يهمنا»: يتحقق أنه صاحبها، ثم ينبّه المعلم فوراً (وفي أوقات الهدوء يرسلها الملخّص)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "سجّل الدخول.")
+    try:
+        uid = auth.verify_id_token(authorization[7:])["uid"]
+    except Exception:
+        raise HTTPException(401, "انتهت جلسة الدخول.")
+    r = db.collection("roster").document(req.student).get()
+    if not r.exists or r.to_dict().get("uid") != uid:
+        raise HTTPException(403, "غير مسموح.")
+    ref = r.reference.collection("feedback").document(req.feedback)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(404, "المحادثة غير موجودة.")
+    m = ref.collection("msgs").document(req.msg).get()
+    if not m.exists or (m.to_dict() or {}).get("from") != "s":
+        raise HTTPException(404, "الرسالة غير موجودة.")
+    x = snap.to_dict()
+    if x.get("lastFrom") != "s" or (x.get("nAt") or "") >= (x.get("lastAt") or ""):
+        return {"sent": 0, "already": True}
+    if quiet(dt.datetime.now(TZ)):
+        return {"sent": 0, "deferred": True}
+    return fbmsg_push(x, ref)
 
 
 @app.post("/review")
