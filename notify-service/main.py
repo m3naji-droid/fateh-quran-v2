@@ -1146,6 +1146,24 @@ def run_round_end(local: dt.datetime) -> dict | None:
     return to_teachers("⏰ انتهى العداد", "نتائج الجولة جاهزة. افتح المقرأة لتراجعها وتعلنها.", "round-" + key, "./#/teacher")
 
 
+AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+
+
+def run_month_report(local: dt.datetime) -> dict | None:
+    """أول كل شهر بعد السابعة صباحاً، مرة واحدة: تنبيه المعلم بأن تقرير الشهر الماضي جاهز."""
+    if local.day != 1 or local.hour < 7 or quiet(local):
+        return None
+    prev = (local.replace(day=1) - dt.timedelta(days=1))
+    ym = prev.strftime("%Y-%m")
+    ref = db.collection("settings").document("monthReport")
+    st = ref.get()
+    if st.exists and (st.to_dict() or {}).get("last") == ym:
+        return None
+    ref.set({"last": ym})
+    label = f"{AR_MONTHS[prev.month - 1]} {ar_num(prev.year)}"
+    return to_teachers(f"📄 تقرير شهر {label} جاهز", "الأرقام والأوائل والنجوم الصاعدة ومن يحتاج متابعة في صفحة واحدة. احفظه PDF أو أرسله للإدارة.", "month-report-" + ym, f"./#/teacher/report/{ym}")
+
+
 def run_week_usage(local: dt.datetime) -> dict | None:
     """كل سبت بعد الثامنة مساءً، مرة واحدة: ملخّص استخدام الأسبوع للمعلم."""
     if local.weekday() != 5 or local.hour < 20 or quiet(local):
@@ -1228,8 +1246,12 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         week = {"error": str(e)[:200]}
     try:
+        mrep = run_month_report(local)
+    except Exception as e:
+        mrep = {"error": str(e)[:200]}
+    try:
         aiq = run_ai_queue()
     except Exception as e:
         aiq = [{"error": str(e)[:200]}]
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders), "aiQueue": len(aiq)})
-    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "round": rnd, "deferredSent": flushed}
+    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "round": rnd, "monthReport": mrep, "deferredSent": flushed}

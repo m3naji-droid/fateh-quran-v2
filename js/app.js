@@ -17,6 +17,7 @@ import { taskFor, taskStudents, targetLabel, buildTarget, tClasses, tStudents, t
 import { TEMPLATES, seasonStatus, activeSeason, seasonRange, seasonExtra, seasonBarHtml, seasonBoardHtml, daysLeftText, fmtDay, todayStr } from './season.js';
 import { PRESETS, KH_PTS, normSegs, khTotal, khDone, khActive, khForClass, newKeys, nextGap, contributors, khBonus, khLabel, daysLeft, detailHtml as khDetailHtml, groupCertificate } from './khatma.js';
 import { mergeAttempt, mapFromSubs, renderMushaf, surahDetailHtml, suggestRange } from './mushaf.js';
+import { mountReports } from './reports.js';
 import { mountChat, fbLast, fbClosed, fbUnreadS, fbUnreadT, fbPreview, QUICK_DEFAULT } from './fbchat.js';
 import { compressImage, blobToB64, b64ToBlob, annImage, openLightbox, pruneImageCache, fmtKB, IMG_DAILY_LIMIT, IMG_DAYS } from './images.js';
 import { openImageEditor, openDesigner } from './imgedit.js';
@@ -2682,6 +2683,8 @@ function viewTeacher(app) {
   let tab = 'home'; // تبدأ كل زيارة من «لوحة اليوم»
   let fbSelInit = null, fbViewInit = null;
   if (/^#\/teacher\/feedback/.test(location.hash)) { tab = 'fb'; const k = location.hash.split('/')[3]; if (k) { fbSelInit = decodeURIComponent(k).replace('~', '|'); fbViewInit = 'fb'; } history.replaceState(null, '', '#/teacher'); }
+  let repMonthDeep = null;
+  if (/^#\/teacher\/report/.test(location.hash)) { tab = 'reports'; repMonthDeep = location.hash.split('/')[3] || null; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/review/.test(location.hash)) { tab = 'honor'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/late/.test(location.hash)) { tab = 'tasks'; history.replaceState(null, '', '#/teacher'); }
   if (/^#\/teacher\/redo/.test(location.hash)) { tab = 'subs'; history.replaceState(null, '', '#/teacher'); }
@@ -4615,43 +4618,41 @@ function viewTeacher(app) {
   }
 
   /* --- التقارير --- */
+  let repApi = null, repMonthInit = repMonthDeep;
   function drawReports(body) {
-    const byClass = D.classes.map((c) => {
-      const subs = D.subs.filter((x) => x.classId === c.id);
+    repApi = mountReports(body, {
+      D, store, pref, toast, openModal, closeModal, confirmBox, className, surahName, subScore, taskFor, taskStarted, taskClosed, taskEnd, normSegs, khDone, nWord, sendPushBatch,
+      openSubmission: (x) => openSubmission(x),
+      goAnn: (title, text) => { goTab('ann'); setTimeout(() => { const t = $('#anTitle', app), b = $('#anBody', app); if (t) t.value = title; if (b) { b.value = text.slice(0, 500); b.dispatchEvent(new Event('input')); b.focus(); b.scrollIntoView({ block: 'center' }); } toast('جهّزت لك نص الإعلان. راجعه ثم انشره.'); }, 150); },
+      drawOld: (host, p, cls) => drawRepOld(host, p, cls),
+    });
+    if (repMonthInit) { const ym = repMonthInit; repMonthInit = null; repApi.monthReport(ym); }
+  }
+  /** متوسط الدقة لكل صف، وتعلّم التقييم، وخريطة الأخطاء (تتبع الفلتر الزمني) */
+  function drawRepOld(host, p, cls) {
+    const inP = (x) => { const t = Date.parse(x.createdAt || '') || 0; return t >= p.from && t < p.to; };
+    const byClass = D.classes.filter((c) => cls === 'all' || c.id === cls).map((c) => {
+      const subs = D.subs.filter((x) => x.classId === c.id && inP(x));
       const auto = subs.filter((x) => x.percent != null);
       const graded = subs.filter((x) => x.teacher);
       return { c, n: subs.length, avg: auto.length ? Math.round(auto.reduce((a, x) => a + x.percent, 0) / auto.length) : null, tavg: graded.length ? Math.round((graded.reduce((a, x) => a + x.teacher.total, 0) / graded.length) * 10) / 10 : null };
     });
-    const agg = new Map();
-    D.subs.forEach((x) => (x.mistakes || []).forEach((m) => { const k = `${x.surah}:${m.a}:${m.w}`; const e = agg.get(k) || { s: x.surah, a: m.a, w: m.w, n: 0, who: new Set() }; e.n++; e.who.add(x.pn); agg.set(k, e); }));
-    const top = [...agg.values()].sort((a, b) => b.who.size - a.who.size || b.n - a.n).slice(0, 16);
-    const students = D.students.map((s) => {
-      const subs = D.subs.filter((x) => x.pn === s.id && x.percent != null);
-      return { s, n: D.subs.filter((x) => x.pn === s.id).length, avg: subs.length ? Math.round(subs.reduce((a, x) => a + x.percent, 0) / subs.length) : null };
-    });
-    const need = students.filter((x) => x.avg != null && x.avg < 70).sort((a, b) => a.avg - b.avg).slice(0, 10);
-    const silent = students.filter((x) => x.n === 0).slice(0, 30);
-    body.innerHTML = `<div class="card stack emap" id="emap" style="margin-bottom:16px"></div><div class="grid2" style="align-items:start">
+    host.innerHTML = `<div class="card stack emap" id="emap" style="margin-bottom:16px"></div><div class="grid2" style="align-items:start">
       <div class="card stack" style="gap:12px"><h3>متوسط الدقة الآلية لكل صف</h3>
         ${byClass.map((r) => `<div class="bar-row"><span>${esc(r.c.name)}</span><div class="bar"><i style="width:${r.avg ?? 0}%"></i></div><b class="num">${r.avg == null ? '—' : ar(r.avg) + '٪'}</b></div>
-        <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? ` · متوسط درجتك ${ar(r.tavg)}/١٠` : ''}</div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
+        <div class="small muted" style="margin-top:-8px">${ar(r.n)} تسميع${r.tavg != null ? `، متوسط درجتك ${ar(r.tavg)}/١٠` : ''}</div>`).join('') || '<span class="muted">لا توجد صفوف.</span>'}
       </div>
       ${learnCard()}
-      <div class="card stack" style="gap:8px"><h3>طلاب يحتاجون متابعة</h3>
-        ${need.length ? need.map((x) => `<div class="row" style="justify-content:space-between"><span>${esc(x.s.name)} <span class="small muted">${esc(className(x.s.classId))}</span></span><span class="pill ${pctClass(x.avg)}">${ar(x.avg)}٪</span></div>`).join('') : '<span class="muted">لا يوجد طالب متوسطه أقل من ٧٠٪.</span>'}
-      </div>
-      <div class="card stack" style="gap:8px"><h3>لم يرسلوا أي تسميع بعد (${ar(students.filter((x) => x.n === 0).length)})</h3>
-        ${silent.length ? `<div class="row" style="gap:6px">${silent.map((x) => `<span class="pill mute">${esc(x.s.name)}</span>`).join('')}</div>` : '<span class="muted">كل الطلاب أرسلوا.</span>'}
-      </div>
     </div>`;
-    drawErrMap($('#emap', body));
+    emF.range = { from: p.from, to: p.to }; emF.cls = cls;
+    drawErrMap($('#emap', host));
   }
 
   /* --- خريطة أخطاء الصف على المصحف --- */
-  const emF = { cls: 'all', period: 'all', surah: null };
+  const emF = { cls: 'all', period: 'all', surah: null, range: null };
   function errData() {
-    const from = emF.period === '30' ? Date.now() - 30 * 864e5 : emF.period === 'month' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() : 0;
-    const subs = D.subs.filter((x) => x.surah && (emF.cls === 'all' || x.classId === emF.cls) && (!from || new Date(x.createdAt).getTime() >= from));
+    const from = emF.range ? emF.range.from : emF.period === '30' ? Date.now() - 30 * 864e5 : emF.period === 'month' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() : 0, to = emF.range ? emF.range.to : Infinity;
+    const subs = D.subs.filter((x) => { const t = new Date(x.createdAt).getTime(); return x.surah && (emF.cls === 'all' || x.classId === emF.cls) && (!from || t >= from) && t < to; });
     const W = new Map(); // `${s}:${a}:${i}` -> { s, a, i, w, rec:Set, err:Map(pn->st), tj:Map(rule->Set) }
     const get = (s, w) => { const k = `${s}:${w.ayah}:${w.idx}`; let e = W.get(k); if (!e) W.set(k, (e = { s, a: w.ayah, i: w.idx, w: w.text, rec: new Set(), err: new Map(), tj: new Map() })); return e; };
     subs.forEach((x) => {
@@ -4687,15 +4688,15 @@ function viewTeacher(app) {
     };
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🗺️ خريطة أخطاء الصف على المصحف</h3>${emF.surah ? '<button class="btn sm gold" type="button" id="emShow">📺 اعرضها في الحصة</button>' : ''}</div>
       <div class="row">
-        <select id="emC" style="flex:1 1 140px">${opt('all', 'كل الصفوف', emF.cls)}${D.classes.map((c) => opt(c.id, c.name, emF.cls)).join('')}</select>
-        <select id="emP" style="flex:1 1 140px">${opt('all', 'منذ البداية', emF.period)}${opt('30', 'آخر ٣٠ يوماً', emF.period)}${opt('month', 'هذا الشهر', emF.period)}</select>
+        ${emF.range ? '<span class="small muted" style="flex:1 1 140px">حسب الفترة والصف المختارين أعلى الصفحة</span>' : `<select id="emC" style="flex:1 1 140px">${opt('all', 'كل الصفوف', emF.cls)}${D.classes.map((c) => opt(c.id, c.name, emF.cls)).join('')}</select>
+        <select id="emP" style="flex:1 1 140px">${opt('all', 'منذ البداية', emF.period)}${opt('30', 'آخر ٣٠ يوماً', emF.period)}${opt('month', 'هذا الشهر', emF.period)}</select>`}
         <select id="emS" style="flex:2 1 180px" ${surahs.length ? '' : 'disabled'}>${surahs.length ? surahs.map((s) => opt(s, `${surahName(s)} (${ar(bySurah.get(s))} خطأ)`, emF.surah)).join('') : '<option>لا أخطاء بعد</option>'}</select>
       </div>
       ${emF.surah ? `<div class="em-legend small"><span><i class="em1"></i>أقل من ٢٠٪ من الطلاب</span><span><i class="em2"></i>٢٠–٤٠٪</span><span><i class="em3"></i>٤٠٪ فأكثر</span><span><i class="em-tjk"></i>خطأ تجويد حدده المعلم</span><span class="muted">الرقم: عدد من أخطأ فيها · اضغط الكلمة للتفاصيل</span></div>
       ${mapHtml()}
       <div><b class="small">أكثر الكلمات خطأً${emF.cls === 'all' ? '' : ' في هذا الصف'}</b><div class="row em-top" style="gap:6px;margin-top:6px">${top.map((e) => `<button type="button" class="word-chip em-chip" data-k="${e.s}:${e.a}:${e.i}"><span class="qw">${esc(e.w)}</span> <small>${esc(surahName(e.s))}:${ar(e.a)} · ${ar(e.who.size)} من ${ar(e.rec.size)}</small></button>`).join('')}</div></div>` : '<div class="empty">لا توجد أخطاء مسجّلة بهذه الاختيارات بعد.</div>'}`;
-    $('#emC', host).onchange = (e) => { emF.cls = e.target.value; drawErrMap(host); };
-    $('#emP', host).onchange = (e) => { emF.period = e.target.value; drawErrMap(host); };
+    if ($('#emC', host)) $('#emC', host).onchange = (e) => { emF.cls = e.target.value; drawErrMap(host); };
+    if ($('#emP', host)) $('#emP', host).onchange = (e) => { emF.period = e.target.value; drawErrMap(host); };
     const S = $('#emS', host); if (S) S.onchange = (e) => { emF.surah = +e.target.value; drawErrMap(host); };
     const detail = (k) => {
       const e = W.get(k); if (!e) return;
