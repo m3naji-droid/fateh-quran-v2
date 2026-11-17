@@ -5547,7 +5547,7 @@ function viewTeacher(app) {
         <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
       <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}، ومنذ البداية ${ar(L.length)}. حد كل طالب ${ar(CH_DAILY)} تحديات يومياً.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="chLog">📋 سجل التحديات كاملاً</button><button class="btn sm" type="button" id="chPtsBtn">⚙️ نقاط التحدي: فوز ${ar(CH_PTS.win)} · مشاركة ${ar(CH_PTS.lose)} · تعادل ${ar(CH_PTS.tie)} · إلغاء −${ar(CH_PTS.cancel)}</button></div>
-      ${month.length ? `<details><summary class="small">آخر تحديات هذا الشهر</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span></div><span class="small">${esc(chResult(c))}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`).join('')}</ul></details>` : ''}`;
+      ${month.length ? `<details><summary class="small">آخر تحديات هذا الشهر</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span><span class="small ch-when">${chWhenTxt(c)}</span></div><span class="small">${esc(chResult(c))}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`).join('')}</ul></details>` : ''}`;
     $('#chOn', host).onchange = async (e) => {
       try { cfg = { ...cfg, off: !e.target.checked }; await store.setChallengeCfg(cfg); toast(e.target.checked ? 'فُعّلت التحديات.' : 'أُوقفت التحديات مؤقتاً، ولا يستطيع الطلاب إنشاء تحدٍّ جديد.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); e.target.checked = !e.target.checked; }
     };
@@ -5568,6 +5568,13 @@ function viewTeacher(app) {
     });
   }
 
+  /** تاريخ التحدي ووقته: «📅 الثلاثاء ١٧ نوفمبر · ٥:٥٣ ص» ومعه وقت انتهائه إن انتهى */
+  const chEndAt = (c) => [c.ra?.at, c.rb?.at].filter(Boolean).sort().pop();
+  const chWhenTxt = (c) => {
+    const yr = (iso) => (new Date(iso).getUTCFullYear() !== new Date().getUTCFullYear() ? ` ${ar(new Date(iso).getUTCFullYear())}` : '');
+    const t0 = Date.parse(c.createdAt || ''), e = chEndAt(c), t1 = e && c.ra?.at && c.rb?.at ? Date.parse(e) : 0;
+    return `${t0 ? `📅 ${fmtWhen(t0)}${yr(c.createdAt)}` : ''}${t1 ? ` · ✅ انتهى ${riyadhDay(new Date(t1)) === riyadhDay(new Date(t0)) ? fmtWhen(t1).split(' · ')[1] : fmtWhen(t1)}` : ''}`;
+  };
   /** سجل التحديات كاملاً: كل الأشهر، مع تصفية بالشهر والصف والطالب، وتصدير Excel */
   function openChLog() {
     const L = (D.challenges || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -5589,7 +5596,7 @@ function viewTeacher(app) {
         const wins = {}; R.forEach((c) => { const w = chWinner(c); if (w && w !== 'tie') wins[w] = (wins[w] || 0) + 1; });
         const top = Object.entries(wins).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([pn, n]) => `${esc(stuName(pn))} (${ar(n)})`).join('، ');
         $('#clSum', m).innerHTML = `${ar(R.length)} ${R.length === 1 ? 'تحدٍّ' : 'تحديات'}${top ? ` · الأكثر فوزاً: ${top}` : ''}`;
-        $('#clT', m).innerHTML = R.length ? `<ul class="ch-list">${R.map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${fmtDate(c.createdAt)} · ${esc(c.className || className(c.classId) || '')} · ${esc(c.label || '')}</span><span class="small muted">${esc(c.a.name)}: ${pc(c.ra)} — ${esc(c.b.name)}: ${pc(c.rb)}</span></div><span class="small"><b>${esc(chResult(c))}</b></span></li>`).join('')}</ul>` : '<div class="empty">لا تحديات بهذه التصفية.</div>';
+        $('#clT', m).innerHTML = R.length ? `<ul class="ch-list">${R.map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small ch-when">${chWhenTxt(c)}</span><span class="small muted">${esc(c.className || className(c.classId) || '')} · ${esc(c.label || '')}</span><span class="small muted">${esc(c.a.name)}: ${pc(c.ra)} — ${esc(c.b.name)}: ${pc(c.rb)}</span></div><span class="small"><b>${esc(chResult(c))}</b></span></li>`).join('')}</ul>` : '<div class="empty">لا تحديات بهذه التصفية.</div>';
       };
       $('#clM', m).onchange = (e) => { f.ym = e.target.value; paint(); };
       $('#clC', m).onchange = (e) => { f.cls = e.target.value; paint(); };
@@ -5598,7 +5605,7 @@ function viewTeacher(app) {
       $('#clX', m).onclick = () => {
         if (!window.XLSX) { toast('مكتبة Excel لم تُحمّل بعد. أعد المحاولة بعد لحظات.'); return; }
         const data = rows().map((c) => { const w = chWinner(c); return {
-          'التاريخ': fmtDate(c.createdAt), 'الصف': c.className || className(c.classId) || '', 'المقطع': c.label || '',
+          'التاريخ': fmtDate(c.createdAt), 'الوقت': c.createdAt ? fmtWhen(Date.parse(c.createdAt)).split(' · ')[1] : '', 'وقت الانتهاء': chEndAt(c) && c.ra?.at && c.rb?.at ? fmtWhen(Date.parse(chEndAt(c))) : '', 'الصف': c.className || className(c.classId) || '', 'المقطع': c.label || '',
           'الطالب الأول': c.a.name, 'رقمه': c.a.pn, 'دقته %': c.ra?.p ?? '', 'سرعته (كلمة/دقيقة)': c.ra?.wpm ?? '',
           'الطالب الثاني': c.b.name, 'رقمه ': c.b.pn, 'دقته % ': c.rb?.p ?? '', 'سرعته (كلمة/دقيقة) ': c.rb?.wpm ?? '',
           'النتيجة': chResult(c).replace('🏆 ', 'فاز: '), 'نقاط الأول': ptsOf(c, c.a.pn), 'نقاط الثاني': ptsOf(c, c.b.pn) }; });
