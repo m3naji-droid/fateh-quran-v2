@@ -186,6 +186,7 @@ const local = {
   // نقاط «الهمة العالية» اليومية لكل طالب
   async logHimma(pn, day, x) { const a = LS.get('himma', {}); const k = pn + '|' + day; const c = a[k] || { pn, d: day, hp: 0, ha: 0, hm: 0 }; c.hp = Math.min(200, c.hp + (x.pts || 0)); c.ha += x.ayat || 0; c.hm = Math.min(30, c.hm + (x.mins || 0)); a[k] = c; LS.set('himma', a); },
   async listAllHimma() { return Object.values(LS.get('himma', {})); },
+  async getMyHimma(pn, day) { return LS.get('himma', {})[pn + '|' + day] || null; },
   watchAllHimma(cb) { let last = ''; const f = () => { const v = localStorage.fp_himma || ''; if (v !== last) { last = v; cb(Object.values(LS.get('himma', {}))); } }; f(); const id = setInterval(f, 3000); return () => clearInterval(id); },
   async getChallengeCfg() { return LS.get('chCfg', { off: false }); },
   async setChallengeCfg(c) { LS.set('chCfg', c); },
@@ -578,6 +579,7 @@ async function makeCloud() {
     async updateChallenge(id, patch) { await updateDoc(doc(db, 'challenges', id), patch); },
     /** نقاط «الهمة العالية»: مستند يومي لكل طالب roster/{pn}/himma/{day} */
     async logHimma(pn, day, x) { await setDoc(doc(db, 'roster', pn, 'himma', day), { d: day, hp: increment(x.pts || 0), ha: increment(x.ayat || 0), hm: increment(x.mins || 0), at: now() }, { merge: true }); },
+    async getMyHimma(pn, day) { const d = await getDoc(doc(db, 'roster', pn, 'himma', day)); return d.exists() ? d.data() : null; },
     async listAllHimma() { await ensureAnon(); return (await getDocs(collectionGroup(db, 'himma'))).docs.map((d) => ({ pn: d.ref.parent.parent.id, ...d.data() })); },
     // نقاط الهمّة لكل الطلاب لحظة بلحظة (للمعلم): يُعاد حساب اللوحة فور تدرّب أي طالب
     watchAllHimma(cb) { return onSnapshot(collectionGroup(db, 'himma'), (s) => cb(s.docs.map((d) => ({ pn: d.ref.parent.parent.id, ...d.data() }))), (e) => console.warn('himma watch', e)); },

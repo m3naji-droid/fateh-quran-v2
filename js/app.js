@@ -1090,6 +1090,23 @@ function viewStudent(app) {
       }
     } finally { HQ.busy = false; paintHmBar(); paintHmWarn(); }
   }
+  /** استرجاع ما ضاع قبل الإصدار ٤٠: يقارن حصيلة الجهاز لآخر يوم تدرّب فيه بما في قاعدة البيانات، ويرسل الفرق فقط (لا يزيد على ما سجّله الجهاز) */
+  async function recoverHimma() {
+    if (!me) return;
+    for (const k of Object.keys(localStorage).filter((x) => x.startsWith(`hm_${me.id}_`))) {
+      const day = k.slice(`hm_${me.id}_`.length); if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      let st; try { st = JSON.parse(localStorage.getItem(k)); } catch { continue; }
+      if (!st?.pts) continue;
+      let srv; try { srv = await store.getMyHimma(me.id, day); } catch (e) { console.warn('himma recover', e); return; } // الجلسة منتهية: يُعاد بعد الدخول
+      const queued = hmQueue().filter((x) => x.day === day), qPts = queued.reduce((n, x) => n + (x.pts || 0), 0), qMins = queued.reduce((n, x) => n + (x.mins || 0), 0);
+      const diff = Math.min(st.pts - (srv?.hp || 0) - qPts, 200 - (srv?.hp || 0) - qPts);
+      if (diff <= 0) continue;
+      const mins = Math.max(0, Math.min(diff, (st.mins || 0) - (srv?.hm || 0) - qMins, 30 - (srv?.hm || 0) - qMins));
+      pref.set(hqKey(), [...hmQueue(), { id: 'rc' + Date.now().toString(36), day, pts: diff, ayat: diff - mins, mins, t: Date.now(), rec: 1 }]);
+      HQ.recovered = (HQ.recovered || 0) + diff;
+    }
+    if (HQ.recovered) { flushHimma(); toast(`☁️ استُرجعت ${ar(HQ.recovered)} نقطة همّة من تدريب سابق لم تُحفظ، وأُضيفت إلى رصيدك.`); }
+  }
   /** تنبيه ظاهر إن لم تُحفظ النقاط لانتهاء جلسة الدخول */
   function paintHmWarn() {
     let el = $('#hmWarn', app);
@@ -2082,7 +2099,7 @@ function viewStudent(app) {
     RW = { wallet: { spent: 0, bonus: 0 }, owned: [], ach: {}, look: null, ...(me.rankInfo?._rw || {}) };
     hbStart();
     setTimeout(checkPopAnn, 1600);
-    setTimeout(flushHimma, 2000); // نقاط معلّقة من جلسة سابقة
+    setTimeout(() => flushHimma().then(recoverHimma), 2000); // نقاط معلّقة من جلسة سابقة، ثم استرجاع ما ضاع
     FX.kind = RW.look?.x || '';
     if (RW.look) setLook(me.id, RW.look);
     draw();
