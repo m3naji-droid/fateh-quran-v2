@@ -94,6 +94,10 @@ service cloud.firestore {
       }
     }
     // بطولة «الأبطال»: يديرها البرنامج من لوحة المعلم، والطالب يكتب نتيجته فقط (مرة واحدة)، أو يعيد المباراة عند التعادل
+    // نقاط شرف يمنحها المعلم لطالب أو مجموعة (تدخل في حساب لوحة الشرف على جهاز المعلم)
+    match /grants/{gid} {
+      allow read, write: if isTeacher();
+    }
     match /tourneys/{tid} {
       allow read: if signedIn();
       allow write: if isTeacher();

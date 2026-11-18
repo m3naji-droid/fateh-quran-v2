@@ -4821,6 +4821,8 @@ function viewTeacher(app) {
   }
   async function publishBoard() {
     if (!D.students.length) return;
+    // لا ننشر قبل أن تكتمل مصادر النقاط (حتى لا تنزل اللوحة لحظةً ثم تعود)
+    if ((D.grants === undefined || D.khatmas === undefined || D.seasons === undefined) && (publishBoard.wait = (publishBoard.wait || 0) + 1) < 20) { schedulePublish(800); return; }
     const all = boardSubs();
     const { board, ranks } = computeBoard(all, D.students, D.classes, new Date(), roundPer());
     // الموسم الجاري: ترتيب كل طالب، وأوائل المرحلة وكل صف للطلاب
@@ -5510,8 +5512,8 @@ function viewTeacher(app) {
   /* ================= المكافآت (المعلم): المتجر، والمنح، وصوت الأسبوع ================= */
   async function loadRewardsT() {
     store.ensureLooks?.().catch(() => {});
-    let [sh, lk, vs, v] = await Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({})), store.listVoices().catch(() => []), store.getVoice().catch(() => null)]);
-    D.shop = sh || { items: {} }; D.voices = vs || []; D.voice = v;
+    let [sh, lk, vs, v, gr] = await Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({})), store.listVoices().catch(() => []), store.getVoice().catch(() => null), store.listGrants().catch(() => [])]);
+    D.shop = sh || { items: {} }; D.voices = vs || []; D.voice = v; D.grants = (gr || []).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
     // الأصوات القديمة بلا تاريخ أسبوعها: يُحفظ لها مرة واحدة ليعرضها الطلاب في أسبوعها
     const fixWk = (x) => (x && !x.wk && voiceWk(x) ? { ...x, wk: voiceWk(x) } : null);
     D.voices = D.voices.map((x) => { const f = fixWk(x); if (f) store.archiveVoice(f).catch(() => {}); return f || x; });
@@ -5524,7 +5526,8 @@ function viewTeacher(app) {
     schedulePublish();
     if (tab === 'honor') drawBody();
   }
-  const voiceBonus = () => (D.voices || []).filter((v) => v.pn && v.pts).map((v) => ({ pn: v.pn, bonus: v.pts, createdAt: v.at }));
+  const voiceBonus = () => (D.voices || []).filter((v) => v.pn && v.pts).map((v) => ({ pn: v.pn, bonus: v.pts, createdAt: v.at }))
+    .concat((D.grants || []).filter((g) => g.pn && g.pts).map((g) => ({ pn: g.pn, bonus: g.pts, createdAt: g.at }))); // ومعها نقاط الشرف الممنوحة
   let shopKind = 'title';
   function drawShopT(host) {
     if (!host) return;
@@ -5562,19 +5565,20 @@ function viewTeacher(app) {
           <label class="field" style="flex:1 1 140px">طريقة الحصول<select id="shM"><option value="sell">يُباع في المتجر</option><option value="grant">يمنحه المعلم فقط</option></select></label>
         </div><button class="btn primary" type="button" id="shAdd">إضافة</button></details>
       <details class="sp-box" id="grBox"><summary><b>🎖️ منح نقاط شرف أو عنصر لطالب أو مجموعة</b></summary>
-        <p class="small muted" style="margin:8px 0 0">النقاط تُضاف إلى رصيد الطالب في المتجر (🪙)، ويصله إشعار بها.</p>
+        <p class="small muted" style="margin:8px 0 0">النقاط تُحسب في <b>لوحة الشرف</b> فوراً (في الشهر والجولة الحاليين)، وتزيد معها رصيده في المتجر، ويصله إشعار بها. للمقارنة: الدرجة الكاملة في واجب واحد = ١٠ نقاط.</p>
         <div class="row" style="margin-top:10px">
           <label class="field" style="flex:1 1 150px">الصف<select id="grCls"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
           <label class="field" style="flex:2 1 180px">بحث<input id="grQ" type="search" placeholder="اسم الطالب أو رقمه"></label>
         </div>
         <div class="gr-pick"><label class="gr-all"><input type="checkbox" id="grAll"> <b>تحديد الكل</b> <span class="small muted" id="grN"></span></label><div id="grList" class="gr-list"></div></div>
         <div class="row" style="margin-top:10px">
-          <label class="field" style="flex:1 1 110px">نقاط شرف 🪙<input id="grC" type="number" min="0" max="500" value="10"></label>
+          <label class="field" style="flex:1 1 110px">نقاط شرف ⭐<input id="grC" type="number" min="0" max="50" step="0.5" value="2"></label>
           <label class="field" style="flex:2 1 180px">عنصر من المتجر (اختياري)<select id="grI"><option value="">— بلا عنصر —</option>${all.filter((x) => !x.deleted).map((x) => `<option value="${esc(x.id)}">${esc(KINDS[x.kind].split(' ')[0])} ${esc(x.name)}</option>`).join('')}</select></label>
           <label class="field" style="flex:3 1 220px">السبب (يظهر للطالب، اختياري)<input id="grWhy" maxlength="80" placeholder="مثلاً: لحسن الإنصات في الحلقة"></label>
         </div>
-        <div class="row" style="gap:6px;flex-wrap:wrap" id="grQuick">${[5, 10, 20, 50].map((n) => `<button type="button" class="chip" data-grc="${n}">+${ar(n)} 🪙</button>`).join('')}</div>
-        <button class="btn primary" type="button" id="grGo" style="margin-top:10px">امنح</button></details>
+        <div class="row" style="gap:6px;flex-wrap:wrap" id="grQuick">${[1, 2, 3, 5, 10].map((n) => `<button type="button" class="chip" data-grc="${n}">+${ar(n)} ⭐</button>`).join('')}</div>
+        <button class="btn primary" type="button" id="grGo" style="margin-top:10px">امنح</button>
+        <div id="grLog"></div></details>
       <div class="row"><button class="btn primary" type="button" id="shSave">حفظ تعديلات المتجر</button></div>`;
     const kk = host.querySelector('#shK'), kv = host.querySelector('#shV');
     const ph = { title: 'نص اللقب', badge: '🏅 رمز', icon: '🌟 رمز', color: '#0f8a5f' };
@@ -5633,19 +5637,35 @@ function viewTeacher(app) {
     host.querySelector('#grCls').onchange = grPaint; host.querySelector('#grQ').oninput = grPaint;
     $$('[data-grc]', host).forEach((b) => (b.onclick = () => (host.querySelector('#grC').value = b.dataset.grc)));
     grPaint();
+    // سجل آخر المنح، مع إمكانية الإلغاء
+    const grLog = () => {
+      const L = (D.grants || []).slice(0, 30), box = host.querySelector('#grLog'); if (!box) return;
+      if (!L.length) { box.innerHTML = ''; return; }
+      // تجميع المنح التي صدرت معاً (نفس الوقت والسبب)
+      const G = []; L.forEach((g) => { const k = g.batch || g.id, o = G.find((x) => x.k === k); o ? o.L.push(g) : G.push({ k, L: [g] }); });
+      box.innerHTML = `<h4 style="margin:14px 0 6px">آخر المنح</h4><div class="gr-log">${G.slice(0, 12).map((x) => { const g = x.L[0], names = x.L.map((y) => D.students.find((s) => s.id === y.pn)?.name || y.pn);
+        return `<div class="gr-row"><b class="rp-up">+${ar(g.pts)} ⭐</b><span>${esc(names.length > 3 ? `${names.slice(0, 3).join('، ')} و${ar(names.length - 3)} غيرهم` : names.join('، '))}${g.why ? ` <small class="muted">(${esc(g.why)})</small>` : ''}</span><small class="muted">${esc(timeAgo(g.at))}</small><button type="button" class="btn sm ghost danger" data-gx="${esc(x.k)}" title="إلغاء هذه المنحة">إلغاء</button></div>`; }).join('')}</div>`;
+      $$('[data-gx]', box).forEach((b) => (b.onclick = async () => {
+        const grp = G.find((x) => x.k === b.dataset.gx); if (!grp || !(await confirmBox(`إلغاء منحة ${ar(grp.L[0].pts)} ⭐ عن ${ar(grp.L.length)} ${grp.L.length === 1 ? 'طالب' : 'طلاب'}؟ تُخصم من لوحة الشرف.`, 'ألغِها'))) return;
+        try { for (const g of grp.L) await store.deleteGrant(g.id); const ids = new Set(grp.L.map((g) => g.id)); D.grants = D.grants.filter((g) => !ids.has(g.id)); grLog(); schedulePublish(100); toast('أُلغيت المنحة.'); } catch (e) { toast('تعذر الإلغاء: ' + (e.code || e.message)); }
+      }));
+    };
+    grLog();
     host.querySelector('#grGo').onclick = async (e) => {
-      const pns = [...grSel], id = host.querySelector('#grI').value, c = Math.max(0, Math.min(500, Math.floor(+host.querySelector('#grC').value || 0))), why = host.querySelector('#grWhy').value.trim();
+      const pns = [...grSel], id = host.querySelector('#grI').value, c = Math.max(0, Math.min(50, Math.round((+host.querySelector('#grC').value || 0) * 2) / 2)), why = host.querySelector('#grWhy').value.trim();
       if (!pns.length) return toast('اختر طالباً واحداً على الأقل.');
       if (!id && !c) return toast('اكتب عدد النقاط أو اختر عنصراً.');
-      const it = all.find((x) => x.id === id), what = `${c ? `${ar(c)} 🪙 نقطة شرف` : ''}${it && c ? ' و' : ''}${it ? `«${it.name}»` : ''}`;
+      const it = all.find((x) => x.id === id), what = `${c ? `${ar(c)} ${c <= 2 ? (c === 1 ? 'نقطة شرف' : 'نقطتا شرف') : c <= 10 ? 'نقاط شرف' : 'نقطة شرف'} ⭐` : ''}${it && c ? ' و' : ''}${it ? `«${it.name}»` : ''}`;
       if (pns.length > 1 && !(await confirmBox(`منح ${what} لكل واحد من ${ar(pns.length)} طلاب؟`, 'امنح'))) return;
       e.target.disabled = true;
-      const batch = [], failed = [];
+      const batch = [], failed = [], at = new Date().toISOString(), bid = 'b' + Date.now().toString(36);
+      try {
+        if (c) { const out = await store.addGrants(pns.map((pn) => ({ pn, pts: c, why, at, batch: bid, classId: D.students.find((s) => s.id === pn)?.classId || '' }))); D.grants = [...out, ...(D.grants || [])]; schedulePublish(100); }
+      } catch (x) { e.target.disabled = false; return toast('تعذر منح النقاط: ' + (x.code || x.message)); }
       for (const pn of pns) {
         try {
           if (id) await store.grantItem(pn, id);
-          if (c) await store.grantCoins(pn, c);
-          const nid = await store.addStudentNotif(pn, { type: 'reward', title: '🎁 هدية من معلمك', body: `${what}${why ? ` ${why}` : ''}. افتح «خزانتي».`, link: './#/student', tag: 'reward-' + pn });
+          const nid = await store.addStudentNotif(pn, { type: 'reward', title: '🎁 هدية من معلمك', body: `${what}${why ? ` ${why}` : ''}${c ? '. تظهر الآن في لوحة الشرف' : '. افتح «خزانتي»'}.`, link: './#/student', tag: 'reward-' + pn });
           if (nid) batch.push({ notif: nid, student: pn });
         } catch (x) { failed.push(D.students.find((s) => s.id === pn)?.name || pn); }
       }
@@ -5653,6 +5673,7 @@ function viewTeacher(app) {
       const ok = pns.length - failed.length, one = D.students.find((x) => x.id === pns[0]);
       toast(failed.length ? `مُنح ${ar(ok)}، وتعذر منح: ${failed.join('، ')}` : ok === 1 ? `مُنح ${one?.name || 'الطالب'} ${what}.` : `مُنح ${ar(ok)} طلاب ${what} لكل واحد.`);
       if (!failed.length) { grSel.clear(); grPaint(); host.querySelector('#grWhy').value = ''; }
+      grLog();
       e.target.disabled = false;
     };
   }

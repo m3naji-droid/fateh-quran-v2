@@ -1812,3 +1812,5 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .gr-list { max-height: 240px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px; padding: 8px; }
 .gr-it { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; }
 .gr-it.on { background: var(--ok-bg); }
+.gr-log { display: flex; flex-direction: column; gap: 4px; }
+.gr-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 6px 4px; border-top: 1px dashed var(--line); font-size: 14px; }
