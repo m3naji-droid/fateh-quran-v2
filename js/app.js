@@ -210,6 +210,28 @@ $('#aboutLink').onclick = (e) => { e.preventDefault(); openAbout(); };
 /* الوضع الليلي */
 function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
 applyTheme(pref.get('theme', null));
+// آيفون (خاصة التطبيق المثبّت): بعد إغلاق قائمة الاختيار أو لوحة المفاتيح قد يبقى الشريط السفلي الثابت
+// مرفوعاً في منتصف الشاشة. نُخفيه أثناء فتح لوحة المفاتيح، ونعيد رسمه في مكانه بعد إغلاقها.
+(() => {
+  const vv = window.visualViewport; if (!vv) return;
+  let t = 0;
+  const kbOpen = () => vv.height < window.innerHeight * 0.78;
+  const settle = () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      document.body.classList.toggle('kb-open', kbOpen());
+      if (kbOpen()) return;
+      document.querySelectorAll('.tnav').forEach((n) => { n.style.display = 'none'; void n.offsetHeight; n.style.display = ''; });
+      window.scrollTo(window.scrollX, window.scrollY);
+    }, 150);
+  };
+  vv.addEventListener('resize', settle);
+  document.addEventListener('focusin', (e) => { if (e.target.matches?.('input, select, textarea')) document.body.classList.add('kb-open'); settle(); });
+  document.addEventListener('focusout', settle);
+  document.addEventListener('change', (e) => { if (e.target.matches?.('select')) settle(); });
+  window.addEventListener('pageshow', settle); document.addEventListener('visibilitychange', settle);
+})();
+
 // تحديث يدوي: مهم في وضع التطبيق المثبّت (لا يوجد فيه زر تحديث للمتصفح)
 $('#refreshBtn').onclick = async () => {
   const b = $('#refreshBtn'); b.classList.add('spin'); b.disabled = true;
