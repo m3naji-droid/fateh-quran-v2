@@ -38,17 +38,22 @@ export async function promptInstall() {
 }
 
 /* ---------- تنبيه التحديث ----------
- * يتحقق كل بضع دقائق (وعند العودة إلى الصفحة) من بصمة ملفات الموقع الأساسية على الخادم (ETag).
- * إن تغيّرت عما فُتحت به الصفحة: صدر تحديث، فيظهر شريط «يوجد تحديث، اضغط هنا».
- * لا يحتاج رقم إصدار يدوياً: أي نشر جديد يغيّر البصمة تلقائياً. */
-// كل ملفات الموقع التي تتغير كثيراً: أي تعديل فيها يُظهر رسالة التحديث
-const WATCH = ['./', 'js/app.js', 'js/store.js', 'assets/style.css', 'js/iqra.js', 'js/iqra-audio.js', 'js/iqra-taj.js', 'js/iqra-data.js', 'js/tajweed-ai.js', 'js/speech.js', 'js/speech-issues.js', 'js/countdown.js', 'js/prayer.js', 'js/rewards.js'];
+ * يتحقق كل بضع دقائق (وعند العودة إلى الصفحة) من رقم أحدث إصدار في VERSIONS.md على الخادم.
+ * الرقم يزيد دائماً، فلا يظهر الشريط إلا لإصدار أحدث فعلاً مما فُتحت به الصفحة.
+ * (كانت المقارنة سابقاً ببصمة الملفات ETag، وخوادم الاستضافة الموزعة قد تعطي بصمات مختلفة
+ *  للملف نفسه بعد النشر، فيتكرر الشريط كل دقيقتين بلا تحديث حقيقي.) */
+const AR_D = { '٠': 0, '١': 1, '٢': 2, '٣': 3, '٤': 4, '٥': 5, '٦': 6, '٧': 7, '٨': 8, '٩': 9 };
 async function fingerprint() {
-  const parts = await Promise.all(WATCH.map((u) => fetch(u, { method: 'HEAD', cache: 'no-store' })
-    .then((r) => (r.ok ? r.headers.get('etag') || r.headers.get('last-modified') || r.headers.get('content-length') || '' : null))
-    .catch(() => null)));
-  return parts.some((p) => p == null) ? null : parts.join('|'); // تعذر الاتصال: لا نحكم
+  try {
+    const r = await fetch('VERSIONS.md', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const t = await r.text();
+    let max = 0;
+    for (const m of t.matchAll(/^\|\s*([٠-٩0-9]+)\s*\|/gm)) { const n = +[...m[1]].map((c) => AR_D[c] ?? c).join(''); if (n > max) max = n; }
+    return max || null;
+  } catch { return null; } // تعذر الاتصال: لا نحكم
 }
+
 export function watchUpdates(onUpdate, every = 3 * 60e3) {
   if (!isSecureContext && location.hostname !== 'localhost') return;
   let base = null, shown = false, busy = false;
@@ -58,7 +63,7 @@ export function watchUpdates(onUpdate, every = 3 * 60e3) {
     try {
       const fp = await fingerprint();
       if (fp && base == null) base = fp;
-      else if (fp && fp !== base) { shown = true; onUpdate(); }
+      else if (fp && fp > base) { shown = true; onUpdate(); }
     } finally { busy = false; }
   };
   setTimeout(check, 4000);
