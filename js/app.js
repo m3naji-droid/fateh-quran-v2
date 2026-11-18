@@ -1660,7 +1660,7 @@ function viewStudent(app) {
     $$('[data-ht]', body).forEach((b) => (b.onclick = () => { hTab = b.dataset.ht; drawHeroes(body); }));
     $$('.hb-m[data-mid]', body).forEach((b) => (b.onclick = () => { const x = hM.find((y) => y.id === b.dataset.mid); if (x && !x.bye) (sideOf(x, me.id) && !x.done ? openMatch : watchMatch)(x.id); }));
   }
-  /** صفحة المباراة: تسميع غيباً بمحاولة واحدة، والنتيجة آلية */
+  /** صفحة المباراة: تسميع غيباً (أو تلاوة نظراً إن اختارها المعلم للبطولة) بمحاولة واحدة، والنتيجة آلية */
   function openMatch(mid) {
     const m = hM.find((x) => x.id === mid); if (!m) return toast('المباراة غير موجودة.');
     const side = sideOf(m, me.id); if (!side || m.done) return watchMatch(mid);
@@ -1684,11 +1684,11 @@ function viewStudent(app) {
     }
     stopCheer();
     if (m.live && Date.now() > endMs) { body.innerHTML = '<div class="notice">انتهت نافذة المباراة.</div>'; return; }
-    body.innerHTML = `<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً بلا تلميح، <b>محاولة واحدة</b> تُحتسب عند الإيقاف. ${m.live ? `أمامك حتى ${fmtTimeOf(new Date(endMs).toISOString())} (${ar(LIVE_MIN)} دقائق)، ويُحلَّل تجويدك آلياً ويُخصم ${ar(AI_PENALTY)} لكل ملاحظة.` : 'النتيجة بدقة الكلمات الآلية فقط.'}</div>${m.live ? '<div class="hero-count live" id="hmLeft"></div>' : ''}<div id="hmRc"></div>`;
+    body.innerHTML = `<div class="notice" style="margin-bottom:12px">🎯 ${heroT.mode === 'recite' ? '📖 تلاوة نظراً (النص أمامك)' : '🙈 تسميع غيباً'} بلا تلميح، <b>محاولة واحدة</b> تُحتسب عند الإيقاف. ${m.live ? `أمامك حتى ${fmtTimeOf(new Date(endMs).toISOString())} (${ar(LIVE_MIN)} دقائق)، ويُحلَّل تجويدك آلياً ويُخصم ${ar(AI_PENALTY)} لكل ملاحظة.` : 'النتيجة بدقة الكلمات الآلية فقط.'}</div>${m.live ? '<div class="hero-count live" id="hmLeft"></div>' : ''}<div id="hmRc"></div>`;
     if (m.live) { const iv = setInterval(() => { const el = $('#hmLeft', body); if (!el) return clearInterval(iv); const s = Math.max(0, Math.round((endMs - Date.now()) / 1000)); el.textContent = `⏱ ${ar(Math.floor(s / 60))}:${ar(String(s % 60).padStart(2, '0'))}`; }, 500); }
     let liveT = 0;
     comp = mountRecite($('#hmRc', body), {
-      surah: m.surah, from: m.from, to: m.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true, capCheck: true,
+      surah: m.surah, from: m.from, to: m.to, mode: heroT.mode === 'recite' ? 'recite' : 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true, capCheck: true,
       maxSeconds: m.live ? Math.max(30, Math.round((endMs - Date.now()) / 1000)) : 600,
       confirmStart: 'محاولة واحدة فقط تُحتسب عند الإيقاف. هل أنت مستعد؟',
       onActivity: (sec) => logAct('practice', sec),
@@ -1832,7 +1832,10 @@ function viewStudent(app) {
     // تحدٍّ انتهى وقته ولم يُبلَّغ: نطلب إشعار النتيجة (يكفي طرف واحد)
     myCh.filter((c) => chStatus(c) === 'done' && !c.nDone).forEach((c) => notifyChallenge(c.id, 'done').catch(() => {}));
   }
-  const chLabel = (c) => `«سورة ${surahName(c.surah)}» ${c.from === c.to ? `الآية ${ar(c.from)}` : `${ar(c.from)}–${ar(c.to)}`}`;
+  const chLabel = (c) => `«سورة ${surahName(c.surah)}» ${c.from === c.to ? `الآية ${ar(c.from)}` : `${ar(c.from)}–${ar(c.to)}`}${c.mode === 'recite' ? '، تلاوة نظراً' : ''}`;
+  /** نوع المنافسة: غيباً (الأصل) أو نظراً */
+  const modeTxt = (m) => (m === 'recite' ? 'تلاوة نظراً (النص ظاهر)' : 'تسميع غيباً');
+  const chModes = () => (chCfg?.modes === 'hifz' || chCfg?.modes === 'recite' ? [chCfg.modes] : ['hifz', 'recite']);
   function paintChBar() {
     const host = $('#chBar', app); if (!host) return;
     const L = myCh.filter((c) => chStatus(c) === 'open' && !chView(c, me.id).mine);
@@ -1861,7 +1864,7 @@ function viewStudent(app) {
     };
     host.innerHTML = `<div class="card ch-card stack" style="gap:10px;margin-bottom:16px">
       <div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3><span class="small muted">انتصاراتك: <b>${ar(wins)}</b> من ${ar(played)}</span></div>
-      <p class="small muted" style="margin:0">تحدَّ زميلاً من صفك في مقطع تختاره: تسميع غيباً، محاولة واحدة لكلٍّ منكما خلال ${ar(CH_HOURS)} ساعة. الأدق يفوز (+${ar(CH_PTS.win)} نقاط)، والمشارك +${ar(CH_PTS.lose)}.</p>
+      <p class="small muted" style="margin:0">تحدَّ زميلاً من صفك في مقطع تختاره: ${chModes().length > 1 ? 'تسميع غيباً أو تلاوة نظراً' : modeTxt(chModes()[0])}، محاولة واحدة لكلٍّ منكما خلال ${ar(CH_HOURS)} ساعة. الأدق يفوز (+${ar(CH_PTS.win)} نقاط)، والمشارك +${ar(CH_PTS.lose)}.</p>
       ${chCfg.off ? '<div class="notice">أوقف المعلم التحديات مؤقتاً.</div>' : `<div class="row"><button class="btn primary" type="button" id="chNew" ${sentToday >= CH_DAILY ? 'disabled' : ''}>تحدَّ زميلاً</button><span class="small muted">${sentToday >= CH_DAILY ? `وصلت إلى ${ar(CH_DAILY)} تحديات اليوم. عُد غداً!` : `يتبقى لك اليوم ${ar(CH_DAILY - sentToday)} من ${ar(CH_DAILY)}`}</span></div>`}
       ${active.length ? `<b class="small">تحديات جارية</b><ul class="ch-list">${active.map(row).join('')}</ul>` : ''}
       ${recent.length ? `<b class="small">آخر النتائج</b><ul class="ch-list">${recent.map(row).join('')}</ul>` : ''}
@@ -1893,6 +1896,7 @@ function viewStudent(app) {
   }
   async function newChallenge() {
     openModal('<div class="loading">جارٍ تحميل زملائك…</div>');
+    chCfg = (await store.getChallengeCfg().catch(() => null)) || chCfg; // أحدث إعداد للمعلم (الإيقاف ونوع التحدي)
     if (chCfg.off) { closeModal(); return toast('أوقف المعلم التحديات مؤقتاً.'); }
     if ((await chSentToday()) >= CH_DAILY) { closeModal(); toast(`وصلت إلى ${ar(CH_DAILY)} تحديات اليوم. عُد غداً!`); if ($('#stBody', app) && tab === 'honor') draw(); return; }
     let mates = [];
@@ -1902,7 +1906,8 @@ function viewStudent(app) {
     $('#modalBody').innerHTML = `<form class="stack" id="chForm"><h2>⚔️ تحدٍّ جديد</h2>
       <label class="field">زميلك<select id="chMate" required><option value="">اختر زميلاً من صفك</option>${mates.map((x) => `<option value="${esc(x.id)}" ${busy.has(x.id) ? 'disabled' : ''}>${esc(x.name)}${busy.has(x.id) ? ' (بينكما تحدٍّ جارٍ)' : ''}</option>`).join('')}</select></label>
       <div class="card">${rangePicker('cx', init)}</div>
-      <p class="small muted" style="margin:0">المقطع حتى ٢٠ آية. تسميع غيباً بلا تلميح، ومحاولة واحدة لكلٍّ منكما. يصل زميلك إشعار، وأمامكما ${ar(CH_HOURS)} ساعة.</p>
+      ${chModes().length > 1 ? `<div class="field">نوع التحدي<div class="seg ch-mode" role="radiogroup"><label><input type="radio" name="chM" value="hifz" ${pref.get('chMode', 'hifz') !== 'recite' ? 'checked' : ''}> 🙈 تسميع غيباً</label><label><input type="radio" name="chM" value="recite" ${pref.get('chMode', 'hifz') === 'recite' ? 'checked' : ''}> 📖 تلاوة نظراً</label></div></div>` : `<p class="small" style="margin:0">نوع التحدي: <b>${modeTxt(chModes()[0])}</b> (حدده المعلم)</p>`}
+      <p class="small muted" style="margin:0">المقطع حتى ٢٠ آية. بلا تلميح، ومحاولة واحدة لكلٍّ منكما، وكلاكما بالنوع نفسه. يصل زميلك إشعار، وأمامكما ${ar(CH_HOURS)} ساعة.</p>
       <div class="row"><button class="btn primary" type="submit">أرسل التحدي</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`;
     const m = $('#modalBody');
     let rng = { ...init };
@@ -1910,6 +1915,8 @@ function viewStudent(app) {
     $('#chForm', m).onsubmit = async (e) => {
       e.preventDefault();
       const mate = mates.find((x) => x.id === $('#chMate', m).value); if (!mate) return toast('اختر زميلك.');
+      // يُقرأ النوع قبل نافذة التأكيد (لأنها تستبدل محتوى النافذة)
+      const mode = chModes().length > 1 ? ($('input[name=chM]:checked', m)?.value === 'recite' ? 'recite' : 'hifz') : chModes()[0]; pref.set('chMode', mode);
       if (rng.to - rng.from + 1 > 20) return toast('اختر مقطعاً لا يزيد على ٢٠ آية.');
       const btn = e.submitter;
       if (!(await confirmBox(`⚠️ قبل الإرسال: التحدي لا يُلغى. إن أردت إلغاءه بعد إرساله ستخسر ${CH_PTS.cancel === 1 ? 'نقطة واحدة' : ar(CH_PTS.cancel) + ' نقاط'} من لوحة الشرف مباشرة. هل أنت مستعد لتحدي ${mate.name}؟`, 'نعم، أرسل التحدي'))) return;
@@ -1917,7 +1924,7 @@ function viewStudent(app) {
       if ((await chSentToday()) >= CH_DAILY) { closeModal(); toast(`وصلت إلى ${ar(CH_DAILY)} تحديات اليوم. عُد غداً!`); if ($('#stBody', app) && tab === 'honor') draw(); return; }
       const cls = data.classes.find((c) => c.id === me.classId);
       const now = new Date();
-      const c = { pns: [me.id, mate.id], a: { pn: me.id, name: me.name }, b: { pn: mate.id, name: mate.name }, classId: me.classId, className: cls?.name || '', surah: rng.surah, from: rng.from, to: rng.to, label: '', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CH_HOURS * 3600e3).toISOString(), ra: null, rb: null, v: CH_V };
+      const c = { mode, pns: [me.id, mate.id], a: { pn: me.id, name: me.name }, b: { pn: mate.id, name: mate.name }, classId: me.classId, className: cls?.name || '', surah: rng.surah, from: rng.from, to: rng.to, label: '', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CH_HOURS * 3600e3).toISOString(), ra: null, rb: null, v: CH_V };
       c.label = chLabel(c);
       try {
         const id = await store.createChallenge(c);
@@ -1944,7 +1951,7 @@ function viewStudent(app) {
     // التحديات الجديدة: شاشة قبول قبل البدء، تنبّه أن التحدي لا يُلغى إلا بخسارة نقطة
     if (isStrict(c) && v.incoming && !c.acceptedAt) {
       body.innerHTML = `<div class="card stack ch-accept" style="gap:12px"><h2 style="margin:0">⚔️ ${esc(v.other.name)} يتحداك!</h2>
-        <p style="margin:0">المقطع: <b>${esc(chLabel(c))}</b> · تسميع غيباً، ومحاولة واحدة لكلٍّ منكما · ${esc(ar(timeLeft(c)))}.</p>
+        <p style="margin:0">المقطع: <b>${esc(chLabel(c))}</b> · ${modeTxt(c.mode)}، ومحاولة واحدة لكلٍّ منكما · ${esc(ar(timeLeft(c)))}.</p>
         <div class="notice">⚠️ <b>التحدي لا يُلغى بعد قبوله.</b> إن قبلته ثم أردت إلغاءه ستخسر ${CH_PTS.cancel === 1 ? 'نقطة واحدة' : ar(CH_PTS.cancel) + ' نقاط'} من لوحة الشرف مباشرة. أما الاعتذار الآن قبل القبول فلا خصم فيه.</div>
         <div class="row"><button class="btn gold" type="button" id="chAcc">أقبل التحدي</button><button class="btn ghost" type="button" id="chDec">أعتذر الآن (بلا خصم)</button></div></div>`;
       $('#chAcc', body).onclick = async (e) => {
@@ -1958,9 +1965,9 @@ function viewStudent(app) {
       };
       return;
     }
-    body.innerHTML = '<div class="notice" style="margin-bottom:12px">🎯 تسميع غيباً، بلا تلميح، ومحاولة واحدة فقط: النتيجة تُحتسب عند أول إيقاف. استعد جيداً ثم ابدأ.</div><div id="chRc"></div>';
+    body.innerHTML = `<div class="notice" style="margin-bottom:12px">🎯 ${c.mode === 'recite' ? '📖 تلاوة نظراً (النص أمامك)' : '🙈 تسميع غيباً'}، بلا تلميح، ومحاولة واحدة فقط: النتيجة تُحتسب عند أول إيقاف. استعد جيداً ثم ابدأ.</div><div id="chRc"></div>`;
     comp = mountRecite($('#chRc', body), {
-      surah: c.surah, from: c.from, to: c.to, mode: 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true, capCheck: true,
+      surah: c.surah, from: c.from, to: c.to, mode: c.mode === 'recite' ? 'recite' : 'hifz', lockMode: true, noHint: true, noAi: true, noListen: true, capCheck: true,
       onActivity: (sec) => logAct('practice', sec),
       // الجهاز لم يتعرف على الكلام: يُرسل التسجيل ليقيّمه المعلم
       onNoTranscript: (sub, blob, dur) => setTimeout(async () => {
@@ -5140,6 +5147,7 @@ function viewTeacher(app) {
         <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" type="button" data-pr="78-114">جزء عمّ</button><button class="btn sm" type="button" data-pr="67-77">جزء تبارك</button><button class="btn sm" type="button" data-pr="58-66">جزء قد سمع</button><button class="btn sm ghost" type="button" data-pr="none">مسح</button></div>
         <div id="hrPool" class="hr-pool">${getSurahs().map((x, i) => `<label class="chip-ck"><input type="checkbox" value="${i + 1}"${HERO_SURAHS.includes(i + 1) ? ' checked' : ''}> ${ar(i + 1)}. ${esc(x.name)} <small class="muted">(${ar(x.ayahs)})</small></label>`).join('')}</div></div>
       <div class="field">عدد الآيات <span class="small muted">(مقطع متتالٍ من موضع عشوائي، والسورة الأقصر من العدد تُعطى كاملة. التعادل يُعاد بمقطع جديد بالطول نفسه)</span><div id="hrRounds" class="stack" style="gap:6px"></div></div>
+      <label class="field">نوع المنافسة<select id="hrMode"><option value="hifz">🙈 تسميع غيباً</option><option value="recite">📖 تلاوة نظراً (النص ظاهر)</option></select></label>
       <div class="small muted" id="hrInfo"></div>
       <div class="row"><button class="btn primary" type="submit">ابدأ البطولة والقرعة</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
       const sel = () => $$('#hrF .field > .row input[type=checkbox]', m).filter((i) => i.checked).map((i) => i.value);
@@ -5169,7 +5177,7 @@ function viewTeacher(app) {
         const P = pool(); if (!P.length) return toast('اختر سورة واحدة على الأقل للبطولة.');
         const num = (k) => Math.max(1, Math.min(60, Math.round(+$(`input[data-n="${k}"]`, m)?.value || 0) || 1));
         btn.disabled = true;
-        const x = { name: $('#hrName', m).value.trim() || 'الأبطال', status: 'running', stage: 'class', classIds: ids, hours: +$('#hrH', m).value, pool: P, counts: $$('#hrRounds input[data-n^="r"]', m).map((i) => num(i.dataset.n)), semiN: num('semi'), thirdN: num('third'), finalN: num('final'), classChamps: {}, createdAt: new Date().toISOString() };
+        const x = { mode: $('#hrMode', m).value === 'recite' ? 'recite' : 'hifz', name: $('#hrName', m).value.trim() || 'الأبطال', status: 'running', stage: 'class', classIds: ids, hours: +$('#hrH', m).value, pool: P, counts: $$('#hrRounds input[data-n^="r"]', m).map((i) => num(i.dataset.n)), semiN: num('semi'), thirdN: num('third'), finalN: num('final'), classChamps: {}, createdAt: new Date().toISOString() };
         try {
           x.id = await store.saveTourney(x);
           const ms = firstRound(x, studs, new Date());
@@ -5782,12 +5790,14 @@ function viewTeacher(app) {
     setChPts(cfg.pts);
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3>
         <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
+      <label class="row small" style="gap:6px">نوع التحدي المسموح<select id="chModes"><option value="both" ${!cfg.modes || cfg.modes === 'both' ? 'selected' : ''}>الطالب يختار: غيباً أو نظراً</option><option value="hifz" ${cfg.modes === 'hifz' ? 'selected' : ''}>تسميع غيباً فقط</option><option value="recite" ${cfg.modes === 'recite' ? 'selected' : ''}>تلاوة نظراً فقط</option></select></label>
       <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}، ومنذ البداية ${ar(L.length)}. حد كل طالب ${ar(CH_DAILY)} تحديات يومياً.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="chLog">📋 سجل التحديات كاملاً</button><button class="btn sm" type="button" id="chPtsBtn">⚙️ نقاط التحدي: فوز ${ar(CH_PTS.win)} · مشاركة ${ar(CH_PTS.lose)} · تعادل ${ar(CH_PTS.tie)} · إلغاء −${ar(CH_PTS.cancel)}</button></div>
       ${month.length ? `<details><summary class="small">آخر تحديات هذا الشهر</summary><ul class="ch-list">${month.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 15).map((c) => `<li><div><b>${esc(c.a.name)} ⚔️ ${esc(c.b.name)}</b><span class="small muted">${esc(c.className || '')} · ${esc(c.label || '')}</span><span class="small ch-when">${chWhenTxt(c)}</span></div><span class="small">${esc(chResult(c))}${c.ra || c.rb ? ` · ${c.ra ? ar(c.ra.p) + '٪' : '—'} / ${c.rb ? ar(c.rb.p) + '٪' : '—'}` : ''}</span></li>`).join('')}</ul></details>` : ''}`;
     $('#chOn', host).onchange = async (e) => {
       try { cfg = { ...cfg, off: !e.target.checked }; await store.setChallengeCfg(cfg); toast(e.target.checked ? 'فُعّلت التحديات.' : 'أُوقفت التحديات مؤقتاً، ولا يستطيع الطلاب إنشاء تحدٍّ جديد.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); e.target.checked = !e.target.checked; }
     };
+    $('#chModes', host).onchange = async (e) => { const v = e.target.value; try { cfg = { ...cfg, modes: v }; await store.setChallengeCfg(cfg); toast(v === 'both' ? 'يختار الطالب نوع التحدي: غيباً أو نظراً.' : `التحديات الجديدة: ${v === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'} فقط.`); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); } };
     $('#chLog', host).onclick = () => openChLog();
     $('#chPtsBtn', host).onclick = () => openModal(`<form id="cpF" class="stack" style="gap:12px">
         <h2>⚙️ نقاط تحدّي الزملاء</h2>

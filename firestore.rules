@@ -145,6 +145,7 @@ service cloud.firestore {
         && request.resource.data.a.pn != request.resource.data.b.pn
         && get(/databases/$(database)/documents/roster/$(request.resource.data.b.pn)).data.classId == get(/databases/$(database)/documents/roster/$(request.resource.data.a.pn)).data.classId
         && request.resource.data.ra == null && request.resource.data.rb == null
+        && request.resource.data.get('mode', 'hifz') in ['hifz', 'recite']
         && chDayOk(request.resource.data.a.pn);
       allow update: if isTeacher()
         || (isStudent(resource.data.a.pn) && resource.data.get('ra', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ra']))

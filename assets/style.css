@@ -1814,3 +1814,7 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .gr-it.on { background: var(--ok-bg); }
 .gr-log { display: flex; flex-direction: column; gap: 4px; }
 .gr-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 6px 4px; border-top: 1px dashed var(--line); font-size: 14px; }
+/* نوع التحدي: غيباً أو نظراً */
+.ch-mode { display: flex; gap: 8px; flex-wrap: wrap; border: 0; background: none; margin-top: 4px; }
+.ch-mode label { flex: 1 1 140px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; font-weight: 600; }
+.ch-mode label:has(input:checked) { border-color: var(--green); background: var(--green-2); }
