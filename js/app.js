@@ -5561,12 +5561,20 @@ function viewTeacher(app) {
           <label class="field" style="flex:1 1 90px">السعر 🪙<input id="shP" type="number" min="0" max="5000" value="30"></label>
           <label class="field" style="flex:1 1 140px">طريقة الحصول<select id="shM"><option value="sell">يُباع في المتجر</option><option value="grant">يمنحه المعلم فقط</option></select></label>
         </div><button class="btn primary" type="button" id="shAdd">إضافة</button></details>
-      <details class="sp-box"><summary><b>🎖️ منح طالب عنصراً أو مكافآت</b></summary>
+      <details class="sp-box" id="grBox"><summary><b>🎖️ منح نقاط شرف أو عنصر لطالب أو مجموعة</b></summary>
+        <p class="small muted" style="margin:8px 0 0">النقاط تُضاف إلى رصيد الطالب في المتجر (🪙)، ويصله إشعار بها.</p>
         <div class="row" style="margin-top:10px">
-          <label class="field" style="flex:2 1 180px">الطالب<select id="grS">${D.students.slice().sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((x) => `<option value="${esc(x.id)}">${esc(x.name)} · ${esc(className(x.classId))}</option>`).join('')}</select></label>
-          <label class="field" style="flex:2 1 180px">العنصر<select id="grI"><option value="">— مكافآت فقط —</option>${all.filter((x) => !x.deleted).map((x) => `<option value="${esc(x.id)}">${esc(KINDS[x.kind].split(' ')[0])} ${esc(x.name)}</option>`).join('')}</select></label>
-          <label class="field" style="flex:1 1 100px">مكافآت 🪙<input id="grC" type="number" min="0" max="500" value="0"></label>
-        </div><button class="btn primary" type="button" id="grGo">امنح</button></details>
+          <label class="field" style="flex:1 1 150px">الصف<select id="grCls"><option value="all">كل الصفوف</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="field" style="flex:2 1 180px">بحث<input id="grQ" type="search" placeholder="اسم الطالب أو رقمه"></label>
+        </div>
+        <div class="gr-pick"><label class="gr-all"><input type="checkbox" id="grAll"> <b>تحديد الكل</b> <span class="small muted" id="grN"></span></label><div id="grList" class="gr-list"></div></div>
+        <div class="row" style="margin-top:10px">
+          <label class="field" style="flex:1 1 110px">نقاط شرف 🪙<input id="grC" type="number" min="0" max="500" value="10"></label>
+          <label class="field" style="flex:2 1 180px">عنصر من المتجر (اختياري)<select id="grI"><option value="">— بلا عنصر —</option>${all.filter((x) => !x.deleted).map((x) => `<option value="${esc(x.id)}">${esc(KINDS[x.kind].split(' ')[0])} ${esc(x.name)}</option>`).join('')}</select></label>
+          <label class="field" style="flex:3 1 220px">السبب (يظهر للطالب، اختياري)<input id="grWhy" maxlength="80" placeholder="مثلاً: لحسن الإنصات في الحلقة"></label>
+        </div>
+        <div class="row" style="gap:6px;flex-wrap:wrap" id="grQuick">${[5, 10, 20, 50].map((n) => `<button type="button" class="chip" data-grc="${n}">+${ar(n)} 🪙</button>`).join('')}</div>
+        <button class="btn primary" type="button" id="grGo" style="margin-top:10px">امنح</button></details>
       <div class="row"><button class="btn primary" type="button" id="shSave">حفظ تعديلات المتجر</button></div>`;
     const kk = host.querySelector('#shK'), kv = host.querySelector('#shV');
     const ph = { title: 'نص اللقب', badge: '🏅 رمز', icon: '🌟 رمز', color: '#0f8a5f' };
@@ -5610,18 +5618,41 @@ function viewTeacher(app) {
       try { D.shop = { items: collect() }; await store.setShop(D.shop); toast('حُفظ المتجر، ويظهر للطلاب الآن.'); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); }
       e.target.disabled = false;
     };
+    // اختيار الطلاب: صف، وبحث، وتحديد الكل
+    const grSel = new Set();
+    const grPool = () => { const c = host.querySelector('#grCls').value, q = host.querySelector('#grQ').value.trim();
+      return D.students.filter((x) => (c === 'all' || x.classId === c) && (!q || x.name.includes(q) || String(x.id).includes(q))).sort((a, b) => a.name.localeCompare(b.name, 'ar')); };
+    const grPaint = () => {
+      const L = grPool(), box = host.querySelector('#grList');
+      box.innerHTML = L.length ? L.map((x) => `<label class="gr-it${grSel.has(x.id) ? ' on' : ''}"><input type="checkbox" value="${esc(x.id)}" ${grSel.has(x.id) ? 'checked' : ''}> ${esc(x.name)}${host.querySelector('#grCls').value === 'all' ? ` <small class="muted">${esc(className(x.classId))}</small>` : ''}</label>`).join('') : '<span class="muted small">لا يوجد طلاب.</span>';
+      $$('input', box).forEach((i) => (i.onchange = () => { i.checked ? grSel.add(i.value) : grSel.delete(i.value); i.parentElement.classList.toggle('on', i.checked); grCount(); }));
+      grCount();
+    };
+    const grCount = () => { const L = grPool(); host.querySelector('#grAll').checked = L.length > 0 && L.every((x) => grSel.has(x.id)); host.querySelector('#grN').textContent = grSel.size ? `(المحدَّدون: ${ar(grSel.size)})` : ''; host.querySelector('#grGo').textContent = grSel.size > 1 ? `امنح ${ar(grSel.size)} طلاب` : 'امنح'; };
+    host.querySelector('#grAll').onchange = (e) => { grPool().forEach((x) => (e.target.checked ? grSel.add(x.id) : grSel.delete(x.id))); grPaint(); };
+    host.querySelector('#grCls').onchange = grPaint; host.querySelector('#grQ').oninput = grPaint;
+    $$('[data-grc]', host).forEach((b) => (b.onclick = () => (host.querySelector('#grC').value = b.dataset.grc)));
+    grPaint();
     host.querySelector('#grGo').onclick = async (e) => {
-      const pn = host.querySelector('#grS').value, id = host.querySelector('#grI').value, c = Math.max(0, Math.min(500, +host.querySelector('#grC').value || 0));
-      if (!pn || (!id && !c)) return toast('اختر عنصراً أو اكتب عدد المكافآت.');
+      const pns = [...grSel], id = host.querySelector('#grI').value, c = Math.max(0, Math.min(500, Math.floor(+host.querySelector('#grC').value || 0))), why = host.querySelector('#grWhy').value.trim();
+      if (!pns.length) return toast('اختر طالباً واحداً على الأقل.');
+      if (!id && !c) return toast('اكتب عدد النقاط أو اختر عنصراً.');
+      const it = all.find((x) => x.id === id), what = `${c ? `${ar(c)} 🪙 نقطة شرف` : ''}${it && c ? ' و' : ''}${it ? `«${it.name}»` : ''}`;
+      if (pns.length > 1 && !(await confirmBox(`منح ${what} لكل واحد من ${ar(pns.length)} طلاب؟`, 'امنح'))) return;
       e.target.disabled = true;
-      try {
-        if (id) await store.grantItem(pn, id);
-        if (c) await store.grantCoins(pn, c);
-        const it = all.find((x) => x.id === id), st = D.students.find((x) => x.id === pn);
-        const nid = await store.addStudentNotif(pn, { type: 'reward', title: '🎁 هدية من معلمك', body: `${it ? `«${it.name}»` : ''}${it && c ? ' و' : ''}${c ? `${ar(c)} 🪙 مكافأة` : ''}. افتح «خزانتي».`, link: './#/student', tag: 'rw-' + Date.now() }).catch(() => null);
-        if (nid) sendPush(nid, pn).catch(() => {});
-        toast(`مُنح ${st?.name || 'الطالب'} ${it ? `«${it.name}»` : ''}${it && c ? ' و' : ''}${c ? ar(c) + ' 🪙' : ''}.`);
-      } catch (x) { toast('تعذر المنح: ' + (x.code || x.message)); }
+      const batch = [], failed = [];
+      for (const pn of pns) {
+        try {
+          if (id) await store.grantItem(pn, id);
+          if (c) await store.grantCoins(pn, c);
+          const nid = await store.addStudentNotif(pn, { type: 'reward', title: '🎁 هدية من معلمك', body: `${what}${why ? ` ${why}` : ''}. افتح «خزانتي».`, link: './#/student', tag: 'reward-' + pn });
+          if (nid) batch.push({ notif: nid, student: pn });
+        } catch (x) { failed.push(D.students.find((s) => s.id === pn)?.name || pn); }
+      }
+      if (batch.length) (batch.length === 1 ? sendPush(batch[0].notif, batch[0].student) : sendPushBatch(batch)).catch(() => {});
+      const ok = pns.length - failed.length, one = D.students.find((x) => x.id === pns[0]);
+      toast(failed.length ? `مُنح ${ar(ok)}، وتعذر منح: ${failed.join('، ')}` : ok === 1 ? `مُنح ${one?.name || 'الطالب'} ${what}.` : `مُنح ${ar(ok)} طلاب ${what} لكل واحد.`);
+      if (!failed.length) { grSel.clear(); grPaint(); host.querySelector('#grWhy').value = ''; }
       e.target.disabled = false;
     };
   }

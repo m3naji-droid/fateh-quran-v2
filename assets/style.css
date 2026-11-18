@@ -1805,3 +1805,10 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .lv-a.pop { animation: lvPop .6s ease; }
 @keyframes lvPop { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .lv-a.pop { animation: none; } }
+
+/* منح نقاط الشرف لمجموعة */
+.gr-pick { margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.gr-all { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--green-2); cursor: pointer; }
+.gr-list { max-height: 240px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px; padding: 8px; }
+.gr-it { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.gr-it.on { background: var(--ok-bg); }
