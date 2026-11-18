@@ -295,7 +295,8 @@ service cloud.firestore {
       }
       match /feedback/{fid} {
         allow read: if isTeacher() || isStudent(pn);
-        allow create: if isStudent(pn)
+        // المعلم يبدأ محادثة مع طالب، والطالب يكتب ملاحظة جديدة
+        allow create: if (isTeacher() && request.resource.data.pn == pn) || isStudent(pn)
           && request.resource.data.keys().hasOnly(['pn', 'name', 'classId', 'className', 'kind', 'text', 'createdAt'])
           && request.resource.data.pn == pn
           && request.resource.data.kind in ['comment', 'complaint', 'suggest', 'note']

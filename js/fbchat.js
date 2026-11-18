@@ -54,7 +54,7 @@ export function mountChat(host, { store, side, pn, fid, title = '', sub = '', to
 
   const msgList = () => {
     if (!T) return [];
-    const L = [{ id: '_0', from: 's', text: T.text, at: T.createdAt }];
+    const L = [{ id: '_0', from: T.byT ? 't' : 's', text: T.text, at: T.createdAt }];
     if (T.reply && !MS.some((m) => m.legacy)) L.push({ id: '_1', from: 't', text: T.reply, at: T.repliedAt || T.createdAt });
     return [...L, ...MS].sort((a, b) => (a.at || '').localeCompare(b.at || ''));
   };
@@ -199,4 +199,4 @@ export function mountChat(host, { store, side, pn, fid, title = '', sub = '', to
   }
   return stop;
 }
-const KIND = { comment: '💬 تعليق', complaint: '⚠️ شكوى', suggest: '💡 اقتراح', note: '📝 ملاحظة' };
+const KIND = { comment: '💬 تعليق', complaint: '⚠️ شكوى', suggest: '💡 اقتراح', note: '📝 ملاحظة', teacher: '✉️ رسالة من المعلم' };

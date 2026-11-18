@@ -128,7 +128,9 @@ const remember = {
 };
 // رأيك يهمنا: أنواع الملاحظات
 const FB_KINDS = { comment: ['💬', 'تعليق'], complaint: ['⚠️', 'شكوى'], suggest: ['💡', 'اقتراح'], note: ['📝', 'ملاحظة'] };
-const fbKindChip = (k) => `<span class="fb-kind fb-${k}">${FB_KINDS[k]?.[0] || '💬'} ${FB_KINDS[k]?.[1] || 'ملاحظة'}</span>`;
+/** نوع المحادثة، ومنها ما يبدؤه المعلم */
+const FBK = (k) => FB_KINDS[k] || (k === 'teacher' ? ['✉️', 'رسالة من المعلم'] : ['💬', 'ملاحظة']);
+const fbKindChip = (k) => `<span class="fb-kind fb-${k}">${FBK(k)[0]} ${FBK(k)[1]}</span>`;
 const rememberBox = (id, on) => `<label class="row small remember" style="gap:8px;cursor:pointer"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> تذكّر كلمة السر على هذا الجهاز</label>`;
 const timeAgo = (iso) => {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -2062,7 +2064,7 @@ function viewStudent(app) {
     const openChat = (x) => {
       const m = $('#modalBody'); m.innerHTML = '<div class="fb-chat-wrap"></div>';
       mountChat($('.fb-chat-wrap', m), {
-        store, side: 's', pn: me.id, fid: x.id, title: 'معلمك', sub: `${FB_KINDS[x.kind]?.[1] || 'ملاحظة'}، بدأت ${timeAgo(x.createdAt)}`, toast,
+        store, side: 's', pn: me.id, fid: x.id, title: 'معلمك', sub: `${FBK(x.kind)[1]}، بدأت ${timeAgo(x.createdAt)}`, toast,
         onBack: () => paintList(),
         onState: (t) => { const i = myFb.findIndex((f) => f.id === t.id); if (i >= 0) myFb[i] = { ...myFb[i], ...t }; paintFbCta(); },
         onSent: (msg) => notifyFbMsg(me.id, x.id, msg.id).catch(() => {}),
@@ -2071,8 +2073,8 @@ function viewStudent(app) {
     const paintList = () => {
       const mine = [...myFb].sort((a, b) => fbLast(b).localeCompare(fbLast(a)));
       const row = (x) => { const u = fbUnreadS(x), cl = fbClosed(x); return `<li><button type="button" class="fb-th${u ? ' unread' : ''}" data-th="${esc(x.id)}">
-        <span class="fb-th-ico">${FB_KINDS[x.kind]?.[0] || '💬'}</span>
-        <span class="fb-th-m"><span class="row" style="justify-content:space-between;gap:6px"><b>${esc(FB_KINDS[x.kind]?.[1] || 'ملاحظة')}${cl ? ' <small class="muted">🔒 مغلقة</small>' : ''}</b><small class="muted">${esc(timeAgo(fbLast(x)))}</small></span>
+        <span class="fb-th-ico">${FBK(x.kind)[0]}</span>
+        <span class="fb-th-m"><span class="row" style="justify-content:space-between;gap:6px"><b>${esc(FBK(x.kind)[1])}${cl ? ' <small class="muted">🔒 مغلقة</small>' : ''}</b><small class="muted">${esc(timeAgo(fbLast(x)))}</small></span>
         <span class="fb-th-p">${esc(fbPreview(x))}</span></span>${u ? '<span class="fb-th-n" aria-label="جديد"></span>' : ''}</button></li>`; };
       openModal(`<div class="stack fb-modal">
         <h2>💬 رأيك يهمنا</h2>
@@ -3289,7 +3291,7 @@ function viewTeacher(app) {
       return `<button type="button" class="ib-row${u ? ' unread' : ''}${k === fbSel ? ' sel' : ''}" data-fb="${esc(k)}">
         <span class="ib-av" style="--h:${hue(x.pn)}">${esc((x.name || 'ط').trim()[0])}</span>
         <span class="ib-m"><span class="ib-top"><b>${esc(x.name || 'طالب')}</b><small class="muted">${esc(timeAgo(fbLast(x)))}</small></span>
-          <span class="ib-sub">${FB_KINDS[x.kind]?.[0] || '💬'} <span class="muted">${esc(x.className || '')}</span>${cl ? ' <span class="muted">🔒</span>' : wait && !u ? ' <span class="ib-wait">بانتظار ردك</span>' : ''}</span>
+          <span class="ib-sub">${FBK(x.kind)[0]} <span class="muted">${esc(x.className || '')}</span>${cl ? ' <span class="muted">🔒</span>' : wait && !u ? ' <span class="ib-wait">بانتظار ردك</span>' : ''}</span>
           <span class="ib-p">${x.lastFrom === 't' ? '<span class="tk' + ((x.sSeenAt || '') >= (x.lastAt || '') ? ' read' : '') + '">✓✓</span> ' : ''}${esc(fbPreview(x).replace(/^المعلم: /, ''))}</span></span>
         ${u ? '<span class="ib-dot" aria-label="جديد"></span>' : ''}</button>`; }).join('')
       : `<div class="empty">${FB.length ? 'لا توجد محادثات بهذه الاختيارات.' : 'لم تصل ملاحظات بعد. يجد الطلاب زر «رأيك يهمنا» أسفل صفحتهم.'}</div>`;
@@ -3302,7 +3304,7 @@ function viewTeacher(app) {
     if (!matchMedia('(min-width: 860px)').matches) setTimeout(() => $('.fb-inbox')?.scrollIntoView({ block: 'start' }), 50);
     $$('#fbInbox [data-fb]').forEach((b) => b.classList.toggle('sel', b.dataset.fb === k));
     mountChat(pane, {
-      store, side: 't', pn, fid: id, title: x.name || 'طالب', sub: `${x.className || ''}، ${FB_KINDS[x.kind]?.[1] || 'ملاحظة'}`, toast,
+      store, side: 't', pn, fid: id, title: x.name || 'طالب', sub: `${x.className || ''}، ${FBK(x.kind)[1]}`, toast,
       quick: QR, saveQuick: async (L) => { await store.saveQuickReplies(L); QR = L; },
       onBack: () => { fbSel = null; $('.fb-inbox')?.classList.remove('chatting'); pane.innerHTML = '<div class="empty ib-empty">اختر محادثة من القائمة</div>'; paintFbList(); },
       onState: (t) => { Object.assign(x, t); paintFbTab(); paintFbList(); },
@@ -3318,6 +3320,34 @@ function viewTeacher(app) {
     };
     $('.chat-h', pane)?.append(del);
   }
+  /** المعلم يبدأ محادثة: يختار الصف ثم الطالب ثم يكتب رسالته */
+  function newFbToStudent(fbBody) {
+    const last = pref.get('fbNewCls', D.classes[0]?.id || '');
+    openModal(`<form id="nfF" class="stack" style="gap:12px"><h2>✉️ رسالة لطالب</h2>
+      <p class="small muted" style="margin:0">تصل الطالب إشعاراً، وتظهر له في «رأيك يهمنا»، ويستطيع الرد عليك في المحادثة نفسها.</p>
+      <label class="field">الصف<select id="nfC">${D.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === last ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      <label class="field">الطالب<select id="nfS" required></select></label>
+      <label class="field">رسالتك<textarea id="nfT" rows="4" maxlength="1000" required placeholder="مثلاً: أحسنت في تسميع اليوم، وأريدك أن تراجع…"></textarea></label>
+      <div class="modal-actions row"><button class="btn primary" type="submit">أرسل</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      const fill = () => { const c = $('#nfC', m).value; pref.set('fbNewCls', c); $('#nfS', m).innerHTML = '<option value="">اختر الطالب</option>' + D.students.filter((x) => x.classId === c).sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(''); };
+      $('#nfC', m).onchange = fill; fill();
+      $('#nfF', m).onsubmit = async (e) => {
+        e.preventDefault();
+        const st = D.students.find((x) => x.id === $('#nfS', m).value), text = $('#nfT', m).value.trim();
+        if (!st) return toast('اختر الطالب.');
+        if (!text) return toast('اكتب رسالتك.');
+        const btn = e.submitter; btn.disabled = true;
+        const at = new Date().toISOString(), f = { name: st.name, classId: st.classId || '', className: className(st.classId), kind: 'teacher', text, byT: true, seen: true, tSeenAt: at, lastAt: at, lastFrom: 't', lastText: text.slice(0, 120) };
+        try {
+          const id = await store.startFeedback(st.id, f, at);
+          FB = fbSort([{ ...f, id, pn: st.id, createdAt: at }, ...(FB || []).filter((x) => !(x.id === id && x.pn === st.id))]);
+          try { const nid = await store.addStudentNotif(st.id, { type: 'fbReply', fid: id, title: '✉️ رسالة من معلمك', body: text.length > 120 ? text.slice(0, 120) + '…' : text, link: `./#/student/fb/${id}`, tag: 'fb-' + id }); await sendPush(nid, st.id); } catch (x) { console.warn(x); }
+          closeModal(); toast(`أُرسلت الرسالة إلى ${st.name}.`);
+          fbView = 'fb'; fbSel = `${st.id}|${id}`; fbSelInit = fbSel; drawFb(fbBody);
+        } catch (x) { toast('تعذر الإرسال: ' + (x.code || x.message)); btn.disabled = false; }
+      };
+    });
+  }
   function drawFb(body) {
     if (!FB) { body.innerHTML = '<div class="loading">جارٍ تحميل الملاحظات…</div>'; return; }
     const spNew = (SP || []).filter((x) => (x.status || 'new') === 'new').length, fbNew = FB.filter(fbUnreadT).length;
@@ -3331,18 +3361,19 @@ function viewTeacher(app) {
     }
     const opt = (v, l, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`;
     const count = (k) => FB.filter((x) => x.kind === k).length, waitN = FB.filter((x) => !fbClosed(x) && (x.lastFrom ? x.lastFrom === 's' : !x.reply)).length;
-    body.innerHTML = sw + `<div class="fb-wrap"><div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">كل ملاحظة محادثة: تردّ ويكمل الطالب على ردّك. يصلك تنبيه بكل رسالة جديدة، وتُغلق المحادثة تلقائياً بعد ${ar(7)} أيام بلا رسائل.</p></div><span class="ib-sum">${waitN ? `⏳ ${ar(waitN)} بانتظار ردك` : '✓ لا شيء بانتظارك'}</span></div>
+    body.innerHTML = sw + `<div class="fb-wrap"><div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h2 style="margin:0">💬 رأيك يهمنا</h2><p class="small muted" style="margin:4px 0 0">كل ملاحظة محادثة: تردّ ويكمل الطالب على ردّك. يصلك تنبيه بكل رسالة جديدة، وتُغلق المحادثة تلقائياً بعد ${ar(7)} أيام بلا رسائل.</p></div><div class="row" style="gap:8px"><span class="ib-sum">${waitN ? `⏳ ${ar(waitN)} بانتظار ردك` : '✓ لا شيء بانتظارك'}</span><button type="button" class="btn primary sm" id="fbNew">✉️ رسالة لطالب</button></div></div>
       <div class="fb-stats">${Object.entries(FB_KINDS).map(([k, [i, l]]) => `<button type="button" class="kpi kpi-btn${fbF.kind === k ? ' on' : ''}" data-fk="${k}"><b>${i} ${ar(count(k))}</b><span>${l}</span></button>`).join('')}</div>
       <div class="row" style="margin:12px 0">
         <input type="search" id="fbQ" placeholder="بحث باسم الطالب" value="${esc(fbF.q)}" style="flex:2 1 160px">
         <select id="fbS" style="flex:1 1 120px">${opt('all', 'كل المحادثات', fbF.status)}${opt('new', 'غير مقروءة', fbF.status)}${opt('wait', 'بانتظار ردك', fbF.status)}${opt('open', 'مفتوحة', fbF.status)}${opt('closed', 'مغلقة', fbF.status)}</select>
-        <select id="fbK" style="flex:1 1 120px">${opt('all', 'كل الأنواع', fbF.kind)}${Object.entries(FB_KINDS).map(([k, [i, l]]) => opt(k, `${i} ${l}`, fbF.kind)).join('')}</select>
+        <select id="fbK" style="flex:1 1 120px">${opt('all', 'كل الأنواع', fbF.kind)}${Object.entries(FB_KINDS).map(([k, [i, l]]) => opt(k, `${i} ${l}`, fbF.kind)).join('')}${opt('teacher', '✉️ من المعلم', fbF.kind)}</select>
         <select id="fbC" style="flex:1 1 120px">${opt('all', 'كل الصفوف', fbF.cls)}${D.classes.map((c) => opt(c.id, c.name, fbF.cls)).join('')}</select>
       </div>
       <div class="fb-inbox"><div class="ib-list" id="fbInbox"></div><div class="ib-chat" id="fbChat"><div class="empty ib-empty">اختر محادثة من القائمة</div></div></div></div>`;
     wireSw();
     $$('[data-fk]', body).forEach((b) => (b.onclick = () => { fbF.kind = fbF.kind === b.dataset.fk ? 'all' : b.dataset.fk; drawFb(body); }));
     $('#fbK', body).onchange = (e) => { fbF.kind = e.target.value; drawFb(body); };
+    $('#fbNew', body).onclick = () => newFbToStudent(body);
     $('#fbS', body).onchange = (e) => { fbF.status = e.target.value; paintFbList(); };
     $('#fbC', body).onchange = (e) => { fbF.cls = e.target.value; paintFbList(); };
     $('#fbQ', body).oninput = (e) => { fbF.q = e.target.value.trim(); paintFbList(); };
