@@ -47,6 +47,8 @@ export function earnHimma(pn, day, sub, srOK) {
   return { pts, ayat, mins };
 }
 
+/** نسخة من حالة اليوم للعرض الحي أثناء التدريب (دون حفظ) */
+export function himmaPeek(pn, day) { const st = dayState(pn, day); return { pts: st.pts || 0, k: { ...(st.k || {}) } }; }
 /** ما جمعه الطالب اليوم على هذا الجهاز: { pts, mins } */
 export function himmaToday(pn, day) { const st = dayState(pn, day); return { pts: st.pts || 0, mins: st.mins || 0 }; }
 /** نقاط الهمة في لوحة الشرف: نقطة لكل HM.ratio من نقاط الهمة، مؤرّخة بيومها */

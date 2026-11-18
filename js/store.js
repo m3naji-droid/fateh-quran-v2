@@ -131,6 +131,7 @@ const local = {
     return id;
   },
   async studentSubmissions(pn) { return LS.get('subs', []).filter((s) => s.pn === pn); },
+  watchMySubs(pn, cb) { let last = ''; const f = () => { const L = LS.get('subs', []).filter((s) => s.pn === pn), v = JSON.stringify(L.map((x) => [x.id, x.teacher?.total, x.teacher?.at])); if (v !== last) { last = v; cb(L); } }; f(); const id = setInterval(f, 2000); return () => clearInterval(id); },
   async allSubmissions() { return LS.get('subs', []); },
   watchSubmissions(cb) { cb(LS.get('subs', [])); const h = (e) => { if (e.key === 'fp_subs') cb(LS.get('subs', [])); }; addEventListener('storage', h); return () => removeEventListener('storage', h); },
   async getAudio(pn, id) { return idbGet(id); },
@@ -172,6 +173,7 @@ const local = {
   async deleteKhatma(id) { LS.set('khatmas', LS.get('khatmas', []).filter((x) => x.id !== id)); },
   async addKhatmaDone(id, entries, completedAt = null) { const all = LS.get('khatmas', []); const k = all.find((x) => x.id === id); if (!k) return; k.done = { ...(k.done || {}) }; Object.entries(entries).forEach(([key, v]) => { if (!k.done[key]) k.done[key] = v; }); if (completedAt) k.completedAt = completedAt; LS.set('khatmas', all); },
   // التحديات الودّية
+  async chToday() { return null; },
   async createChallenge(c) { const all = LS.get('challenges', []); const id = uid(); all.push({ ...c, id }); LS.set('challenges', all); return id; },
   async listMyChallenges(pn) { return LS.get('challenges', []).filter((c) => c.pns.includes(pn)); },
   async listAllChallenges() { return LS.get('challenges', []); },
@@ -578,7 +580,16 @@ async function makeCloud() {
       if (completedAt) patch.completedAt = completedAt;
       await updateDoc(doc(db, 'khatmas', id), patch);
     },
-    async createChallenge(c) { const id = uid(); await setDoc(doc(db, 'challenges', id), c); return id; },
+    async createChallenge(c) {
+      const id = uid(), day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date()).replace(/-/g, '');
+      const cref = doc(db, 'roster', c.a.pn, 'chday', day), cur = await getDoc(cref);
+      const n = (cur.exists() ? cur.data().n || 0 : 0) + 1;
+      if (n > 3) { const e = new Error('وصلت إلى ٣ تحديات اليوم. عُد غداً!'); e.code = 'daily-limit'; throw e; }
+      const b = writeBatch(db); b.set(cref, { n }); b.set(doc(db, 'challenges', id), c);
+      try { await b.commit(); } catch (e) { if (e.code === 'permission-denied') { const x = new Error('لم يُقبل التحدي: إما أنك وصلت إلى ٣ تحديات اليوم، أو أن تاريخ جهازك ووقته غير صحيحين.'); x.code = 'daily-limit'; throw x; } throw e; }
+      return id;
+    },
+    async chToday(pn) { const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date()).replace(/-/g, ''); const d = await getDoc(doc(db, 'roster', pn, 'chday', day)).catch(() => null); return d?.exists() ? d.data().n || 0 : null; },
     async listMyChallenges(pn) { await ensureAnon(); return (await getDocs(query(collection(db, 'challenges'), where('pns', 'array-contains', pn), limit(200)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     async listAllChallenges() { return (await getDocs(query(collection(db, 'challenges'), limit(5000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     watchAllChallenges(cb) { return onSnapshot(query(collection(db, 'challenges'), limit(5000)), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.warn('challenges watch', e)); },
@@ -644,6 +655,7 @@ async function makeCloud() {
     async updateSpeechIssue(pn, id, patch) { await updateDoc(doc(db, 'roster', pn, 'speechIssues', id), patch); },
     async deleteSpeechIssue(pn, id) { await deleteDoc(doc(db, 'roster', pn, 'speechIssues', id)); },
     async studentSubmissions(pn) { await ensureAnon(); return list(`roster/${pn}/subs`); },
+    watchMySubs(pn, cb) { let off = () => {}, dead = false; ensureAnon().then(() => { if (!dead) off = onSnapshot(collection(db, 'roster', pn, 'subs'), (q) => cb(q.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.warn('my subs', e)); }); return () => { dead = true; off(); }; },
     async allSubmissions() { return (await getDocs(query(collectionGroup(db, 'subs'), limit(10000)))).docs.map((d) => ({ id: d.id, ...d.data() })); },
     watchSubmissions(cb, onErr) {
       return onSnapshot(query(collectionGroup(db, 'subs'), limit(10000)), (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr);

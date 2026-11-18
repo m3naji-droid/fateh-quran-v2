@@ -6,6 +6,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    // يوم الرياض الحالي بصيغة 20261118 (لحد التحديات اليومي)
+    function rdKey() { let t = request.time + duration.value(3, 'h'); return string(t.year() * 10000 + t.month() * 100 + t.day()); }
+    // حد ٣ تحديات يومياً: إنشاء التحدي يجب أن يرفع عدّاد اليوم بواحد في الدفعة نفسها، ولا يتجاوز ٣
+    function chDayOk(pn) {
+      let p = /databases/$(database)/documents/roster/$(pn)/chday/$(rdKey());
+      return existsAfter(p) && getAfter(p).data.n <= 3
+        && ((!exists(p) && getAfter(p).data.n == 1) || (exists(p) && getAfter(p).data.n == get(p).data.n + 1));
+    }
     function isTeacher() {
       return signedIn() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
     }
@@ -132,7 +140,8 @@ service cloud.firestore {
         && request.resource.data.pns == [request.resource.data.a.pn, request.resource.data.b.pn]
         && request.resource.data.a.pn != request.resource.data.b.pn
         && get(/databases/$(database)/documents/roster/$(request.resource.data.b.pn)).data.classId == get(/databases/$(database)/documents/roster/$(request.resource.data.a.pn)).data.classId
-        && request.resource.data.ra == null && request.resource.data.rb == null;
+        && request.resource.data.ra == null && request.resource.data.rb == null
+        && chDayOk(request.resource.data.a.pn);
       allow update: if isTeacher()
         || (isStudent(resource.data.a.pn) && resource.data.get('ra', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ra']))
         || (isStudent(resource.data.b.pn) && resource.data.get('rb', null) == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rb', 'declined', 'acceptedAt']))
@@ -271,6 +280,14 @@ service cloud.firestore {
         allow write: if isTeacher() || isStudent(pn);
       }
       // رأيك يهمنا: الطالب يرسل ملاحظته باسمه ويقرأ ملاحظاته ورد المعلم. المعلم يقرأ ويرد ويحذف
+      // عدّاد التحديات اليومي للطالب (يوم الرياض)
+      match /chday/{d} {
+        allow read: if isTeacher() || isStudent(pn);
+        allow create: if isStudent(pn) && d == rdKey() && request.resource.data.keys().hasOnly(['n']) && request.resource.data.n == 1;
+        allow update: if isStudent(pn) && d == rdKey() && request.resource.data.keys().hasOnly(['n'])
+          && request.resource.data.n == resource.data.n + 1 && request.resource.data.n <= 3;
+        allow delete: if isTeacher();
+      }
       match /feedback/{fid} {
         allow read: if isTeacher() || isStudent(pn);
         allow create: if isStudent(pn)

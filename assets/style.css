@@ -1790,3 +1790,18 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .mr ol { list-style: arabic-indic; }
 .rp-mx th, .rp-mx td { background: none; border: 0; } .rp-mx .rp-nm { background: var(--card); }
 @media (max-width: 700px) { .rp-svg { font-size: calc(var(--fs, 12px) * 1.6); } .rp-seg { display: flex; width: 100%; } .rp-seg button { flex: 1 1 auto; } }
+
+/* النتيجة الحية في التدريب الحر */
+.live-sc { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; text-align: start; }
+.lv-top { display: flex; align-items: center; gap: 12px; }
+.lv-acc { flex: none; width: 78px; height: 78px; border-radius: 50%; display: grid; place-content: center; text-align: center; border: 5px solid var(--c); transition: border-color .3s; }
+.lv-acc b { font-size: 22px; line-height: 1.1; color: var(--c); }
+.lv-acc span { font-size: 10.5px; color: var(--muted); }
+.lv-n { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.lv-as { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.lv-a { font-size: 12.5px; border-radius: 99px; padding: 2px 9px; border: 1px solid var(--line); }
+.lv-a.ok { background: var(--ok-bg); border-color: transparent; }
+.lv-a.bad { background: var(--bad-bg, #fbe4e1); border-color: transparent; }
+.lv-a.pop { animation: lvPop .6s ease; }
+@keyframes lvPop { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lv-a.pop { animation: none; } }

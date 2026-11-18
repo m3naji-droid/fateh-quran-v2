@@ -7,7 +7,7 @@ import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
-import { earnHimma, himmaToday, himmaBonus, computeLists, mountLists, HM } from './lists.js';
+import { earnHimma, himmaPeek, himmaToday, himmaBonus, computeLists, mountLists, HM } from './lists.js';
 import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { mountIqraStudent, mountIqraTeacher, iqraCfg, iqraBonus, IQ_DEFAULT } from './iqra.js';
@@ -319,6 +319,7 @@ function mountRecite(root, opts) {
         <div class="progress"><i id="rcProg"></i></div>
         <div class="small muted" id="rcStatus">اضغط الزر وابدأ القراءة، وسيتابعك الموقع كلمة بكلمة.</div>
         <div class="live-text" id="rcLive"></div>
+        ${opts.practice ? '<div class="live-sc" id="rcLiveSc" hidden></div>' : ''}
       </div>
       <div id="rcResult"></div>
       <div class="card stack" style="gap:10px" ${opts.noListen ? 'hidden' : ''}>
@@ -424,6 +425,32 @@ function mountRecite(root, opts) {
   }
   const showSheet = () => { const sh = $('.sheet', root); const r = sh?.getBoundingClientRect(); if (r && (r.top < 56 || r.top > innerHeight * 0.4)) sh.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 
+  /* النتيجة الحية في التدريب الحر: دقة الكلمات، وكل آية تكتمل تظهر نتيجتها ونقطتها فوراً */
+  const ayahIdx = {}; words.forEach((w, i) => { (ayahIdx[w.ayah] = ayahIdx[w.ayah] || []).push(i); });
+  const LV = { seen: new Map(), pts: 0, hm: null };
+  const liveReset = () => { LV.seen = new Map(); LV.pts = 0; LV.hm = opts.hmPeek ? opts.hmPeek() : null; const b = $('#rcLiveSc', root); if (b) { b.hidden = true; b.innerHTML = ''; } };
+  function paintLiveScore(res) {
+    const box = $('#rcLiveSc', root); if (!box) return;
+    let ok = 0, bad = 0;
+    for (let i = 0; i < res.position && i < words.length; i++) { const st = res.status[i]; if (st === 'correct') ok++; else if (st === 'wrong' || st === 'missing') bad++; }
+    const done = ok + bad; if (!done) return;
+    // الآيات التي تجاوزها الطالب: نتيجتها ثابتة
+    Object.entries(ayahIdx).forEach(([a, ix]) => {
+      if (LV.seen.has(+a) || res.position <= ix[ix.length - 1]) return;
+      const c = ix.filter((i) => res.status[i] === 'correct').length, p = Math.round((c / ix.length) * 100);
+      let pt = 0;
+      if (p >= HM.okP && LV.hm) { const k = surah + ':' + a; if ((LV.hm.k[k] || 0) < HM.perAyah && LV.hm.pts + LV.pts < HM.dayCap) { pt = 1; LV.pts++; LV.hm.k[k] = (LV.hm.k[k] || 0) + 1; } }
+      LV.seen.set(+a, { p, pt, fresh: true });
+    });
+    const acc = Math.round((ok / done) * 100), col = acc >= 85 ? 'var(--ok)' : acc >= 60 ? 'var(--warn)' : 'var(--bad)';
+    const chips = [...LV.seen.entries()].slice(-6).map(([a, v]) => `<span class="lv-a ${v.p >= HM.okP ? 'ok' : 'bad'}${v.fresh ? ' pop' : ''}">آية ${ar(a)}: ${ar(v.p)}٪${v.pt ? ' <b>+١🌟</b>' : v.p >= HM.okP ? '' : ' ↻'}</span>`).join('');
+    LV.seen.forEach((v) => (v.fresh = false));
+    const okA = [...LV.seen.values()].filter((v) => v.p >= HM.okP).length;
+    box.hidden = false;
+    box.innerHTML = `<div class="lv-top"><div class="lv-acc" style="--c:${col}"><b>${ar(acc)}٪</b><span>دقتك الآن</span></div>
+      <div class="lv-n"><span>✅ <b>${ar(ok)}</b> صحيحة</span><span>❌ <b>${ar(bad)}</b> ${bad === 1 ? 'خطأ' : 'أخطاء'}</span><span>📖 <b>${ar(okA)}</b> من ${ar(LV.seen.size)} ${LV.seen.size === 1 ? 'آية' : 'آيات'} متقنة</span>${LV.hm ? `<span>🌟 <b>+${ar(LV.pts)}</b> همّة حتى الآن</span>` : ''}</div></div>
+      ${chips ? `<div class="lv-as">${chips}</div>` : ''}`;
+  }
   // التلوين حسب النتيجة
   function paint(res, live) {
     text.classList.toggle('live', !!live);
@@ -434,6 +461,7 @@ function mountRecite(root, opts) {
     });
     if (live && wEls[res.position]) { wEls[res.position].classList.add('cursor'); follow(wEls[res.position]); }
     if (live && opts.onLive) opts.onLive(res);
+    if (live && opts.practice) paintLiveScore(res);
     $('#rcProg', root).style.width = (res.total ? (res.done / res.total) * 100 : 0) + '%';
   }
 
@@ -444,6 +472,7 @@ function mountRecite(root, opts) {
   // إذن الميكروفون مرفوض سابقاً: ننبّه بالحل قبل أن يضغط الطالب
   try { navigator.permissions?.query({ name: 'microphone' }).then((p) => { const warn = () => { if (p.state === 'denied' && !$('#rcNotice', root).textContent) $('#rcNotice', root).innerHTML = `<div class="notice">🎙️ ${esc(micErrorText({ name: 'NotAllowedError' }))}</div>`; }; warn(); p.onchange = () => { if (p.state !== 'denied') $('#rcNotice', root).innerHTML = ''; warn(); }; }).catch(() => {}); } catch {}
 
+  if (store.mode === 'local') window.__rcLive = (t) => { if (!LV.hm) liveReset(); onTranscript(t); }; // للتجارب المحلية فقط
   let throttle = 0, pendingT = null;
   function onTranscript(t) {
     $('#rcLive', root).textContent = t.split(' ').slice(-14).join(' ');
@@ -497,7 +526,7 @@ function mountRecite(root, opts) {
     pop?.remove();
     $('#rcResult', root).innerHTML = ''; $('#rcLive', root).innerHTML = ''; $('#rcGo', root).innerHTML = '';
     wEls.forEach((el) => el.classList.remove('correct', 'wrong', 'missing', 'cursor', 'revealed'));
-    last = null;
+    last = null; liveReset();
     // جهاز لا يجمع التسجيل والتعرف: في الواجبات يُسجَّل للمعلم فقط، وفي التدريب والتحديات تظهر الكلمات بلا تسجيل
     const nd = devCaps.noDual || devCaps.tryNoDual;
     // التجربة (التعرف وحده قبل التأكد) في التدريب فقط؛ أما التحديات والمباريات فلا تُجرَّب إلا بعد التأكد حتى لا تضيع المحاولة
@@ -976,7 +1005,7 @@ function viewHome(app) {
 
 /* ================= التدريب الحر (للطلاب المسجلين والمعلم فقط) ================= */
 let pendingPractice = null;
-function mountPractice(host, learn, onActivity, onResult) {
+function mountPractice(host, learn, onActivity, onResult, hmPeek = null) {
   const init = pendingPractice || pref.get('lastRange', { surah: 36, from: 1, to: 12 });
   pendingPractice = null;
   host.innerHTML = `<p class="muted" style="margin:0 0 12px">اختر أي مقطع ثم اضغط زر الميكروفون وابدأ القراءة. التدريب لا يُرسل للمعلم.</p>
@@ -989,7 +1018,7 @@ function mountPractice(host, learn, onActivity, onResult) {
     comp = mountTalqeen($('#prBody', host), { ...r, reciter: pref.get('reciter', RECITERS[0].id), onActivity, onAyahDone: onResult,
       onExit: () => mount(r), onFinish: () => { mode0 = 'hifz'; mount(r); } });
   };
-  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, noAi: true, practice: true, onTalqeen: onResult ? talqeen : null }); }; // التدريب الحر بلا تحليل تجويد آلي
+  const mount = (r) => { comp?.destroy(); pref.set('lastRange', r); comp = mountRecite($('#prBody', host), { ...r, mode: mode0, learn, onActivity, onResult, hmPeek, noAi: true, practice: true, onTalqeen: onResult ? talqeen : null }); }; // التدريب الحر بلا تحليل تجويد آلي
   bindRangePicker(host, 'pr', mount);
   mount({ surah: init.surah, from: init.from, to: init.to });
   return { destroy: () => comp?.destroy() };
@@ -1855,8 +1884,17 @@ function viewStudent(app) {
     try { await store.updateChallenge(c.id, { cancel }); c.cancel = cancel; toast(strict ? 'أُلغي التحدي.' : 'أُلغي التحدي مجاناً.'); await loadChallenges(); draw(); }
     catch (e) { toast('تعذر الإلغاء: ' + (e.code || e.message)); }
   }
+  /** عدد ما أرسله الطالب اليوم: الأكبر بين عدّاد الخادم والقائمة المحدّثة */
+  async function chSentToday() {
+    try { myCh = await store.listMyChallenges(me.id); } catch {}
+    const today = riyadhDay(new Date()), local = myCh.filter((c) => c.a.pn === me.id && riyadhDay(new Date(c.createdAt)) === today).length;
+    const srv = await store.chToday(me.id).catch(() => null);
+    return Math.max(local, srv || 0);
+  }
   async function newChallenge() {
     openModal('<div class="loading">جارٍ تحميل زملائك…</div>');
+    if (chCfg.off) { closeModal(); return toast('أوقف المعلم التحديات مؤقتاً.'); }
+    if ((await chSentToday()) >= CH_DAILY) { closeModal(); toast(`وصلت إلى ${ar(CH_DAILY)} تحديات اليوم. عُد غداً!`); if ($('#stBody', app) && tab === 'honor') draw(); return; }
     let mates = [];
     try { mates = (await store.listDirectory(me.classId)).filter((x) => x.id !== me.id && x.hasAccount); } catch (e) { $('#modalBody').innerHTML = `<div class="notice">تعذر تحميل الزملاء: ${esc(e.code || e.message)}</div>`; return; }
     const busy = new Set(myCh.filter((c) => chStatus(c) === 'open').map((c) => chView(c, me.id).other.pn));
@@ -1876,6 +1914,7 @@ function viewStudent(app) {
       const btn = e.submitter;
       if (!(await confirmBox(`⚠️ قبل الإرسال: التحدي لا يُلغى. إن أردت إلغاءه بعد إرساله ستخسر ${CH_PTS.cancel === 1 ? 'نقطة واحدة' : ar(CH_PTS.cancel) + ' نقاط'} من لوحة الشرف مباشرة. هل أنت مستعد لتحدي ${mate.name}؟`, 'نعم، أرسل التحدي'))) return;
       btn.disabled = true;
+      if ((await chSentToday()) >= CH_DAILY) { closeModal(); toast(`وصلت إلى ${ar(CH_DAILY)} تحديات اليوم. عُد غداً!`); if ($('#stBody', app) && tab === 'honor') draw(); return; }
       const cls = data.classes.find((c) => c.id === me.classId);
       const now = new Date();
       const c = { pns: [me.id, mate.id], a: { pn: me.id, name: me.name }, b: { pn: mate.id, name: mate.name }, classId: me.classId, className: cls?.name || '', surah: rng.surah, from: rng.from, to: rng.to, label: '', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CH_HOURS * 3600e3).toISOString(), ra: null, rb: null, v: CH_V };
@@ -1886,7 +1925,7 @@ function viewStudent(app) {
         notifyChallenge(id, 'new').catch(() => {});
         closeModal(); toast(`أُرسل التحدي إلى ${mate.name} ⚔️`);
         openChallenge(id);
-      } catch (x) { toast('تعذر إرسال التحدي: ' + (x.code || x.message)); btn.disabled = false; }
+      } catch (x) { if (x.code === 'daily-limit') { closeModal(); toast(x.message); return; } toast('تعذر إرسال التحدي: ' + (x.code || x.message)); btn.disabled = false; }
     };
   }
   /** شاشة التحدي: التسميع (مرة واحدة) أو النتيجة */
@@ -2124,6 +2163,23 @@ function viewStudent(app) {
     loadHeroes();
     iqraCfg().then((c) => { const on = (c.pns || []).includes(me.id); if (on !== iqraOn) { iqraOn = on; if ($('#stBody', app) && !offIqra) draw(); } }).catch(() => {});
     loadKhatmas().then(() => { if (openKhId) { const id = openKhId; openKhId = null; openKhatma(id); } });
+    // تقييمات المعلم تصل فوراً (حتى أثناء التلاوة)
+    const gSig = (L) => JSON.stringify(L.map((x) => [x.id, x.teacher?.total ?? null, x.teacher?.at || '', x.retakeRequested?.id || '']).sort());
+    let lastG = gSig(data.subs);
+    store.watchMySubs(me.id, (L) => {
+      const sig = gSig(L); if (sig === lastG) return; lastG = sig;
+      const old = new Map(data.subs.map((x) => [x.id, x]));
+      data.subs = L.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      const fresh = data.subs.filter((x) => x.teacher && typeof x.teacher.total === 'number' && (old.get(x.id)?.teacher?.at || '') !== (x.teacher.at || ''));
+      if (!$('#stBody', app)) return;
+      if (comp || $('#modal')?.classList.contains('open') || !$('#modal')?.hidden) {
+        // في منتصف التلاوة أو نافذة مفتوحة: تنبيه صغير لا يقطع التسميع، والاحتفال لاحقاً
+        if (fresh.length) { const x = fresh[0]; toast(`🎓 قيّم معلمك «${x.taskTitle || 'تسميعك'}»: ${ar(x.teacher.total)} من ١٠`); }
+        if (!comp && ['history', 'tasks'].includes(tab) && $('#modal')?.hidden !== false) draw();
+        return;
+      }
+      draw(); if (fresh.length) announceGrades();
+    });
     loadChallenges().then(() => { if (openChId) { const id = openChId; openChId = null; openChallenge(id); } });
     store.listMyFeedback(me.id).then((L) => { myFb = L; paintFbCta(); if (openFbId) { const id = openFbId; openFbId = null; openFeedback(id); } }).catch(() => {});
     if (openTaskId) { const t = data.tasks.find((x) => x.id === openTaskId); openTaskId = null; if (t) { openTask(t); return; } }
@@ -2415,7 +2471,7 @@ function viewStudent(app) {
     comp?.destroy();
     body.innerHTML = '<div class="card hm-bar" id="hmBar"></div><div id="prWrap"></div>';
     HS.pts = 0; HS.n = 0; paintHmBar();
-    comp = mountPractice($('#prWrap', body), learn, (sec) => logAct('practice', sec), (sub) => { recordProgress(sub); earnTraining(sub); });
+    comp = mountPractice($('#prWrap', body), learn, (sec) => logAct('practice', sec), (sub) => { recordProgress(sub); earnTraining(sub); }, hasRecognition ? () => himmaPeek(me.id, riyadhDay()) : null);
   }
 
   function pushInvite() {
@@ -3526,6 +3582,7 @@ function viewTeacher(app) {
         const wantNotify = $('#gNotify', m).checked && prevTotal !== teacher.total;
         try {
           await store.updateSubmission(x.pn, x.id, patch);
+          { const k = D.subs.find((y) => y.id === x.id && y.pn === x.pn); if (k) Object.assign(k, patch); schedulePublish(150); }
           if (wantNotify) notifyGrade(x, teacher, prevTotal).then((r) => r && setTimeout(() => toast(r), 1200)).catch((err) => { console.warn(err); setTimeout(() => toast('تعذر إرسال تنبيه الدرجة: ' + (err.code || err.message)), 1200); });
           Object.assign(x, patch);
           closeModal();
@@ -4746,9 +4803,13 @@ function viewTeacher(app) {
     const base = D.subs.concat(voiceBonus(), D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
-  function schedulePublish(ms = 2500) {
-    clearTimeout(boardTimer);
-    boardTimer = setTimeout(publishBoard, ms);
+  /** نشر اللوحة: لا يؤجّل نشراً أقرب مُجدولاً (حتى لا تتأخر الدرجات بتتابع التحديثات) */
+  let boardDue = 0;
+  function schedulePublish(ms = 1200) {
+    const due = Date.now() + ms;
+    if (boardTimer && boardDue && boardDue <= due) return;
+    clearTimeout(boardTimer); boardDue = due;
+    boardTimer = setTimeout(() => { boardTimer = null; boardDue = 0; publishBoard(); }, ms);
   }
   /** تحديث لحظي: يُعاد رسم اللوحة المعروضة للمعلم في مكانها دون إعادة الصفحة */
   const liveBump = () => { liveBump.n = (liveBump.n || 0) + 1; };
