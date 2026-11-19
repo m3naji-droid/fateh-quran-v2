@@ -182,7 +182,39 @@ export function openDesigner({ title = '', body = '' } = {}) {
 
 /* ======================= المحرر ======================= */
 const ASPECTS = [['orig', 'الأصل', 0], ['1:1', 'مربع', 1], ['4:5', '٤:٥', 4 / 5], ['9:16', 'طولي', 9 / 16], ['16:9', 'عرضي', 16 / 9]];
-const FILTERS = [['none', 'بلا', ''], ['warm', 'دافئ', 'sepia(.25) saturate(1.2)'], ['cool', 'بارد', 'hue-rotate(-12deg) saturate(.9)'], ['bw', 'أبيض وأسود', 'grayscale(1)'], ['vivid', 'زاهٍ', 'saturate(1.5) contrast(1.08)'], ['soft', 'ناعم', 'contrast(.9) brightness(1.06)']];
+const FILTERS = [['none', 'بلا', []], ['warm', 'دافئ', [['sepia', 0.25], ['sat', 1.2]]], ['cool', 'بارد', [['hue', -12], ['sat', 0.9]]], ['bw', 'أبيض وأسود', [['sat', 0]]], ['vivid', 'زاهٍ', [['sat', 1.5], ['con', 1.08]]], ['soft', 'ناعم', [['con', 0.9], ['bri', 1.06]]]];
+/* الضبط والفلاتر بحساب الألوان مباشرة (مصفوفة ٣×٤ كما في CSS)، لأن ctx.filter لا يعمل في سفاري والآيفون */
+const M_ID = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
+const mMul = (A, B) => { const o = []; for (let r = 0; r < 3; r++) { for (let c = 0; c < 3; c++) o[r * 4 + c] = A[r * 4] * B[c] + A[r * 4 + 1] * B[4 + c] + A[r * 4 + 2] * B[8 + c]; o[r * 4 + 3] = A[r * 4] * B[3] + A[r * 4 + 1] * B[7] + A[r * 4 + 2] * B[11] + A[r * 4 + 3]; } return o; };
+function opM(k, v) {
+  if (k === 'bri') return [v, 0, 0, 0, 0, v, 0, 0, 0, 0, v, 0];
+  if (k === 'con') { const o = 127.5 * (1 - v); return [v, 0, 0, o, 0, v, 0, o, 0, 0, v, o]; }
+  if (k === 'sat') return [0.213 + 0.787 * v, 0.715 - 0.715 * v, 0.072 - 0.072 * v, 0, 0.213 - 0.213 * v, 0.715 + 0.285 * v, 0.072 - 0.072 * v, 0, 0.213 - 0.213 * v, 0.715 - 0.715 * v, 0.072 + 0.928 * v, 0];
+  if (k === 'sepia') { const a = 1 - v; return [0.393 + 0.607 * a, 0.769 - 0.769 * a, 0.189 - 0.189 * a, 0, 0.349 - 0.349 * a, 0.686 + 0.314 * a, 0.168 - 0.168 * a, 0, 0.272 - 0.272 * a, 0.534 - 0.534 * a, 0.131 + 0.869 * a, 0]; }
+  if (k === 'hue') { const t = (v * Math.PI) / 180, C = Math.cos(t), S = Math.sin(t); return [0.213 + C * 0.787 - S * 0.213, 0.715 - C * 0.715 - S * 0.715, 0.072 - C * 0.072 + S * 0.928, 0, 0.213 - C * 0.213 + S * 0.143, 0.715 + C * 0.285 + S * 0.14, 0.072 - C * 0.072 - S * 0.283, 0, 0.213 - C * 0.213 - S * 0.787, 0.715 - C * 0.715 + S * 0.715, 0.072 + C * 0.928 + S * 0.072, 0]; }
+  return M_ID;
+}
+/** يطبّق الإضاءة والتباين والتشبع والفلتر على اللوحة كلها */
+function applyAdjust(c, W, H, S) {
+  let M = M_ID;
+  [['bri', S.b / 100], ['con', S.c / 100], ['sat', S.s / 100], ...((FILTERS.find((f) => f[0] === S.f) || FILTERS[0])[2])].forEach(([k, v]) => { M = mMul(opM(k, v), M); });
+  if (M.every((v, i) => Math.abs(v - M_ID[i]) < 1e-6)) return;
+  const im = c.getImageData(0, 0, W, H), d = im.data;
+  const [a, b, e, f, g, h, i, j, k, l, m, n] = M;
+  for (let p = 0; p < d.length; p += 4) {
+    const r = d[p], gg = d[p + 1], bb = d[p + 2];
+    d[p] = a * r + b * gg + e * bb + f; d[p + 1] = g * r + h * gg + i * bb + j; d[p + 2] = k * r + l * gg + m * bb + n; // Uint8Clamped يقصّ تلقائياً
+  }
+  c.putImageData(im, 0, 0);
+}
+/** تمويه بالتصغير ثم التكبير (يعمل في كل المتصفحات) */
+function softBlur(img, w, h) {
+  const sm = canvas(Math.max(2, Math.round(w / 28)), Math.max(2, Math.round(h / 28))), sx = sm.getContext('2d');
+  sx.imageSmoothingQuality = 'high'; sx.drawImage(img, 0, 0, sm.width, sm.height);
+  const md = canvas(Math.max(4, Math.round(w / 7)), Math.max(4, Math.round(h / 7))), mx = md.getContext('2d');
+  mx.imageSmoothingQuality = 'high'; mx.drawImage(sm, 0, 0, md.width, md.height);
+  return md;
+}
 const STICKERS = ['🏆', '⭐', '🌟', '📖', '🕌', '🌙', '✨', '🎉', '🎁', '👏', '❤️', '🔥', '📢', '⏰', '✅', '📝', '🤲', '💡', '۞', '❁', '✿', '❖', '﴾ ﴿'];
 const COLORS = ['#ffffff', '#111111', '#0f5c46', '#c9a54a', '#f3d48a', '#b8452e', '#2f5aa8', '#8a4fd1', '#e85d9c'];
 const BGS = [['white', 'أبيض', '#ffffff'], ['cream', 'كريمي', '#f6efe0'], ['green', 'أخضر', '#0f5c46'], ['navy', 'كحلي', '#16264d'], ['g1', 'تدرّج أخضر', 'grad:#0b4a39:#1f8a68'], ['g2', 'تدرّج ذهبي', 'grad:#5a3d0a:#e0b354'], ['g3', 'تدرّج بنفسجي', 'grad:#3c2066:#8a4fd1'], ['pat', 'زخرفة', 'pat:#0f5c46'], ['blur', 'الأصل مموّهاً', 'blur']];
@@ -211,7 +243,7 @@ export async function openImageEditor(blob) {
       let src = base;
       if (S.cut) { // الخلفية الجديدة تحت الصورة المقصوصة
         const c = canvas(w, h), x = c.getContext('2d'), bg = (BGS.find((b) => b[0] === S.bg) || BGS[0])[2];
-        if (bg === 'blur') { x.filter = `blur(${Math.round(Math.max(w, h) / 40)}px) brightness(.9)`; x.drawImage(orig, -w * 0.05, -h * 0.05, w * 1.1, h * 1.1); x.filter = 'none'; }
+        if (bg === 'blur') { x.imageSmoothingQuality = 'high'; x.drawImage(softBlur(orig, w, h), -w * 0.05, -h * 0.05, w * 1.1, h * 1.1); x.fillStyle = 'rgba(0,0,0,.1)'; x.fillRect(0, 0, w, h); }
         else if (bg.startsWith('grad:')) { const [, a, b] = bg.split(':'); const g = x.createLinearGradient(0, 0, w * 0.4, h); g.addColorStop(0, a); g.addColorStop(1, b); x.fillStyle = g; x.fillRect(0, 0, w, h); }
         else if (bg.startsWith('pat:')) { x.fillStyle = '#f6efe0'; x.fillRect(0, 0, w, h); islamicPattern(x, w, h, bg.split(':')[1], 0.22, Math.max(w, h) / 9); }
         else { x.fillStyle = bg; x.fillRect(0, 0, w, h); }
@@ -236,8 +268,8 @@ export async function openImageEditor(blob) {
       const G = geom(srcCache), W = G.W, H = G.H;
       target.width = W; target.height = H; const c = target.getContext('2d');
       c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
-      c.filter = `brightness(${S.b}%) contrast(${S.c}%) saturate(${S.s}%) ${(FILTERS.find((f) => f[0] === S.f) || FILTERS[0])[2]}`.trim();
-      c.imageSmoothingQuality = 'high'; c.drawImage(srcCache, G.x, G.y, G.cw, G.ch, 0, 0, W, H); c.filter = 'none';
+      c.imageSmoothingQuality = 'high'; c.drawImage(srcCache, G.x, G.y, G.cw, G.ch, 0, 0, W, H);
+      applyAdjust(c, W, H, S);
       // التمويه: تكسير المنطقة إلى مربعات كبيرة فلا تُقرأ
       S.blurs.forEach((r) => {
         const x = Math.round(r.x * W), y = Math.round(r.y * H), w = Math.max(4, Math.round(r.w * W)), h = Math.max(4, Math.round(r.h * H)), k = Math.max(6, Math.round(Math.min(w, h) / 6));
