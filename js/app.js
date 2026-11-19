@@ -215,7 +215,9 @@ applyTheme(pref.get('theme', null));
 (() => {
   const vv = window.visualViewport; if (!vv) return;
   let t = 0;
-  const kbOpen = () => vv.height < window.innerHeight * 0.78;
+  // لوحة المفاتيح مفتوحة فقط إن كان التركيز في خانة كتابة وتقلّص الارتفاع الظاهر فعلاً (مع حساب التكبير بالأصابع)
+  const kbOpen = () => !!document.activeElement?.matches?.('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select')
+    && window.innerHeight - vv.height * (vv.scale || 1) > 120;
   const settle = () => {
     clearTimeout(t);
     t = setTimeout(() => {
@@ -226,7 +228,10 @@ applyTheme(pref.get('theme', null));
     }, 150);
   };
   vv.addEventListener('resize', settle);
-  document.addEventListener('focusin', (e) => { if (e.target.matches?.('input, select, textarea')) document.body.classList.add('kb-open'); settle(); });
+  document.addEventListener('focusin', settle);
+  // أمان: إن بقي الشريط مخفياً بلا لوحة مفاتيح، يعود عند أول لمسة أو تمرير
+  addEventListener('scroll', () => { if (document.body.classList.contains('kb-open')) settle(); }, { passive: true });
+  addEventListener('touchstart', () => { if (document.body.classList.contains('kb-open')) settle(); }, { passive: true });
   document.addEventListener('focusout', settle);
   document.addEventListener('change', (e) => { if (e.target.matches?.('select')) settle(); });
   window.addEventListener('pageshow', settle); document.addEventListener('visibilitychange', settle);
