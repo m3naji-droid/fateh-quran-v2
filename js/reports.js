@@ -8,6 +8,8 @@ const DAY = 864e5;
 const MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 const COLORS = ['#0d5c46', '#c08a1e', '#2f7fb5', '#b5512f', '#7a4fa0', '#4f8a3a', '#a33b6b', '#2a9d8f'];
 const ayatOf = (x) => Math.max(0, (+x.to || 0) - (+x.from || 0) + 1);
+/** ثواني التلاوة: وقت التدريب الحر المسجَّل (أو دقائقه القديمة) + مدة التسميعات */
+const trainSec = (him, subs) => him.reduce((a, h) => a + (h.hs != null ? h.hs : (h.hm || 0) * 60), 0) + subs.reduce((a, x) => a + Math.min(1800, +x.duration || 0), 0);
 const avg = (L) => (L.length ? L.reduce((a, b) => a + b, 0) / L.length : null);
 const bhDay = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date(ms));
 const ymOf = (ms) => bhDay(ms).slice(0, 7);
@@ -70,7 +72,7 @@ export function mountReports(body, X) {
       acc: accOf(subs), rate: taskStats(p, cls).rate,
       ayat: subs.reduce((a, x) => a + ayatOf(x), 0) + him.reduce((a, h) => a + (h.ha || 0), 0),
       active: S.length ? Math.round((S.filter((s) => act.has(s.id)).length / S.length) * 100) : null, actN: S.filter((s) => act.has(s.id)).length, S: S.length,
-      mins: him.reduce((a, h) => a + (h.hm || 0), 0), subs: subs.length, any: subs.length + him.length > 0,
+      mins: Math.round(trainSec(him, subs) / 60), subs: subs.length, any: subs.length + him.length > 0,
     };
   }
   const delta = (a, b, unit = '', inv = false) => {
@@ -114,7 +116,7 @@ export function mountReports(body, X) {
   function achieve(p) {
     const subs = subsIn(p), him = himIn(p);
     const ayS = subs.reduce((a, x) => a + ayatOf(x), 0), ayH = him.reduce((a, h) => a + (h.ha || 0), 0);
-    const mins = him.reduce((a, h) => a + (h.hm || 0), 0);
+    const mins = trainSec(him, subs) / 60;
     const ch = (D.challenges || []).filter((c) => { const t = Date.parse(c.createdAt || '') || 0; return t >= p.from && t < p.to && !c.cancel && (R.cls === 'all' || clsOf(c.a?.pn) === R.cls || clsOf(c.b?.pn) === R.cls); }).length;
     const kh = (D.khatmas || []).filter((k) => { const t = Date.parse(k.createdAt || '') || 0; return t < p.to && (R.cls === 'all' || !k.classId || k.classId === R.cls || (k.classIds || []).includes(R.cls)) && k.segs && khDone(k) >= normSegs(k.segs).length; }).length;
     const byCls = D.classes.map((c) => ({ c, n: subsIn(p, c.id).reduce((a, x) => a + ayatOf(x), 0) + himIn(p, c.id).reduce((a, h) => a + (h.ha || 0), 0) })).filter((x) => x.n).sort((a, b) => b.n - a.n);
@@ -122,7 +124,7 @@ export function mountReports(body, X) {
   }
   const achHtml = (A, p, big = false) => `<div class="rp-ach${big ? ' big' : ''}">
       <div><b>${num(A.ayat)}</b><span>آية مسمَّعة ومتدرَّب عليها</span></div>
-      <div><b>${ar(A.hours < 10 ? A.hours.toFixed(1) : Math.round(A.hours))}</b><span>ساعة تدريب</span></div>
+      <div><b>${ar(A.hours < 10 ? A.hours.toFixed(1) : Math.round(A.hours))}</b><span>ساعة تلاوة وتدريب</span></div>
       <div><b>${num(A.subs)}</b><span>تسميعاً أُرسل</span></div>
       <div><b>${num(A.ch)}</b><span>تحدٍّ بين الزملاء</span></div></div>
     <p class="rp-ach-n">≈ ما يعادل ${ar((A.ayat / 6236).toFixed(1))} ختمة للمصحف${A.kh ? `، ومعها ${ar(A.kh)} ${A.kh === 1 ? 'ختمة جماعية مكتملة' : 'ختمات جماعية مكتملة'}` : ''}.</p>`;
@@ -315,7 +317,7 @@ export function mountReports(body, X) {
     $('#rpX').onclick = () => exportDialog();
     $('#rpShow').onclick = () => present();
     $('#rpMGo').onclick = () => { const ym = $('#rpM').value; pref.set('repM', ym); monthReport(ym); };
-    $('#rpAchAnn').onclick = () => X.goAnn('🌿 حصيلة مقرأة الفاتح', `${p.label}${R.cls === 'all' ? '' : ' في ' + className(R.cls)}: ${num(A.ayat)} آية مسمَّعة ومتدرَّب عليها، و${ar(A.hours < 10 ? A.hours.toFixed(1) : Math.round(A.hours))} ساعة تدريب، و${num(A.subs)} تسميعاً، و${num(A.ch)} تحدٍّ بين الزملاء. ≈ ${ar((A.ayat / 6236).toFixed(1))} ختمة للمصحف. بارك الله في جهودكم وزادكم حرصاً 🌟`);
+    $('#rpAchAnn').onclick = () => X.goAnn('🌿 حصيلة مقرأة الفاتح', `${p.label}${R.cls === 'all' ? '' : ' في ' + className(R.cls)}: ${num(A.ayat)} آية مسمَّعة ومتدرَّب عليها، و${ar(A.hours < 10 ? A.hours.toFixed(1) : Math.round(A.hours))} ساعة تلاوة وتدريب، و${num(A.subs)} تسميعاً، و${num(A.ch)} تحدٍّ بين الزملاء. ≈ ${ar((A.ayat / 6236).toFixed(1))} ختمة للمصحف. بارك الله في جهودكم وزادكم حرصاً 🌟`);
     $('#rpRsAnn') && ($('#rpRsAnn').onclick = () => X.goAnn('🚀 النجوم الصاعدة', `أكثر الطلاب تحسّناً ${p.label === 'هذا الشهر' ? 'هذا الشهر' : 'في ' + p.label}:\n${RS.map((r, i) => `${['🥇', '🥈', '🥉'][i] || '⭐'} ${r.s.name} (${className(r.s.classId)})`).join('\n')}\nبارك الله فيكم، الاجتهاد يصنع الفرق!`));
     $('#rpRsCheer') && ($('#rpRsCheer').onclick = () => cheer(RS));
     const self = $('#rpSelf');
@@ -386,7 +388,7 @@ export function mountReports(body, X) {
       <section><h2>📈 تقدّم ${cls === 'all' ? 'الصفوف' : 'الصف'} خلال الشهر</h2>${chart}${legend(cs)}</section>
       <div class="mr-2"><section><h2>⚠️ يحتاجون متابعة (${ar(need.length + silent.length)})</h2>${need.length ? `<p>${need.slice(0, 12).map((x) => `${esc(x.s.name)} <small>(${ar(x.a)}٪)</small>`).join('، ')}</p>` : ''}${silent.length ? `<p><b>بلا نشاط:</b> ${silent.slice(0, 20).map((s) => esc(s.name)).join('، ')}${silent.length > 20 ? ` و${ar(silent.length - 20)} غيرهم` : ''}</p>` : ''}${!need.length && !silent.length ? '<p class="mr-m">لا أحد، ما شاء الله.</p>' : ''}</section>
         <section><h2>🗺️ أكثر الكلمات خطأً</h2>${words.length ? `<ol>${words.map((w) => `<li><span class="mr-q">${esc(w.w)}</span> <small>${esc(surahName(w.s))}: ${ar(w.a)}، ${ar(w.who.size)} ${w.who.size <= 10 ? 'طلاب' : 'طالباً'}</small></li>`).join('')}</ol>` : '<p class="mr-m">لا أخطاء مسجّلة.</p>'}</section></div>
-      <section class="mr-ach"><h2>🌿 الإنجاز</h2><p>${num(A.ayat)} آية، و${ar(A.hours < 10 ? A.hours.toFixed(1) : Math.round(A.hours))} ساعة تدريب، و${num(A.subs)} تسميعاً، و${num(A.ch)} تحدٍّ بين الزملاء (≈ ${ar((A.ayat / 6236).toFixed(1))} ختمة).</p></section>
+      <section class="mr-ach"><h2>🌿 الإنجاز</h2><p>${num(A.ayat)} آية، و${ar(A.hours < 10 ? A.hours.toFixed(1) : Math.round(A.hours))} ساعة تلاوة وتدريب، و${num(A.subs)} تسميعاً، و${num(A.ch)} تحدٍّ بين الزملاء (≈ ${ar((A.ayat / 6236).toFixed(1))} ختمة).</p></section>
       ${note ? `<section class="mr-note"><h2>✍️ ملاحظة المعلم</h2><p>${esc(note).replace(/\n/g, '<br>')}</p></section>` : ''}
       <footer>أُعدّ آلياً من منصة مقرأة الفاتح، ${esc(dLabel(Date.now()))} ${ar(bhDay(Date.now()).slice(0, 4))}</footer></div>`;
     const summary = () => `📄 تقرير مقرأة الفاتح، ${p.label}${cls === 'all' ? '' : '، ' + className(cls)}\n• متوسط الدقة: ${K.acc == null ? '—' : ar(K.acc) + '٪'}\n• تسليم الواجبات: ${K.rate == null ? '—' : ar(K.rate) + '٪'}\n• آيات مسمَّعة ومتدرَّب عليها: ${num(K.ayat)}\n• طلاب نشطون: ${ar(K.actN)} من ${ar(K.S)}\n${tops.length ? '🏆 الأوائل: ' + tops.map((t) => t.c.name + ': ' + t.L.map((x) => x.s.name).join('، ')).join(' | ') + '\n' : ''}${RS.length ? '🚀 النجوم الصاعدة: ' + RS.map((r) => r.s.name).join('، ') + '\n' : ''}${pref.get(noteKey, '') ? '✍️ ' + pref.get(noteKey, '') : ''}`;
@@ -430,12 +432,12 @@ export function mountReports(body, X) {
     const p = period(), wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
     const add = (name, rows) => { if (!rows.length) rows = [{ 'ملاحظة': 'لا توجد بيانات في هذه الفترة' }]; const ws = XLSX.utils.json_to_sheet(rows); ws['!cols'] = Object.keys(rows[0]).map((k) => ({ wch: Math.max(12, Math.min(40, k.length + 4)) })); XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31)); };
     const cls = R.cls === 'all' ? D.classes : D.classes.filter((c) => c.id === R.cls);
-    if (keys.includes('sum')) add('ملخص الصفوف', cls.map((c) => { const k = kpis(p, c.id), q = p.prev ? kpis(p.prev, c.id) : null; return { 'الصف': c.name, 'عدد الطلاب': k.S, 'طلاب نشطون': k.actN, 'التسميعات': k.subs, 'متوسط الدقة %': k.acc ?? '', 'تسليم الواجبات %': k.rate ?? '', 'الآيات': k.ayat, 'دقائق التدريب': k.mins, ...(q ? { 'الدقة في الفترة السابقة %': q.acc ?? '', 'التسليم في الفترة السابقة %': q.rate ?? '' } : {}) }; }));
+    if (keys.includes('sum')) add('ملخص الصفوف', cls.map((c) => { const k = kpis(p, c.id), q = p.prev ? kpis(p.prev, c.id) : null; return { 'الصف': c.name, 'عدد الطلاب': k.S, 'طلاب نشطون': k.actN, 'التسميعات': k.subs, 'متوسط الدقة %': k.acc ?? '', 'تسليم الواجبات %': k.rate ?? '', 'الآيات': k.ayat, 'دقائق التلاوة والتدريب': k.mins, ...(q ? { 'الدقة في الفترة السابقة %': q.acc ?? '', 'التسليم في الفترة السابقة %': q.rate ?? '' } : {}) }; }));
     if (keys.includes('mx')) cls.forEach((c) => { const M = matrix(p, c.id); if (!M.T.length) return; add('درجات ' + c.name, M.rows.map((r) => ({ 'الطالب': r.s.name, ...Object.fromEntries(M.T.map((t, i) => [t.title || 'واجب ' + (i + 1), r.cells[i].v ?? (r.cells[i].k === 'na' ? '—' : r.cells[i].t || '')])), 'سلّم': `${r.d}/${r.n}`, 'المتوسط': r.avg ?? '' }))); });
     const S = studentsIn();
     if (keys.includes('att')) { const sb = subsIn(p), hb = himIn(p); add('المواظبة', S.map((s) => { const a = sb.filter((x) => x.pn === s.id), h = hb.filter((x) => x.pn === s.id && (x.hp || x.ha)); const days = new Set([...a.map((x) => bhDay(tms(x))), ...h.map((x) => x.d)]); const last = [...a.map((x) => x.createdAt), ...h.map((x) => x.d)].sort().pop(); return { 'الطالب': s.name, 'الرقم': s.id, 'الصف': className(s.classId), 'أيام النشاط': days.size, 'التسميعات': a.length, 'متوسط الدقة %': accOf(a) ?? '', 'الآيات': a.reduce((n, x) => n + ayatOf(x), 0) + h.reduce((n, x) => n + (x.ha || 0), 0), 'آخر نشاط': last ? bhDay(Date.parse(last.length === 10 ? last + 'T12:00:00+03:00' : last)) : '' }; })); }
     if (keys.includes('words')) add('أكثر الكلمات خطأً', topWords(subsIn(p), 50).map((w) => ({ 'الكلمة': w.w, 'السورة': surahName(w.s), 'الآية': w.a, 'عدد من أخطأ': w.who.size })));
-    if (keys.includes('him')) { const hb = himIn(p); add('الهمة والتدريب', S.map((s) => { const h = hb.filter((x) => x.pn === s.id); return { 'الطالب': s.name, 'الصف': className(s.classId), 'نقاط الهمة': h.reduce((n, x) => n + (x.hp || 0), 0), 'آيات التدريب': h.reduce((n, x) => n + (x.ha || 0), 0), 'دقائق التدريب': h.reduce((n, x) => n + (x.hm || 0), 0), 'أيام التدريب': h.filter((x) => x.hp || x.ha).length }; }).sort((a, b) => b['نقاط الهمة'] - a['نقاط الهمة'])); }
+    if (keys.includes('him')) { const hb = himIn(p); add('الهمة والتدريب', S.map((s) => { const h = hb.filter((x) => x.pn === s.id); return { 'الطالب': s.name, 'الصف': className(s.classId), 'نقاط الهمة': h.reduce((n, x) => n + (x.hp || 0), 0), 'آيات التدريب': h.reduce((n, x) => n + (x.ha || 0), 0), 'دقائق التدريب': Math.round(h.reduce((n, x) => n + (x.hs != null ? x.hs / 60 : x.hm || 0), 0)), 'أيام التدريب': h.filter((x) => x.hp || x.ha).length }; }).sort((a, b) => b['نقاط الهمة'] - a['نقاط الهمة'])); }
     if (keys.includes('subs')) add('التسليمات', subsIn(p).sort((a, b) => tms(a) - tms(b)).map((x) => ({ 'الطالب': x.studentName || stu(x.pn)?.name || x.pn, 'الصف': x.className || className(x.classId), 'الواجب': x.taskTitle || 'تدريب', 'السورة': surahName(x.surah), 'من': x.from, 'إلى': x.to, 'التاريخ': bhDay(tms(x)), 'الدقة %': x.percent ?? '', 'درجة المعلم /10': x.teacher?.total ?? '', 'عدد الأخطاء': (x.mistakes || []).length })));
     if (keys.includes('ch')) add('التحديات', (D.challenges || []).filter((c) => { const t = Date.parse(c.createdAt || '') || 0; return t >= p.from && t < p.to && !c.cancel && (R.cls === 'all' || clsOf(c.a?.pn) === R.cls || clsOf(c.b?.pn) === R.cls); }).map((c) => ({ 'التاريخ': bhDay(Date.parse(c.createdAt)), 'المتحدّي': c.a?.name || '', 'المتحدَّى': c.b?.name || '', 'السورة': c.surah ? surahName(c.surah) : '', 'نسبة الأول %': c.ra?.p ?? c.ra?.percent ?? '', 'نسبة الثاني %': c.rb?.p ?? c.rb?.percent ?? '' })));
     XLSX.writeFile(wb, `تقارير-المقرأة-${bhDay(Date.now())}.xlsx`);

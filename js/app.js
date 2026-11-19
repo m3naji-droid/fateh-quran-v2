@@ -1103,8 +1103,11 @@ function viewStudent(app) {
     try {
       const day = riyadhDay(), before = himmaToday(me.id, day).pts, r = earnHimma(me.id, day, sub, hasRecognition);
       HS.n++;
-      if (!r.pts) { paintHmBar(); return; }
-      hmEnqueue(day, r); // تُحفظ في الجهاز أولاً ثم تُرسل، وتُعاد المحاولة حتى تصل
+      // وقت التدريب الفعلي (بالثواني) يُسجَّل لكل تلاوة تدريب، سواء كسبت نقاطاً أم لا، بسقف ٤ ساعات في اليوم
+      const tk = `hsec_${me.id}_${day}`, used = +(localStorage.getItem(tk) || 0), secs = Math.max(0, Math.min(Math.round(sub.duration || 0), 14400 - used));
+      if (secs >= 3) { try { localStorage.setItem(tk, String(used + secs)); } catch {} }
+      if (!r.pts) { if (secs >= 3) hmEnqueue(day, { pts: 0, ayat: 0, mins: 0, secs }); paintHmBar(); return; }
+      hmEnqueue(day, { ...r, secs: secs >= 3 ? secs : 0 }); // تُحفظ في الجهاز أولاً ثم تُرسل، وتُعاد المحاولة حتى تصل
       HS.pts += r.pts;
       const total = before + r.pts, newHonor = Math.floor(total / HM.ratio) > Math.floor(before / HM.ratio);
       hmPop(`<b>🌟 <bdi dir="ltr">+${ar(r.pts)}</bdi> ${r.mins ? 'همّة (دقائق تدريب)' : 'همّة'}</b><span>⭐ <bdi dir="ltr">+${arDec(r.pts / HM.ratio)}</bdi> شرف</span><small>مجموعك اليوم: ${ar(total)} همّة${total >= HM.dayCap ? ' · بلغت سقف اليوم 🎉' : ''}</small>${newHonor ? '<em>🎉 نقطة شرف جديدة!</em>' : ''}`);
@@ -1120,7 +1123,7 @@ function viewStudent(app) {
   const hqKey = () => 'hmQ_' + me.id, hlKey = () => 'hmLog_' + me.id;
   const hmQueue = () => pref.get(hqKey(), []);
   function hmEnqueue(day, r) {
-    pref.set(hqKey(), [...hmQueue(), { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), day, pts: r.pts, ayat: r.ayat, mins: r.mins, t: Date.now() }].slice(-400));
+    pref.set(hqKey(), [...hmQueue(), { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), day, pts: r.pts, ayat: r.ayat, mins: r.mins, secs: r.secs || 0, t: Date.now() }].slice(-400));
     // سجل محلي بما كُسب ووقته: لعرض «نقاطك الآن» قبل أن تُحدَّث اللوحة
     pref.set(hlKey(), [...pref.get(hlKey(), []).filter((x) => Date.now() - x.t < 40 * 864e5), { t: Date.now(), pts: r.pts }]);
     flushHimma(); window.__honorPaint?.();
@@ -2907,7 +2910,7 @@ function viewTeacher(app) {
       // بعد التحميل الأول: متابعة لحظية، فكل تدريب أو تحدٍّ يعيد حساب اللوحة ونشرها خلال ثوانٍ
       D._offHm?.(); D._offCh?.();
       let hj = '', cj = '';
-      D._offHm = store.watchAllHimma((H2) => { const j = JSON.stringify(H2.map((h) => [h.pn, h.d, h.hp, h.hm])); if (j === hj) return; const first = !hj; hj = j; D.himma = H2; if (!first) { liveBump('hm'); schedulePublish(1000); } });
+      D._offHm = store.watchAllHimma((H2) => { const j = JSON.stringify(H2.map((h) => [h.pn, h.d, h.hp, h.hm, h.hs])); if (j === hj) return; const first = !hj; hj = j; D.himma = H2; if (!first) { liveBump('hm'); schedulePublish(1000); } });
       D._offCh = store.watchAllChallenges((L2) => { const j = JSON.stringify(L2.map((c) => [c.id, c.status, c.ra?.p, c.rb?.p, c.cancelled])); if (j === cj) return; const first = !cj; cj = j; D.challenges = L2; if (!first) { liveBump('ch'); schedulePublish(1000); } });
     }).catch((e) => console.warn('challenges', e));
     store.listSeasons().then((L) => { D.seasons = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('seasons', e));

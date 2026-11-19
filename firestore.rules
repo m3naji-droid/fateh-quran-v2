@@ -261,7 +261,8 @@ service cloud.firestore {
       match /himma/{day} {
         allow read: if isTeacher() || isStudent(pn);
         allow create, update: if isStudent(pn)
-          && request.resource.data.keys().hasOnly(['d', 'hp', 'ha', 'hm', 'at'])
+          && request.resource.data.keys().hasOnly(['d', 'hp', 'ha', 'hm', 'hs', 'at'])
+          && request.resource.data.get('hs', 0) is number && request.resource.data.get('hs', 0) >= 0 && request.resource.data.get('hs', 0) <= 14400
           && request.resource.data.d == day
           && request.resource.data.hp is number && request.resource.data.hp >= 0 && request.resource.data.hp <= 200
           && request.resource.data.hm is number && request.resource.data.hm >= 0 && request.resource.data.hm <= 30;
