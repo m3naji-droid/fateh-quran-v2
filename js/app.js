@@ -1143,6 +1143,8 @@ function viewStudent(app) {
           const c = String(e.code || e.message || '');
           if (/permission|unauthenticated/i.test(c)) {
             // هل المشكلة في الدخول أم في هذا السجل وحده (تجاوز سقف اليوم من جهازين)؟
+            // إن رُفض وقت التدريب وحده (قواعد قديمة لم تُنشر بعد) نحفظ النقاط بدونه، فلا تضيع
+            if (it.secs) { const okNoSec = await store.logHimma(me.id, it.day, { ...it, secs: 0 }).then(() => true, () => false); if (okNoSec) { pref.set(hqKey(), hmQueue().filter((x) => x.id !== it.id)); continue; } }
             const okAuth = await store.logHimma(me.id, it.day, { pts: 0, ayat: 0, mins: 0 }).then(() => true, () => false);
             if (okAuth) { pref.set(hqKey(), hmQueue().filter((x) => x.id !== it.id)); continue; }
             HQ.err = 'auth';
