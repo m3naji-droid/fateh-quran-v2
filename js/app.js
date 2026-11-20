@@ -3099,6 +3099,12 @@ function viewTeacher(app) {
       <div class="wu-kpi"><div><b>${ar(subs.length)}</b><span>تسميعاً</span></div><div><b>${ar(pend)}</b><span>بانتظار تقييمك</span></div><div><b>${ar(miss.length)}</b><span>واجبات ناقصة</span></div></div>
       ${last ? `<p class="small" style="margin:0">آخر تسميع: ${esc(rangeLabel(last.surah, last.from, last.to))} · ${last.percent != null ? ar(last.percent) + '٪ · ' : ''}${esc(timeAgo(last.createdAt))}</p>` : ''}
       ${miss.length ? `<div class="wm-ts">${miss.map((t) => `<span class="wm-t${taskClosed(t) ? ' closed' : ''}">${esc(t.title)}</span>`).join('')}</div>` : ''}
+      ${(() => { // سجل تدريبه كما وصل إلى قاعدة البيانات (يتحدّث مباشرة): للتحقق من شكوى «النقاط لا تُسجَّل»
+        const H = (D.himma || []).filter((h) => h.pn === pn).sort((a, b) => (b.d || '').localeCompare(a.d || '')).slice(0, 7);
+        const today = riyadhDay(), fmtS = (sec) => (sec >= 3600 ? `${ar(String(Math.round(sec / 360) / 10).replace(".", "٫"))} س` : `${ar(Math.round(sec / 60))} د`);
+        return `<details class="sq-hm" ${H[0]?.d === today ? 'open' : ''}><summary><b>🌟 تدريبه المحفوظ</b> <small class="muted">${H[0]?.d === today ? `اليوم: ${ar(H[0].hp || 0)} همّة من ${ar(HM.dayCap)}${(H[0].hp || 0) >= HM.dayCap ? ' (بلغ سقف اليوم)' : ''}` : 'لم يُحفظ له تدريب اليوم'}</small></summary>
+          ${H.length ? `<table class="sq-hmt"><tr><th>اليوم</th><th>همّة</th><th>آيات</th><th>وقت</th><th>آخر حفظ</th></tr>${H.map((h) => `<tr><td>${esc(h.d === today ? 'اليوم' : h.d)}</td><td>${ar(h.hp || 0)}</td><td>${ar(h.ha || 0)}</td><td>${h.hs ? fmtS(h.hs) : h.hm ? ar(h.hm) + ' د' : '—'}</td><td>${h.at ? esc(timeAgo(h.at)) : '—'}</td></tr>`).join('')}</table>` : '<p class="small muted" style="margin:6px 0 0">لا يوجد تدريب محفوظ له.</p>'}
+          <p class="small muted" style="margin:6px 0 0">كل آية صحيحة (٨٠٪ فأكثر) = همّة، والآية نفسها حتى ٣ مرات في اليوم، وسقف اليوم ${ar(HM.dayCap)} همّة (= ${ar(HM.dayCap / HM.ratio)} نقطة شرف).</p></details>`; })()}
       <div class="row"><button class="btn" type="button" id="sqM">📖 مصحفه وأخطاؤه</button>${miss.length ? '<button class="btn" type="button" id="sqR">🔔 ذكّره بواجباته</button>' : ''}<button class="btn" type="button" id="sqS">📥 تسليماته</button><button class="btn" type="button" id="sqW">👀 في المتابعة</button><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => {
       $('#sqM', m).onclick = () => { closeModal(); openStudentMushaf(st); };
       $('#sqW', m).onclick = () => goTab('watch');

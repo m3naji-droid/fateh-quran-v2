@@ -1820,3 +1820,6 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .ch-mode label:has(input:checked) { border-color: var(--green); background: var(--green-2); }
 /* أثناء فتح لوحة المفاتيح أو قائمة الاختيار على الجوال: يختفي الشريط السفلي حتى لا يعلق في منتصف الشاشة */
 @media (max-width: 900px) { body.kb-open .tnav { display: none !important; } }
+.sq-hm summary { cursor: pointer; }
+.sq-hmt { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+.sq-hmt th, .sq-hmt td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: center; }
