@@ -2507,6 +2507,34 @@ function viewStudent(app) {
       return { board: B, myRank: R };
     } catch (e) { console.warn('local board', e); return { board, myRank }; }
   }
+  /**
+   * قائمة «صاحب الهمة العالية» في جوال الطالب: نقاطه فيها من سجلات تدريبه المحفوظة نفسها
+   * (وما ينتظر الإرسال)، فتتحدّث فوراً. لا يُكتب شيء، وأي خطأ يعيد القائمة المنشورة كما هي.
+   */
+  function listsWithMine(lists, lr, myHim) {
+    if (!lists?.hm || !myHim) return { lists, lr };
+    try {
+      const Ls = JSON.parse(JSON.stringify(lists)), R = lr ? JSON.parse(JSON.stringify(lr)) : {};
+      const q = hmQueue(), ym = Ls.ym || '';
+      const cmp = (a, b) => b.pts - a.pts || b.days - a.days || String(a.name).localeCompare(String(b.name), 'ar');
+      [['m', (d) => (d || '').startsWith(ym)], ['a', () => true]].forEach(([per, inP]) => {
+        const P = Ls.hm[per]; if (!P) return;
+        const days = new Set();
+        let pts = 0, ayat = 0, mins = 0;
+        myHim.forEach((h) => { if (!(h.hp > 0) || !inP(h.d)) return; pts += h.hp; ayat += h.ha || 0; mins += h.hm || 0; days.add(h.d); });
+        q.forEach((x) => { if (!inP(x.day)) return; pts += x.pts || 0; ayat += x.ayat || 0; mins += x.mins || 0; if (x.pts > 0) days.add(x.day); });
+        if (!(pts > 0)) return;
+        const mine = { pn: me.id, name: me.name, classId: me.classId, pts, ayat, mins, days: days.size };
+        const place = (L) => { const all = [...(L || []).filter((r) => r.pn !== me.id), mine].sort(cmp), at = all.indexOf(mine); return { L: all.slice(0, HM.top), at: at < HM.top ? at + 1 : null }; };
+        const a = place(P.all); P.all = a.L;
+        P.byClass = P.byClass || {}; const c = place(P.byClass[me.classId]); P.byClass[me.classId] = c.L;
+        R.hm = R.hm || {};
+        if (a.at) R.hm[per + 's'] = a.at;
+        if (c.at) R.hm[per + 'c'] = c.at;
+      });
+      return { lists: Ls, lr: R };
+    } catch (e) { console.warn('local lists', e); return { lists, lr }; }
+  }
   /** لوحة الشرف للطالب: تتحدّث لحظة نشرها، ومعها «نقاطك الآن» بما كسبه بعد آخر تحديث */
   async function drawHonor(body) {
     body.innerHTML = '<div class="loading">جارٍ تحميل لوحة الشرف…</div>';
@@ -2530,7 +2558,8 @@ function viewStudent(app) {
         <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك الأخير، وقد أُضيفت إلى ترتيبك في اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
       const L = boardWithMine(board, myRank, pend);
       mountBoard($('#hbB', body), L.board, { me: me.id, myClass: me.classId, myRank: L.myRank, classes: data.classes });
-      mountLists($('#lsB', body), board?.lists, { me: me.id, myClass: me.classId, myRank: myRank?.lists, classes: data.classes });
+      const LL = listsWithMine(board?.lists, myRank?.lists, myHim);
+      mountLists($('#lsB', body), LL.lists, { me: me.id, myClass: me.classId, myRank: LL.lr, classes: data.classes });
       if (first) {
         first = false;
         // احتفال أول مرة يدخل فيها الخمسة الأوائل في صفه أو المرحلة (لكل شهر)
