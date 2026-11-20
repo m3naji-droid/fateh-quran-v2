@@ -192,6 +192,8 @@ const local = {
   watchMyHimmaAll(pn, cb) { let last = ''; const f = () => { const L = Object.values(LS.get('himma', {})).filter((h) => h.pn === pn), v = JSON.stringify(L); if (v !== last) { last = v; cb(L); } }; f(); const id = setInterval(f, 2000); return () => clearInterval(id); },
   watchAllHimma(cb) { let last = ''; const f = () => { const v = localStorage.fp_himma || ''; if (v !== last) { last = v; cb(Object.values(LS.get('himma', {}))); } }; f(); const id = setInterval(f, 3000); return () => clearInterval(id); },
   async getChallengeCfg() { return LS.get('chCfg', { off: false }); },
+  async getLimits() { return LS.get('limits', {}); },
+  async setLimits(x) { LS.set('limits', x); },
   async setChallengeCfg(c) { LS.set('chCfg', c); },
   // «مصحفي»: خريطة الحفظ (مستند واحد لكل طالب)
   async getProgress(pn) { return LS.get('progress_' + pn, null); },
@@ -614,6 +616,8 @@ async function makeCloud() {
     async sendCheer(tid, mid, pn, name, to, k) { await setDoc(doc(db, 'tourneys', tid, 'live', `c_${mid}_${pn}`), { cm: mid, pn, name, to, k, at: now(), seq: increment(1), [to === 'a' ? 'na' : 'nb']: increment(1) }, { merge: true }); },
     watchCheers(tid, mid, cb) { let off = () => {}; ensureAnon().then(() => { off = onSnapshot(query(collection(db, 'tourneys', tid, 'live'), where('cm', '==', mid)), (s) => cb(s.docs.map((d) => d.data())), (e) => console.warn('cheers', e)); }); return () => off(); },
     async getChallengeCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'challengeCfg')).catch(() => null); return d?.exists() ? d.data() : { off: false }; },
+    async getLimits() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'limits')).catch(() => null); return d?.exists() ? d.data() : {}; },
+    async setLimits(x) { await setDoc(doc(db, 'leaderboard', 'limits'), x); },
     async setChallengeCfg(c) { await setDoc(doc(db, 'leaderboard', 'challengeCfg'), c); },
     async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
     async saveProgress(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'map'), { ...patch, at: now() }, { merge: true }); },

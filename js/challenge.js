@@ -2,6 +2,8 @@
 // الفائز: الأدق، ثم الأسرع (كلمات في الدقيقة) عند التعادل. النقاط: الفائز ٣، والمشارك ١، والتعادل ٢ لكلٍّ منهما.
 export const CH_HOURS = 48;
 export const CH_DAILY = 3;
+/** الحدود اليومية التي يضبطها المعلم (leaderboard/limits): عدد التحديات التي يرسلها الطالب في اليوم */
+export const CH_LIM = { daily: CH_DAILY };
 export const CH_DEFAULT_PTS = { win: 3, lose: 1, tie: 2, cancel: 1 };
 /** التحديات الجديدة (v: 2) لا تُلغى مجاناً: من يلغيها بعد قبولها يخسر نقطة. القديمة تُلغى مجاناً. */
 export const CH_V = 2;

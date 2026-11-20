@@ -1823,3 +1823,4 @@ body > div.ie-ov, .ie-ov { position: fixed; inset: 0; z-index: 1000; background:
 .sq-hm summary { cursor: pointer; }
 .sq-hmt { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
 .sq-hmt th, .sq-hmt td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: center; }
+.lim-box { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }

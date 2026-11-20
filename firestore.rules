@@ -6,12 +6,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    // الحدود اليومية التي يضبطها المعلم (leaderboard/limits)، وإلا فالقيم الأصلية
+    function lim(k, d) { let p = /databases/$(database)/documents/leaderboard/limits; return exists(p) ? get(p).data.get(k, d) : d; }
     // يوم الرياض الحالي بصيغة 20261118 (لحد التحديات اليومي)
     function rdKey() { let t = request.time + duration.value(3, 'h'); return string(t.year() * 10000 + t.month() * 100 + t.day()); }
     // حد ٣ تحديات يومياً: إنشاء التحدي يجب أن يرفع عدّاد اليوم بواحد في الدفعة نفسها، ولا يتجاوز ٣
     function chDayOk(pn) {
       let p = /databases/$(database)/documents/roster/$(pn)/chday/$(rdKey());
-      return existsAfter(p) && getAfter(p).data.n <= 3
+      return existsAfter(p) && getAfter(p).data.n <= lim('chDaily', 3)
         && ((!exists(p) && getAfter(p).data.n == 1) || (exists(p) && getAfter(p).data.n == get(p).data.n + 1));
     }
     function isTeacher() {
@@ -257,14 +259,17 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['d', 'practice', 'tasks', 'sec', 'at'])
           && request.resource.data.d == day;
       }
-      // نقاط «الهمة العالية» اليومية: يكتبها الطالب لنفسه بسقف ٢٠٠ نقطة و٣٠ دقيقة في اليوم
+      // نقاط «الهمة العالية» اليومية: يكتبها الطالب لنفسه بسقف يضبطه المعلم (أصلاً ٢٠٠) و٣٠ دقيقة في اليوم
       match /himma/{day} {
         allow read: if isTeacher() || isStudent(pn);
         allow create, update: if isStudent(pn)
           && request.resource.data.keys().hasOnly(['d', 'hp', 'ha', 'hm', 'hs', 'at'])
           && request.resource.data.get('hs', 0) is number && request.resource.data.get('hs', 0) >= 0 && request.resource.data.get('hs', 0) <= 14400
           && request.resource.data.d == day
-          && request.resource.data.hp is number && request.resource.data.hp >= 0 && request.resource.data.hp <= 200
+          && request.resource.data.hp is number && request.resource.data.hp >= 0
+          // سقف اليوم يضبطه المعلم (حتى ١٠٠٠)، ويُقبل حفظ الوقت وحده إن لم تتغير النقاط
+          && (request.resource.data.hp <= lim('hmCap', 200) || (resource != null && request.resource.data.hp == resource.data.hp))
+          && request.resource.data.hp <= 1000
           && request.resource.data.hm is number && request.resource.data.hm >= 0 && request.resource.data.hm <= 30;
       }
       // «اقرأ وارتقِ»: الكلمات التي تعثّر فيها الطالب بتسجيلها (صغير)، يسمعها المعلم ويحكم عليها ثم يُحذف الصوت
@@ -291,7 +296,7 @@ service cloud.firestore {
         allow read: if isTeacher() || isStudent(pn);
         allow create: if isStudent(pn) && d == rdKey() && request.resource.data.keys().hasOnly(['n']) && request.resource.data.n == 1;
         allow update: if isStudent(pn) && d == rdKey() && request.resource.data.keys().hasOnly(['n'])
-          && request.resource.data.n == resource.data.n + 1 && request.resource.data.n <= 3;
+          && request.resource.data.n == resource.data.n + 1 && request.resource.data.n <= lim('chDaily', 3);
         allow delete: if isTeacher();
       }
       match /feedback/{fid} {

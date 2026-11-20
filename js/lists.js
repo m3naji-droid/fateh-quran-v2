@@ -27,10 +27,12 @@ function saveState(pn, day, st) {
  * يحسب ما يستحقه تسميع تدريب: { pts, ayat, mins } بعد تطبيق السقوف، ويحدّث حالة اليوم.
  * sub: { surah, from, to, percent, statuses, duration }، srOK: هل يعمل التعرّف على الكلام
  */
-export function earnHimma(pn, day, sub, srOK) {
+export function earnHimma(pn, day, sub, srOK, base = null) {
   const st = dayState(pn, day);
   let pts = 0, ayat = 0, mins = 0;
-  const room = () => HM.dayCap - st.pts - pts;
+  // base: مجموع اليوم الحقيقي من قاعدة البيانات (يشمل أجهزته الأخرى)، فلا يتجاوز السقف من جهازين
+  const used = base == null ? st.pts : Math.max(base, 0);
+  const room = () => HM.dayCap - used - pts;
   const sc = ayahScores(sub).filter((x) => x.p >= HM.okP);
   if (sc.length) {
     sc.forEach(({ a }) => {
@@ -47,6 +49,8 @@ export function earnHimma(pn, day, sub, srOK) {
   return { pts, ayat, mins };
 }
 
+/** يضبط المعلم سقف همّة التدريب اليومي (بين ٢٠ و١٠٠٠) */
+export function setHmCap(n) { const v = Math.round(+n); if (Number.isFinite(v) && v >= 20 && v <= 1000) HM.dayCap = v; }
 /** نسخة من حالة اليوم للعرض الحي أثناء التدريب (دون حفظ) */
 export function himmaPeek(pn, day) { const st = dayState(pn, day); return { pts: st.pts || 0, k: { ...(st.k || {}) } }; }
 /** ما جمعه الطالب اليوم على هذا الجهاز: { pts, mins } */
