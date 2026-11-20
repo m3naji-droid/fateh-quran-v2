@@ -2464,6 +2464,47 @@ function viewStudent(app) {
     };
   }
 
+  /**
+   * لوحة الطالب في جواله: نضيف إلى آخر لوحة منشورة ما كسبه من التدريب بعدها، ونعيد ترتيبه هو فقط
+   * (في قائمة صفه، والمرحلة، وتحدي الصفوف). لا يُكتب شيء في قاعدة البيانات؛ والترتيب الرسمي للجميع
+   * يصل حين ينشر المعلم اللوحة. أي خطأ هنا يعيد اللوحة المنشورة كما هي.
+   */
+  function boardWithMine(board, myRank, pend) {
+    if (!board || !(pend > 0)) return { board, myRank };
+    try {
+      const B = JSON.parse(JSON.stringify(board)), R = myRank ? JSON.parse(JSON.stringify(myRank)) : null, TOP = 5;
+      const r1 = (n) => Math.round(n * 10) / 10;
+      const cmp = (a, b) => b.points - a.points || (b.tasks || 0) - (a.tasks || 0) || String(a.name).localeCompare(String(b.name), 'ar');
+      const cls = data.classes.find((c) => c.id === me.classId);
+      ['month', 'all'].forEach((per) => {
+        const P = B[per]; if (!P) return;
+        const old = R?.[per]?.points ?? (P.stage || []).find((x) => x.id === me.id)?.points ?? (P.byClass?.[me.classId] || []).find((x) => x.id === me.id)?.points ?? 0;
+        const pts = r1(old + pend);
+        const mine = (L) => (L || []).find((x) => x.id === me.id);
+        const ym = per === 'month' && /^\d{4}-\d{2}$/.test(P.ym || '') ? P.ym : '';
+        const tasks = mine(P.stage)?.tasks ?? mine(P.byClass?.[me.classId])?.tasks ?? new Set((data.subs || []).filter((x) => x.taskId && (!ym || (x.createdAt || '').startsWith(ym))).map((x) => x.taskId)).size;
+        /** يضع الطالب في قائمة «الخمسة الأوائل» إن استحق، ويعيد مركزه فيها (أو null) */
+        const place = (L, extra) => {
+          const list = (L || []).filter((x) => x.id !== me.id);
+          const me1 = { id: me.id, name: me.name, points: pts, tasks, ...extra };
+          const all = [...list, me1].sort(cmp), at = all.indexOf(me1);
+          if (at < TOP) return { L: all.slice(0, TOP), at: at + 1, fifth: null };
+          return { L: list.slice(0, TOP), at: null, fifth: all[TOP - 1]?.points ?? 0 };
+        };
+        const byC = place(P.byClass?.[me.classId], {}); if (P.byClass) P.byClass[me.classId] = byC.L;
+        const st = place(P.stage, { className: cls?.name || '', classId: me.classId }); P.stage = st.L;
+        // تحدي الصفوف: يزيد مجموع صفه بما كسبه
+        if (Array.isArray(P.classes)) { const c = P.classes.find((x) => x.id === me.classId); if (c) { c.score = r1(c.score + pend); if (old <= 0 && pts > 0) c.active = (c.active || 0) + 1; P.classes.sort((a, b) => b.score - a.score || b.active - a.active); } }
+        // مرتبته: داخل الخمسة نعرفها بالضبط، وخارجها تبقى كما كانت (لا تسوء) ويتحدّث الفارق عن الخامس
+        if (R?.[per]) {
+          const q = R[per]; q.points = pts;
+          if (byC.at) { q.cls = byC.at; q.toClassTop = 0; } else if (q.cls != null || pts > 0) { q.cls = q.cls || null; q.toClassTop = r1(Math.max(0.1, (byC.fifth ?? 0) - pts + 0.1)); }
+          if (st.at) { q.stage = st.at; q.toStageTop = 0; } else if (q.stage != null || pts > 0) { q.stage = q.stage || null; q.toStageTop = r1(Math.max(0.1, (st.fifth ?? 0) - pts + 0.1)); }
+        }
+      });
+      return { board: B, myRank: R };
+    } catch (e) { console.warn('local board', e); return { board, myRank }; }
+  }
   /** لوحة الشرف للطالب: تتحدّث لحظة نشرها، ومعها «نقاطك الآن» بما كسبه بعد آخر تحديث */
   async function drawHonor(body) {
     body.innerHTML = '<div class="loading">جارٍ تحميل لوحة الشرف…</div>';
@@ -2477,9 +2518,10 @@ function viewStudent(app) {
       // ما كسبه الطالب من التدريب بعد آخر نشر للوحة (يظهر فوراً، ويدخل الترتيب عند النشر)
       const at = Date.parse(board?.at || '') || 0, pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) / HM.ratio;
       const pts = (myRank?.month?.points || 0) + pend;
-      $('#hbLive', body).innerHTML = `<div class="hb-live"><span class="on-dot"></span><div><b>نقاطك الآن: ${fmt10(Math.round(pts * 10) / 10)}</b>${myRank?.month?.cls ? ` · ترتيبك في صفك ${ar(myRank.month.cls)}` : ''}${myRank?.month?.stage ? ` · وعلى المرحلة ${ar(myRank.month.stage)}` : ''}
-        <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك الأخير، وتدخل في الترتيب لحظة تحديث اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
-      mountBoard($('#hbB', body), board, { me: me.id, myClass: me.classId, myRank, classes: data.classes });
+      $('#hbLive', body).innerHTML = `<div class="hb-live"><span class="on-dot"></span><div><b>نقاطك الآن: ${fmt10(Math.round(pts * 10) / 10)}</b>${(() => { const q = boardWithMine(board, myRank, pend).myRank?.month; return `${q?.cls ? ` · ترتيبك في صفك ${ar(q.cls)}` : ''}${q?.stage ? ` · وعلى المرحلة ${ar(q.stage)}` : ''}`; })()}
+        <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك الأخير، وقد أُضيفت إلى ترتيبك في اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
+      const L = boardWithMine(board, myRank, pend);
+      mountBoard($('#hbB', body), L.board, { me: me.id, myClass: me.classId, myRank: L.myRank, classes: data.classes });
       mountLists($('#lsB', body), board?.lists, { me: me.id, myClass: me.classId, myRank: myRank?.lists, classes: data.classes });
       if (first) {
         first = false;
