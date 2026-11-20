@@ -1153,7 +1153,7 @@ function viewStudent(app) {
         }
         pref.set(hqKey(), hmQueue().filter((x) => x.id !== it.id)); HQ.err = '';
       }
-    } finally { HQ.busy = false; paintHmBar(); paintHmWarn(); }
+    } finally { HQ.busy = false; paintHmBar(); paintHmWarn(); window.__honorPaint?.(); }
   }
   /** استرجاع ما ضاع قبل الإصدار ٤٠: يقارن حصيلة الجهاز لآخر يوم تدرّب فيه بما في قاعدة البيانات، ويرسل الفرق فقط (لا يزيد على ما سجّله الجهاز) */
   async function recoverHimma() {
@@ -2510,7 +2510,7 @@ function viewStudent(app) {
   /** لوحة الشرف للطالب: تتحدّث لحظة نشرها، ومعها «نقاطك الآن» بما كسبه بعد آخر تحديث */
   async function drawHonor(body) {
     body.innerHTML = '<div class="loading">جارٍ تحميل لوحة الشرف…</div>';
-    let board, myRank, first = true;
+    let board, myRank, myHim = null, first = true;
     const paint = () => {
       if (tab !== 'honor' || board === undefined || myRank === undefined) return;
       if (first) {
@@ -2518,7 +2518,13 @@ function viewStudent(app) {
         drawChCard($('#chCard', body));
       }
       // ما كسبه الطالب من التدريب بعد آخر نشر للوحة (يظهر فوراً، ويدخل الترتيب عند النشر)
-      const at = Date.parse(board?.at || '') || 0, pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) / HM.ratio;
+      const at = Date.parse(board?.at || '') || 0, queued = hmQueue().reduce((k, x) => k + (x.pts || 0), 0) / HM.ratio;
+      let pend;
+      if (myHim && myRank?.hb != null) {
+        // الطريقة الدقيقة: لا تعتمد على ساعة الجوال، ولا تحسب ما رفضته قاعدة البيانات
+        const cur = myHim.reduce((k, h) => k + (h.hp > 0 ? Math.round((h.hp / HM.ratio) * 10) / 10 : 0), 0);
+        pend = Math.max(0, Math.round((cur - myRank.hb) * 10) / 10) + queued;
+      } else pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) / HM.ratio; // قبل أن ينشر المعلم بالإصدار الجديد
       const pts = (myRank?.month?.points || 0) + pend;
       $('#hbLive', body).innerHTML = `<div class="hb-live"><span class="on-dot"></span><div><b>نقاطك الآن: ${fmt10(Math.round(pts * 10) / 10)}</b>${(() => { const q = boardWithMine(board, myRank, pend).myRank?.month; return `${q?.cls ? ` · ترتيبك في صفك ${ar(q.cls)}` : ''}${q?.stage ? ` · وعلى المرحلة ${ar(q.stage)}` : ''}`; })()}
         <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك الأخير، وقد أُضيفت إلى ترتيبك في اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
@@ -2539,8 +2545,9 @@ function viewStudent(app) {
     try {
       const o1 = store.watchBoard((b) => { board = b; paint(); });
       const o2 = store.watchMyRank(me, (r) => { myRank = r ? { ...(me.rankInfo || {}), ...r } : null; paint(); });
+      const o3 = store.watchMyHimmaAll ? store.watchMyHimmaAll(me.id, (L) => { myHim = L; paint(); }) : null;
       window.__honorPaint = paint;
-      offHonor = () => { o1?.(); o2?.(); window.__honorPaint = null; };
+      offHonor = () => { o1?.(); o2?.(); o3?.(); window.__honorPaint = null; };
     } catch (e) { body.innerHTML = `<div class="empty">تعذر تحميل لوحة الشرف: ${esc(e.code || e.message)}</div>`; }
   }
 
@@ -4937,6 +4944,9 @@ function viewTeacher(app) {
     if ((D.grants === undefined || D.khatmas === undefined || D.seasons === undefined) && (publishBoard.wait = (publishBoard.wait || 0) + 1) < 20) { schedulePublish(800); return; }
     const all = boardSubs();
     const { board, ranks } = computeBoard(all, D.students, D.classes, new Date(), roundPer());
+    // ما دخل اللوحة من نقاط التدريب لكل طالب (بالتقريب نفسه)، ليعرف جواله بدقة ما كسبه بعد هذا النشر
+    { const hbm = {}; (D.himma || []).forEach((h) => { if (h.hp > 0) hbm[h.pn] = (hbm[h.pn] || 0) + Math.round((h.hp / HM.ratio) * 10) / 10; });
+      Object.keys(ranks).forEach((pn) => { ranks[pn].hb = Math.round((hbm[pn] || 0) * 10) / 10; }); }
     // الموسم الجاري: ترتيب كل طالب، وأوائل المرحلة وكل صف للطلاب
     const ss = activeSeason(D.seasons || []);
     if (ss) {
