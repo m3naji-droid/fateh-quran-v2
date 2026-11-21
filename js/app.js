@@ -1201,6 +1201,7 @@ function viewStudent(app) {
   function paintHmBar() {
     const el = $('#hmBar', app); if (!el) return;
     const t = hmTotal(), cap = t >= HM.dayCap, rt = hmRate(riyadhDay()), frac = (t * rt) % 1;
+    const rem = Math.max(1, Math.ceil((1 - frac) / rt - 1e-9)); // كم همّة تبقى لنقطة الشرف التالية بقيمة اليوم
     el.innerHTML = `<div class="hm-row"><span>🌟 همّتك اليوم <b>${ar(t)}</b><small> / ${ar(HM.dayCap)}</small></span><span>⭐ شرف اليوم <b>${arDec(t * rt)}</b></span>${HS.pts ? `<button type="button" class="btn sm ghost" id="hmEnd">إنهاء وعرض الملخص</button>` : ''}</div>
       <div class="hm-track"><i style="width:${cap ? 100 : frac * 100}%"></i></div>
       ${(() => { const q = hmQueue().reduce((k, x) => k + (x.pts || 0), 0); return q ? `<small class="hm-sync ${HQ.err === 'auth' ? 'bad' : ''}">${HQ.err === 'auth' ? `⚠️ ${ar(q)} همّة لم تُحفظ: سجّل الدخول من جديد` : `⏳ جارٍ حفظ ${ar(q)} همّة…`}</small>` : '<small class="hm-sync ok">☁️ نقاطك محفوظة وتُحسب في لوحة الشرف</small>'; })()}
