@@ -55,9 +55,16 @@ export function setHmCap(n) { const v = Math.round(+n); if (Number.isFinite(v) &
 export function himmaPeek(pn, day) { const st = dayState(pn, day); return { pts: st.pts || 0, k: { ...(st.k || {}) } }; }
 /** ما جمعه الطالب اليوم على هذا الجهاز: { pts, mins } */
 export function himmaToday(pn, day) { const st = dayState(pn, day); return { pts: st.pts || 0, mins: st.mins || 0 }; }
-/** نقاط الهمة في لوحة الشرف: نقطة لكل HM.ratio من نقاط الهمة، مؤرّخة بيومها */
+/** قيمة نقطة الهمة بنقاط الشرف يحددها المعلم بتواريخ سريان: [{ from: 'YYYY-MM-DD', r }]، وr = كم نقطة شرف تساوي همّة واحدة.
+ *  قبل أول تاريخ تبقى القيمة الأصلية (١ ÷ HM.ratio)، فلا تتغير نقاط الأيام السابقة. */
+let RATES = [];
+export function setHmRates(list) { RATES = (Array.isArray(list) ? list : []).filter((x) => x && /^\d{4}-\d{2}-\d{2}$/.test(x.from) && +x.r > 0).map((x) => ({ from: x.from, r: +x.r })).sort((a, b) => a.from.localeCompare(b.from)); }
+export const HM_BASE = () => 1 / HM.ratio;
+export function hmRate(day) { let r = 1 / HM.ratio; for (const x of RATES) if (x.from <= day) r = x.r; return r; }
+export const hmHonor = (pts, day) => Math.round(pts * hmRate(day) * 10) / 10;
+/** نقاط الهمة في لوحة الشرف: همّة اليوم × قيمة الهمة في ذلك اليوم، مؤرّخة بيومها */
 export function himmaBonus(himma) {
-  return (himma || []).filter((h) => h.hp > 0).map((h) => ({ pn: h.pn, bonus: Math.round((h.hp / HM.ratio) * 10) / 10, createdAt: h.d + 'T12:00:00+03:00' }));
+  return (himma || []).filter((h) => h.hp > 0).map((h) => ({ pn: h.pn, bonus: hmHonor(h.hp, h.d), createdAt: h.d + 'T12:00:00+03:00' }));
 }
 
 /* ---------- حساب القائمتين (على جهاز المعلم، وتُنشر في لوحة الشرف) ---------- */

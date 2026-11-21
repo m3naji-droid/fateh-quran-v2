@@ -7,7 +7,7 @@ import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
 import { CH_HOURS, CH_DAILY, CH_LIM, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
 import { mountTalqeen } from './talqeen.js';
-import { earnHimma, himmaPeek, setHmCap, himmaToday, himmaBonus, computeLists, mountLists, HM } from './lists.js';
+import { earnHimma, himmaPeek, setHmCap, setHmRates, hmRate, hmHonor, himmaToday, himmaBonus, computeLists, mountLists, HM } from './lists.js';
 import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
 import { mountAyahOfDay } from './ayahday.js';
 import { mountIqraStudent, mountIqraTeacher, iqraCfg, iqraBonus, IQ_DEFAULT } from './iqra.js';
@@ -1107,7 +1107,7 @@ function viewStudent(app) {
   /** الحدود اليومية من المعلم: سقف همّة التدريب وعدد التحديات */
   async function loadLimits() {
     const L = (await store.getLimits().catch(() => null)) || {};
-    setHmCap(L.hmCap || 200);
+    setHmCap(L.hmCap || 200); setHmRates(L.hmRates);
     const d = Math.round(+L.chDaily); CH_LIM.daily = Number.isFinite(d) && d >= 1 && d <= 10 ? d : CH_DAILY;
   }
   /** همّة اليوم الحقيقية: ما حُفظ في قاعدة البيانات (من كل أجهزته) + ما ينتظر الإرسال من هذا الجهاز */
@@ -1123,8 +1123,8 @@ function viewStudent(app) {
       if (!r.pts) { if (secs >= 3) hmEnqueue(day, { pts: 0, ayat: 0, mins: 0, secs }); paintHmBar(); return; }
       hmEnqueue(day, { ...r, secs: secs >= 3 ? secs : 0 }); // تُحفظ في الجهاز أولاً ثم تُرسل، وتُعاد المحاولة حتى تصل
       HS.pts += r.pts;
-      const total = before + r.pts, newHonor = Math.floor(total / HM.ratio) > Math.floor(before / HM.ratio);
-      hmPop(`<b>🌟 <bdi dir="ltr">+${ar(r.pts)}</bdi> ${r.mins ? 'همّة (دقائق تدريب)' : 'همّة'}</b><span>⭐ <bdi dir="ltr">+${arDec(r.pts / HM.ratio)}</bdi> شرف</span><small>مجموعك اليوم: ${ar(total)} همّة${total >= HM.dayCap ? ' · بلغت سقف اليوم 🎉' : ''}</small>${newHonor ? '<em>🎉 نقطة شرف جديدة!</em>' : ''}`);
+      const rt = hmRate(day), total = before + r.pts, newHonor = Math.floor(total * rt + 1e-9) > Math.floor(before * rt + 1e-9);
+      hmPop(`<b>🌟 <bdi dir="ltr">+${ar(r.pts)}</bdi> ${r.mins ? 'همّة (دقائق تدريب)' : 'همّة'}</b><span>⭐ <bdi dir="ltr">+${arDec(r.pts * rt)}</bdi> شرف</span><small>مجموعك اليوم: ${ar(total)} همّة${total >= HM.dayCap ? ' · بلغت سقف اليوم 🎉' : ''}</small>${newHonor ? '<em>🎉 نقطة شرف جديدة!</em>' : ''}`);
       paintHmBar();
     } catch (e) { console.warn('himma', e); }
   }
@@ -1200,9 +1200,9 @@ function viewStudent(app) {
   /** شريط أعلى التدريب: همّة اليوم، وشرفه، وكم تفصله عن نقطة الشرف التالية */
   function paintHmBar() {
     const el = $('#hmBar', app); if (!el) return;
-    const t = hmTotal(), cap = t >= HM.dayCap, rem = HM.ratio - (t % HM.ratio);
-    el.innerHTML = `<div class="hm-row"><span>🌟 همّتك اليوم <b>${ar(t)}</b><small> / ${ar(HM.dayCap)}</small></span><span>⭐ شرف اليوم <b>${arDec(t / HM.ratio)}</b></span>${HS.pts ? `<button type="button" class="btn sm ghost" id="hmEnd">إنهاء وعرض الملخص</button>` : ''}</div>
-      <div class="hm-track"><i style="width:${cap ? 100 : ((t % HM.ratio) / HM.ratio) * 100}%"></i></div>
+    const t = hmTotal(), cap = t >= HM.dayCap, rt = hmRate(riyadhDay()), frac = (t * rt) % 1;
+    el.innerHTML = `<div class="hm-row"><span>🌟 همّتك اليوم <b>${ar(t)}</b><small> / ${ar(HM.dayCap)}</small></span><span>⭐ شرف اليوم <b>${arDec(t * rt)}</b></span>${HS.pts ? `<button type="button" class="btn sm ghost" id="hmEnd">إنهاء وعرض الملخص</button>` : ''}</div>
+      <div class="hm-track"><i style="width:${cap ? 100 : frac * 100}%"></i></div>
       ${(() => { const q = hmQueue().reduce((k, x) => k + (x.pts || 0), 0); return q ? `<small class="hm-sync ${HQ.err === 'auth' ? 'bad' : ''}">${HQ.err === 'auth' ? `⚠️ ${ar(q)} همّة لم تُحفظ: سجّل الدخول من جديد` : `⏳ جارٍ حفظ ${ar(q)} همّة…`}</small>` : '<small class="hm-sync ok">☁️ نقاطك محفوظة وتُحسب في لوحة الشرف</small>'; })()}
       <small class="muted">${cap ? '🎉 بلغت سقف اليوم، ما شاء الله! تدريبك بعده لا يزيد النقاط، وعُد غداً.' : `${rem === 1 ? 'نقطة همّة واحدة تفصلك' : rem === 2 ? 'نقطتا همّة تفصلانك' : `${ar(rem)} نقاط همّة تفصلك`} عن نقطة الشرف التالية · كل آية صحيحة (٨٠٪ فأكثر) = نقطة همّة.`}</small>`;
     const b = $('#hmEnd', el); if (b) b.onclick = () => practiceSummary();
@@ -1217,8 +1217,8 @@ function viewStudent(app) {
     const rkTxt = rk?.ms ? `<div class="hm-sum-rk">🏅 ترتيبك في «صاحب الهمة العالية» هذا الشهر: <b>${ar(rk.ms)}</b> على المقرأة${rk.mc ? `، و<b>${ar(rk.mc)}</b> في صفك` : ''}<small class="muted">حسب آخر تحديث للوحة الشرف، ويُضاف تدريب اليوم عند تحديثها.</small></div>` : '<div class="hm-sum-rk small muted">يظهر ترتيبك في «صاحب الهمة العالية» بعد أن يحدّث معلمك لوحة الشرف.</div>';
     whenModalFree(() => {
       openModal(`<div class="stack hm-sum"><h2 style="margin:0">🎯 ملخص تدريبك</h2>
-        <div class="hm-sum-g"><div><b>${ar(s0.n)}</b><span>${s0.n === 1 ? 'تسميع' : s0.n === 2 ? 'تسميعان' : s0.n <= 10 ? 'تسميعات' : 'تسميعاً'}</span></div><div><b dir="ltr">+${ar(s0.pts)}</b><span>🌟 همّة</span></div><div><b dir="ltr">+${arDec(s0.pts / HM.ratio)}</b><span>⭐ شرف</span></div></div>
-        <p style="margin:0">مجموعك اليوم: <b>${ar(t)}</b> همّة = <b>${arDec(t / HM.ratio)}</b> نقطة شرف${t >= HM.dayCap ? ' (بلغت السقف 🎉)' : ''}.</p>
+        <div class="hm-sum-g"><div><b>${ar(s0.n)}</b><span>${s0.n === 1 ? 'تسميع' : s0.n === 2 ? 'تسميعان' : s0.n <= 10 ? 'تسميعات' : 'تسميعاً'}</span></div><div><b dir="ltr">+${ar(s0.pts)}</b><span>🌟 همّة</span></div><div><b dir="ltr">+${arDec(s0.pts * hmRate(riyadhDay()))}</b><span>⭐ شرف</span></div></div>
+        <p style="margin:0">مجموعك اليوم: <b>${ar(t)}</b> همّة = <b>${arDec(t * hmRate(riyadhDay()))}</b> نقطة شرف${t >= HM.dayCap ? ' (بلغت السقف 🎉)' : ''}.</p>
         ${s0.pts ? '' : '<p class="small muted" style="margin:0">لم تُحسب نقاط في هذه الجلسة: تُحسب الآية إذا قرأتها بدقة ٨٠٪ فأكثر، وحتى ٣ مرات في اليوم.</p>'}
         ${rkTxt}<div class="row" style="justify-content:center"><button class="btn primary" type="button" data-close>أحسنت، بارك الله فيك</button></div></div>`);
       if (s0.pts) setTimeout(() => confetti(), 150);
@@ -2563,13 +2563,13 @@ function viewStudent(app) {
         drawChCard($('#chCard', body));
       }
       // ما كسبه الطالب من التدريب بعد آخر نشر للوحة (يظهر فوراً، ويدخل الترتيب عند النشر)
-      const at = Date.parse(board?.at || '') || 0, queued = hmQueue().reduce((k, x) => k + (x.pts || 0), 0) / HM.ratio;
+      const at = Date.parse(board?.at || '') || 0, queued = hmQueue().reduce((k, x) => k + (x.pts || 0) * hmRate(x.day || riyadhDay()), 0);
       let pend;
       if (myHim && myRank?.hb != null) {
         // الطريقة الدقيقة: لا تعتمد على ساعة الجوال، ولا تحسب ما رفضته قاعدة البيانات
-        const cur = myHim.reduce((k, h) => k + (h.hp > 0 ? Math.round((h.hp / HM.ratio) * 10) / 10 : 0), 0);
+        const cur = myHim.reduce((k, h) => k + (h.hp > 0 ? hmHonor(h.hp, h.d) : 0), 0);
         pend = Math.max(0, Math.round((cur - myRank.hb) * 10) / 10) + queued;
-      } else pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) / HM.ratio; // قبل أن ينشر المعلم بالإصدار الجديد
+      } else pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) * hmRate(riyadhDay()); // قبل أن ينشر المعلم بالإصدار الجديد
       // نجوم «العب وتعلّم» بعد آخر نشر (pb: ما دخل اللوحة منها)
       if (playPts != null && myRank?.pb != null) pend += Math.max(0, playPts - myRank.pb);
       const pts = (myRank?.month?.points || 0) + pend;
@@ -3110,7 +3110,8 @@ function viewTeacher(app) {
     document.addEventListener('click', (e) => { if (!e.target.closest('.tsearch')) out.hidden = true; });
   }
   /** بطاقة سريعة لطالب من البحث */
-  store.getLimits?.().then((L) => setHmCap(L?.hmCap || 200)).catch(() => {});
+  // قيمة الهمة بتواريخها لازمة قبل نشر اللوحة، وإلا حُسبت الأيام المعدّلة بالقيمة الأصلية
+  (store.getLimits?.() || Promise.resolve(null)).then((L) => { setHmCap(L?.hmCap || 200); setHmRates(L?.hmRates); }).catch(() => {}).finally(() => { D.limOk = true; schedulePublish?.(); });
   function openStudentQuick(pn) {
     const st = D.students.find((x) => x.id === pn); if (!st) return;
     const P = D.presence?.[pn], miss = missingOf(st, doneMap()), subs = D.subs.filter((x) => x.pn === pn).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -3125,7 +3126,7 @@ function viewTeacher(app) {
         const today = riyadhDay(), fmtS = (sec) => (sec >= 3600 ? `${ar(String(Math.round(sec / 360) / 10).replace(".", "٫"))} س` : `${ar(Math.round(sec / 60))} د`);
         return `<details class="sq-hm" ${H[0]?.d === today ? 'open' : ''}><summary><b>🌟 تدريبه المحفوظ</b> <small class="muted">${H[0]?.d === today ? `اليوم: ${ar(H[0].hp || 0)} همّة من ${ar(HM.dayCap)}${(H[0].hp || 0) >= HM.dayCap ? ' (بلغ سقف اليوم)' : ''}` : 'لم يُحفظ له تدريب اليوم'}</small></summary>
           ${H.length ? `<table class="sq-hmt"><tr><th>اليوم</th><th>همّة</th><th>آيات</th><th>وقت</th><th>آخر حفظ</th></tr>${H.map((h) => `<tr><td>${esc(h.d === today ? 'اليوم' : h.d)}</td><td>${ar(h.hp || 0)}</td><td>${ar(h.ha || 0)}</td><td>${h.hs ? fmtS(h.hs) : h.hm ? ar(h.hm) + ' د' : '—'}</td><td>${h.at ? esc(timeAgo(h.at)) : '—'}</td></tr>`).join('')}</table>` : '<p class="small muted" style="margin:6px 0 0">لا يوجد تدريب محفوظ له.</p>'}
-          <p class="small muted" style="margin:6px 0 0">كل آية صحيحة (٨٠٪ فأكثر) = همّة، والآية نفسها حتى ٣ مرات في اليوم، وسقف اليوم ${ar(HM.dayCap)} همّة (= ${ar(HM.dayCap / HM.ratio)} نقطة شرف).</p></details>`; })()}
+          <p class="small muted" style="margin:6px 0 0">كل آية صحيحة (٨٠٪ فأكثر) = همّة، والآية نفسها حتى ٣ مرات في اليوم، وسقف اليوم ${ar(HM.dayCap)} همّة (= ${arDec(HM.dayCap * hmRate(riyadhDay()))} نقطة شرف اليوم).</p></details>`; })()}
       <div class="row"><button class="btn" type="button" id="sqM">📖 مصحفه وأخطاؤه</button>${miss.length ? '<button class="btn" type="button" id="sqR">🔔 ذكّره بواجباته</button>' : ''}<button class="btn" type="button" id="sqS">📥 تسليماته</button><button class="btn" type="button" id="sqW">👀 في المتابعة</button><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => {
       $('#sqM', m).onclick = () => { closeModal(); openStudentMushaf(st); };
       $('#sqW', m).onclick = () => goTab('watch');
@@ -5016,11 +5017,11 @@ function viewTeacher(app) {
   async function publishBoard() {
     if (!D.students.length) return;
     // لا ننشر قبل أن تكتمل مصادر النقاط (حتى لا تنزل اللوحة لحظةً ثم تعود)
-    if ((D.grants === undefined || D.khatmas === undefined || D.seasons === undefined || D.play === undefined) && (publishBoard.wait = (publishBoard.wait || 0) + 1) < 20) { schedulePublish(800); return; }
+    if ((D.grants === undefined || D.khatmas === undefined || D.seasons === undefined || D.play === undefined || !D.limOk) && (publishBoard.wait = (publishBoard.wait || 0) + 1) < 20) { schedulePublish(800); return; }
     const all = boardSubs();
     const { board, ranks } = computeBoard(all, D.students, D.classes, new Date(), roundPer());
     // ما دخل اللوحة من نقاط التدريب لكل طالب (بالتقريب نفسه)، ليعرف جواله بدقة ما كسبه بعد هذا النشر
-    { const hbm = {}; (D.himma || []).forEach((h) => { if (h.hp > 0) hbm[h.pn] = (hbm[h.pn] || 0) + Math.round((h.hp / HM.ratio) * 10) / 10; });
+    { const hbm = {}; (D.himma || []).forEach((h) => { if (h.hp > 0) hbm[h.pn] = (hbm[h.pn] || 0) + hmHonor(h.hp, h.d); });
       Object.keys(ranks).forEach((pn) => { ranks[pn].hb = Math.round((hbm[pn] || 0) * 10) / 10; }); }
     // ونقاط نجوم «العب وتعلّم» التي دخلت اللوحة (pb)
     if (D.play && D.playMod) { const pbm = {}; D.playMod.playBonus(D.play, D.playCfg).forEach((x) => { pbm[x.pn] = (pbm[x.pn] || 0) + x.bonus; }); Object.keys(ranks).forEach((pn) => { ranks[pn].pb = pbm[pn] || 0; }); }
@@ -5982,14 +5983,30 @@ function viewTeacher(app) {
     setChPts(cfg.pts);
     let lim = {};
     try { lim = (await store.getLimits()) || {}; } catch {}
-    const chD = +lim.chDaily || CH_DAILY, hmC = +lim.hmCap || 200; setHmCap(hmC);
+    const chD = +lim.chDaily || CH_DAILY, hmC = +lim.hmCap || 200; setHmCap(hmC); setHmRates(lim.hmRates);
+    const today = riyadhDay(), rNow = hmRate(today), fx2 = (n) => ar(String(Math.round(n * 100) / 100)).replace('.', '٫');
+    const xOf = (r) => fx2(r / (1 / HM.ratio)), perPt = (r) => fx2(1 / r);
+    const rates = (lim.hmRates || []).slice().sort((a, b) => a.from.localeCompare(b.from));
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3>
         <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
       <label class="row small" style="gap:6px">نوع التحدي المسموح<select id="chModes"><option value="both" ${!cfg.modes || cfg.modes === 'both' ? 'selected' : ''}>الطالب يختار: غيباً أو نظراً</option><option value="hifz" ${cfg.modes === 'hifz' ? 'selected' : ''}>تسميع غيباً فقط</option><option value="recite" ${cfg.modes === 'recite' ? 'selected' : ''}>تلاوة نظراً فقط</option></select></label>
       <div class="lim-box"><b class="small">⏱️ الحدود اليومية (تبدأ كل يوم الساعة ١٢ ليلاً بتوقيت البحرين)</b>
         <div class="row" style="gap:10px;flex-wrap:wrap">
           <label class="row small" style="gap:6px">تحديات يرسلها الطالب في اليوم<select id="limCh">${[1, 2, 3, 4, 5, 6, 8, 10].map((n) => `<option value="${n}" ${n === chD ? 'selected' : ''}>${ar(n)}</option>`).join('')}</select></label>
-          <label class="row small" style="gap:6px">سقف همّة التدريب في اليوم<select id="limHm">${[50, 100, 150, 200, 300, 400, 500, 1000].map((n) => `<option value="${n}" ${n === hmC ? 'selected' : ''}>${ar(n)} همّة (= ${ar(n / 10)} نقطة شرف)</option>`).join('')}</select></label>
+          <label class="row small" style="gap:6px">سقف همّة التدريب في اليوم<select id="limHm">${[50, 100, 150, 200, 300, 400, 500, 1000].map((n) => `<option value="${n}" ${n === hmC ? 'selected' : ''}>${ar(n)} همّة (= ${fx2(n * rNow)} نقطة شرف)</option>`).join('')}</select></label>
+        </div>
+        <div class="hmr">
+          <b class="small">⭐ قيمة نقطة الهمة (في التدريب الحر)</b>
+          <p class="small" style="margin:0">اليوم: <b>١ همّة = ${fx2(rNow)} نقطة شرف</b> (كل ${perPt(rNow)} همّة = نقطة شرف)${Math.abs(rNow - 1 / HM.ratio) > 1e-9 ? ` · <span class="pill warn">×${xOf(rNow)} من الأصل</span>` : ' · القيمة الأصلية'}</p>
+          <div class="row" style="gap:8px;flex-wrap:wrap;align-items:end">
+            <label class="field" style="min-width:120px">١ همّة = (نقطة شرف)<input type="number" id="hmrV" min="0.01" max="10" step="0.01" value="${Math.round(rNow * 100) / 100}" inputmode="decimal"></label>
+            <label class="field" style="min-width:140px">يسري من<input type="date" id="hmrFrom" value="${today}"></label>
+            <label class="field" style="min-width:140px">حتى (اختياري)<input type="date" id="hmrTo" value=""></label>
+            <button type="button" class="btn primary sm" id="hmrSave">حفظ</button>
+          </div>
+          <div class="row small" style="gap:6px;flex-wrap:wrap">سريع: ${[1, 2, 3, 5, 10].map((m) => `<button type="button" class="btn sm ghost" data-hmx="${m}">×${ar(m)} (${fx2(m / HM.ratio)})</button>`).join('')}</div>
+          <p class="small muted" style="margin:0">التغيير يسري على همّة الأيام من تاريخ البدء فقط، ونقاط الأيام السابقة تبقى كما هي. وإذا حددت «حتى» تعود القيمة بعده تلقائياً إلى ما كانت عليه.</p>
+          ${rates.length ? `<ul class="hmr-list small">${rates.map((x, i) => `<li><span>من ${esc(fmtDay(x.from))}: ١ همّة = <b>${fx2(x.r)}</b> شرف (×${xOf(x.r)})${x.from <= today && (rates[i + 1]?.from || '9999') > today ? ' <span class="pill ok">الآن</span>' : x.from > today ? ' <span class="pill mute">قادم</span>' : ''}</span><button type="button" class="btn sm ghost danger" data-hmrdel="${i}" aria-label="حذف">✕</button></li>`).join('')}</ul>` : ''}
         </div></div>
       <p class="small muted" style="margin:0">هذا الشهر: ${month.length ? nWord(month.length, 'تحدٍّ واحد', 'تحديان', 'تحديات', 'تحدياً') : 'لا تحديات بعد'}، وجارٍ الآن ${ar(open.length)}، ومنذ البداية ${ar(L.length)}. حد كل طالب ${ar(CH_LIM.daily)} تحديات يومياً.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="chLog">📋 سجل التحديات كاملاً</button><button class="btn sm" type="button" id="chPtsBtn">⚙️ نقاط التحدي: فوز ${ar(CH_PTS.win)} · مشاركة ${ar(CH_PTS.lose)} · تعادل ${ar(CH_PTS.tie)} · إلغاء −${ar(CH_PTS.cancel)}</button></div>
@@ -5999,7 +6016,31 @@ function viewTeacher(app) {
     };
     const saveLim = async (patch, msg) => { try { lim = { ...lim, ...patch }; await store.setLimits(lim); if (patch.hmCap) { setHmCap(patch.hmCap); schedulePublish(300); } toast(msg); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); } };
     $('#limCh', host).onchange = (e) => saveLim({ chDaily: +e.target.value }, `صار حد التحديات ${ar(+e.target.value)} في اليوم لكل طالب.`);
-    $('#limHm', host).onchange = (e) => saveLim({ hmCap: +e.target.value }, `صار سقف همّة التدريب ${ar(+e.target.value)} في اليوم (= ${ar(+e.target.value / 10)} نقطة شرف).`);
+    $('#limHm', host).onchange = (e) => saveLim({ hmCap: +e.target.value }, `صار سقف همّة التدريب ${ar(+e.target.value)} في اليوم (= ${fx2(+e.target.value * rNow)} نقطة شرف).`);
+    host.querySelectorAll('[data-hmx]').forEach((b) => (b.onclick = () => { $('#hmrV', host).value = Math.round((+b.dataset.hmx / HM.ratio) * 100) / 100; }));
+    const saveRates = async (list, msg) => {
+      const prev = lim.hmRates;
+      try { lim = { ...lim, hmRates: list }; await store.setLimits(lim); setHmRates(list); schedulePublish(300); toast(msg); drawBody(); }
+      catch (x) { lim = { ...lim, hmRates: prev }; setHmRates(prev); toast('تعذر الحفظ: ' + (x.code || x.message)); }
+    };
+    $('#hmrSave', host).onclick = () => {
+      const r = Math.round(+$('#hmrV', host).value * 100) / 100, from = $('#hmrFrom', host).value, to = $('#hmrTo', host).value;
+      if (!(r >= 0.01 && r <= 10)) return toast('اكتب قيمة بين ٠٫٠١ و١٠.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return toast('اختر تاريخ البدء.');
+      if (to && to < from) return toast('تاريخ النهاية قبل تاريخ البدء.');
+      const after = to ? addDays(to, 1) : null, back = after ? hmRate(after) : null;
+      let list = rates.filter((x) => (after ? x.from < from || x.from > after : x.from < from));
+      list.push({ from, r });
+      if (after && !list.some((x) => x.from === after)) list.push({ from: after, r: back });
+      list.sort((a, b) => a.from.localeCompare(b.from));
+      const past = from < today ? ' (ويشمل أياماً سابقة)' : '';
+      saveRates(list, `حُفظ: ١ همّة = ${fx2(r)} نقطة شرف من ${fmtDay(from)}${to ? ' حتى ' + fmtDay(to) : ''}${past}. ستُحدَّث لوحة الشرف.`);
+    };
+    host.querySelectorAll('[data-hmrdel]').forEach((b) => (b.onclick = async () => {
+      const x = rates[+b.dataset.hmrdel];
+      if (x.from <= today && !(await confirmBox(`حذف هذه القيمة يغيّر نقاط الأيام من ${fmtDay(x.from)} إلى القيمة التي قبلها. متأكد؟`))) return;
+      saveRates(rates.filter((_, i) => i !== +b.dataset.hmrdel), 'حُذفت القيمة.');
+    }));
     $('#chModes', host).onchange = async (e) => { const v = e.target.value; try { cfg = { ...cfg, modes: v }; await store.setChallengeCfg(cfg); toast(v === 'both' ? 'يختار الطالب نوع التحدي: غيباً أو نظراً.' : `التحديات الجديدة: ${v === 'hifz' ? 'تسميع غيباً' : 'تلاوة نظراً'} فقط.`); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); } };
     $('#chLog', host).onclick = () => openChLog();
     $('#chPtsBtn', host).onclick = () => openModal(`<form id="cpF" class="stack" style="gap:12px">
