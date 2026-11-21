@@ -11,10 +11,10 @@ export const TERM = { id: 'g8s1', t: 'الفصل الأول', book: 'الترب�
 
 export const DOMAINS = [
   { id: 'q', t: 'القرآن الكريم وعلومه', ic: '📖', game: 'race', color: '#0f766e' },
-  { id: 'a', t: 'العقيدة', ic: '🌌', game: 'runner', color: '#4338ca' },
-  { id: 'i', t: 'العبادات', ic: '🕌', game: 'runner', color: '#b45309' },
-  { id: 's', t: 'السيرة النبوية', ic: '🐎', game: 'race', color: '#b91c1c' },
-  { id: 'k', t: 'الأخلاق والتهذيب', ic: '🤝', game: 'race', color: '#7c3aed' },
+  { id: 'a', t: 'العقيدة', ic: '🌌', game: 'space', color: '#4338ca' },
+  { id: 'i', t: 'العبادات', ic: '🕌', game: 'mosque', color: '#b45309' },
+  { id: 's', t: 'السيرة النبوية', ic: '🐎', game: 'castle', color: '#b91c1c' },
+  { id: 'k', t: 'الأخلاق والتهذيب', ic: '🤝', game: 'tree', color: '#7c3aed' },
 ];
 
 export const LESSONS = [

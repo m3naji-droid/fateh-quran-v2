@@ -7,7 +7,18 @@ import { loadQuran, ayahText, normalize, toArabicDigits as ar } from '../quran.j
 import { TERM, DOMAINS, LESSONS } from './g8s1.js';
 
 export const PLAY_DEFAULT = { mode: 'none', classes: [], pns: [], on: {}, pts: 1, cap: 6 };
-export const GAMES = { race: { ic: '🏎️', t: 'سباق السيارات' }, runner: { ic: '🏃', t: 'العدّاء' } };
+export const GAMES = {
+  race: { ic: '🏎️', t: 'سباق السيارات', d: 'عند كل منعطف سؤال: الصحيح تسارع، والخطأ تباطؤ' },
+  runner: { ic: '🏃', t: 'العدّاء', d: 'اقفز فوق العوائق، وأجب عند كل بوابة' },
+  space: { ic: '🚀', t: 'مهمة فضائية', d: 'طِر بين الكواكب وتفادَ النيازك، والصحيح يملأ الوقود' },
+  castle: { ic: '🏰', t: 'كنز القلعة', d: 'افتح الأبواب بالإجابات حتى تصل إلى الكنز' },
+  mosque: { ic: '🕌', t: 'ابنِ المسجد', d: 'كل إجابة صحيحة حجر تضعه بدقة في المئذنة' },
+  tree: { ic: '🌳', t: 'شجرة الأخلاق', d: 'اجمع قطرات الماء واسقِ شجرتك حتى تثمر' },
+  archery: { ic: '🎯', t: 'الرماية', d: 'ارمِ البالون الذي يحمل الإجابة الصحيحة' },
+  memory: { ic: '🧩', t: 'بطاقات الذاكرة', d: 'طابِق البطاقات، وأجب لتثبت كل زوج' },
+  penalty: { ic: '⚽', t: 'ركلات الترجيح', d: 'كل سؤال ركلة، وصُدّ ركلات الخصم' },
+};
+const GAME_MOD = { race: () => import('./race.js'), runner: () => import('./runner.js'), space: () => import('./space.js'), castle: () => import('./castle.js'), mosque: () => import('./mosque.js'), tree: () => import('./tree.js'), archery: () => import('./archery.js'), memory: () => import('./memory.js'), penalty: () => import('./penalty.js') };
 const STARS = [50, 75, 90];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const rday = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(d);
@@ -149,6 +160,29 @@ export const sfx = {
 };
 
 /* ---------------- بطاقة السؤال ---------------- */
+function fbHtml(q, ok, why) {
+  let right = '';
+  if (!ok) {
+    if (q.t === 'mcq') right = `الصحيح: <b class="${q.qf ? 'pq-qf' : ''}">${esc(q.a[0])}</b>`;
+    if (q.t === 'tf') right = `العبارة <b>${q.a ? 'صحيحة' : 'خاطئة'}</b>`;
+    if (q.t === 'ord') right = `الترتيب الصحيح:<ol class="pq-right${q.qf ? ' pq-qf' : ''}">${q.a.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`;
+    if (q.t === 'mat') right = `<ul class="pq-right">${q.a.map((p) => `<li><b>${esc(p[0])}</b>: ${esc(p[1])}</li>`).join('')}</ul>`;
+  }
+  return ok ? `<b class="pq-yes">${pick(['أحسنت! 🌟', 'ممتاز! 🚀', 'رائع! 👏', 'إجابة صحيحة ✔', 'بارك الله فيك! ✨'])}</b>`
+    : `<b class="pq-no">${why === 'time' ? '⏰ انتهى الوقت' : 'إجابة غير صحيحة'}</b><div>${right}</div>${q.x ? `<p class="pq-x">${esc(q.x)}</p>` : ''}<button type="button" class="btn primary pq-go">متابعة ←</button>`;
+}
+/** نتيجة سؤال أجاب عنه الطالب داخل اللعبة نفسها (مثل الرماية): تُعرض بطاقة الحكم فقط */
+function verdictQ(box, q, ok, why) {
+  return new Promise((resolve) => {
+    (ok ? sfx.ok : sfx.bad)();
+    if (ok) { resolve(true); return; }
+    box.innerHTML = `<div class="pq-card bad"><p class="pq-q">${esc(q.q)}</p>${q.v ? `<div class="pq-v quran">${esc(q.v)}</div>` : ''}<div class="pq-fb">${fbHtml(q, false, why)}</div></div>`;
+    box.hidden = false;
+    const b = box.querySelector('.pq-go'); b.focus({ preventScroll: true });
+    b.onclick = () => { box.hidden = true; box.innerHTML = ''; resolve(false); };
+    box._abort = () => resolve(false);
+  });
+}
 function askQ(box, q, i, n) {
   return new Promise((resolve) => {
     const lim = q.t === 'ord' || q.t === 'mat' ? 50 : q.qf ? 30 : 25;
@@ -190,15 +224,7 @@ function askQ(box, q, i, n) {
       card.classList.add(ok ? 'ok' : 'bad');
       (ok ? sfx.ok : sfx.bad)();
       const fb = card.querySelector('.pq-fb'); fb.hidden = false;
-      let right = '';
-      if (!ok) {
-        if (q.t === 'mcq') right = `الصحيح: <b class="${q.qf ? 'pq-qf' : ''}">${esc(q.a[0])}</b>`;
-        if (q.t === 'tf') right = `العبارة <b>${q.a ? 'صحيحة' : 'خاطئة'}</b>`;
-        if (q.t === 'ord') right = `الترتيب الصحيح:<ol class="pq-right${q.qf ? ' pq-qf' : ''}">${q.a.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`;
-        if (q.t === 'mat') right = `<ul class="pq-right">${q.a.map((p) => `<li><b>${esc(p[0])}</b>: ${esc(p[1])}</li>`).join('')}</ul>`;
-      }
-      fb.innerHTML = ok ? `<b class="pq-yes">${pick(['أحسنت! 🌟', 'ممتاز! 🚀', 'رائع! 👏', 'إجابة صحيحة ✔', 'بارك الله فيك! ✨'])}</b>`
-        : `<b class="pq-no">${why === 'time' ? '⏰ انتهى الوقت' : 'إجابة غير صحيحة'}</b><div>${right}</div>${q.x ? `<p class="pq-x">${esc(q.x)}</p>` : ''}<button type="button" class="btn primary pq-go">متابعة ←</button>`;
+      fb.innerHTML = fbHtml(q, ok, why);
       requestAnimationFrame(() => fb.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
       const go = () => { box.hidden = true; box.innerHTML = ''; resolve(ok); };
       if (ok) setTimeout(go, 750);
@@ -248,11 +274,15 @@ async function runRound(L, game, { name = '' } = {}) {
   const hud = ({ a, b, p }) => { if (a != null) ov.querySelector('.pg-a').innerHTML = a; if (b != null) ov.querySelector('.pg-b').innerHTML = b; if (p != null) ov.querySelector('.pg-bar i').style.width = Math.max(0, Math.min(1, p)) * 100 + '%'; };
   let nOk = 0, asked = 0; const wrong = [];
   const ask = async (q) => { const i = asked++; const ok = await askQ(qbox, q, i, qs.length); if (ok) nOk++; else wrong.push(q); return ok; };
+  // للألعاب التي يجيب فيها الطالب بنفسه (الرماية): تسجّل النتيجة وتعرض الحكم
+  const report = async (q, ok, why) => { asked++; if (ok) nOk++; else wrong.push(q); await verdictQ(qbox, q, ok, why); return ok; };
+  // أزواج «الكلمة ومعناها» من أسئلة التوصيل في الدرس (لبطاقات الذاكرة)
+  const pairs = (L.qs || []).filter((q) => q.t === 'mat').flatMap((q) => q.a).filter((p, i, A) => A.findIndex((x) => x[0] === p[0]) === i);
   try {
     stage.innerHTML = '<div class="loading" style="color:#fff">جارٍ تجهيز اللعبة…</div>';
-    mod = await (game === 'runner' ? import('./runner.js') : import('./race.js'));
+    mod = await (GAME_MOD[game] || GAME_MOD.race)();
     stage.innerHTML = '';
-    const played = mod.run(stage, { qs, ask, sfx, hud, color: dom?.color || '#0f766e', name, stopped: () => stopped });
+    const played = mod.run(stage, { qs, ask, report, pairs, esc, ar, sfx, hud, color: dom?.color || '#0f766e', name, title: L.t, stopped: () => stopped });
     const extra = await Promise.race([played, exited]);
     if (extra === null || stopped) return null;
     // الأسئلة التي لم تُعرض (لو انتهت اللعبة قبلها) تُحسب خطأ
@@ -277,7 +307,7 @@ function showResult(R, { L, earned, newStars, capHit, game, onAgain, onMap, save
       <p class="pg-res-m">${msg}</p>
       <div class="pg-res-k"><div><b>${ar(R.ok)}/${ar(R.n)}</b><span>إجابات صحيحة</span></div><div><b>${pctTxt(R.pct)}</b><span>النسبة</span></div>
         ${ex.pos ? `<div><b>${ex.pos === 1 ? '🥇' : ex.pos === 2 ? '🥈' : ex.pos === 3 ? '🥉' : ''} ${ar(ex.pos)}/${ar(ex.of || 4)}</b><span>مركزك في السباق</span></div>` : ''}
-        ${ex.coins != null ? `<div><b>🪙 ${ar(ex.coins)}</b><span>جمعتها في الطريق</span></div>` : ''}</div>
+        ${ex.coins != null ? `<div><b>🪙 ${ar(ex.coins)}</b><span>جمعتها في الطريق</span></div>` : ''}${(ex.stats || []).map((x) => `<div><b>${esc(x.v)}</b><span>${esc(x.l)}</span></div>`).join('')}</div>
       ${newStars > 0 ? `<p class="pg-res-new">⭐ نجوم جديدة: ${ar(newStars)}${earned > 0 ? ` · <b>+${ar(earned)} ${earned === 1 ? 'نقطة' : 'نقاط'} شرف</b>` : ''}</p>` : ''}
       ${capHit ? '<p class="small pg-res-cap">بلغت حدّ نقاط اللعب لهذا اليوم، والنجوم محفوظة لك.</p>' : ''}
       ${saveErr ? '<p class="small pg-res-cap">تعذّر حفظ النتيجة الآن. تأكد من الاتصال ثم العب مرة أخرى.</p>' : ''}
@@ -356,7 +386,8 @@ export function mountPlayStudent(host, { me, toast = () => {}, confetti = () => 
       ${r ? `<p class="small muted">أفضل نتيجة: ${pctTxt(r.b || 0)} · لعبتها ${ar(r.n || 0)} ${(r.n || 0) === 1 ? 'مرة' : 'مرات'}</p>` : '<p class="small muted">أجب عن الأسئلة لتتقدّم: كل إجابة صحيحة تدفعك للأمام، والخطأ يبطئك.</p>'}
       <p class="small pg-sh-rule">⭐ ٥٠٪ · ⭐⭐ ٧٥٪ · ⭐⭐⭐ ٩٠٪${cfg.pts > 0 ? ` — كل نجمة جديدة = ${ar(cfg.pts)} ${cfg.pts === 1 ? 'نقطة' : 'نقاط'} شرف` : ''}</p>
       <b class="small">اختر لعبتك:</b>
-      <div class="pg-games">${Object.entries(GAMES).map(([k, g]) => `<button type="button" class="pg-game${k === def ? ' on' : ''}" data-g="${k}"><span>${g.ic}</span><b>${esc(g.t)}</b><small>${k === 'race' ? 'عند كل منعطف سؤال: الصحيح تسارع، والخطأ تباطؤ' : 'اقفز فوق العوائق، وأجب عند كل بوابة'}</small></button>`).join('')}</div>
+      <div class="pg-games">${Object.entries(GAMES).map(([k, g]) => `<button type="button" class="pg-game${k === def ? ' on' : ''}" data-g="${k}" aria-pressed="${k === def}"><span>${g.ic}</span><b>${esc(g.t)}</b></button>`).join('')}</div>
+      <p class="small pg-gdesc">${esc(GAMES[def].d)}</p>
       <button type="button" class="btn primary pg-start" data-go>▶ ابدأ</button>
     </div>`;
     document.body.appendChild(sh);
@@ -364,7 +395,7 @@ export function mountPlayStudent(host, { me, toast = () => {}, confetti = () => 
     const shut = () => sh.remove();
     sh.onclick = (e) => { if (e.target === sh) shut(); };
     sh.querySelector('[data-x]').onclick = shut;
-    sh.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { game = b.dataset.g; sh.querySelectorAll('[data-g]').forEach((y) => y.classList.toggle('on', y === b)); }));
+    sh.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { game = b.dataset.g; sh.querySelectorAll('[data-g]').forEach((y) => { y.classList.toggle('on', y === b); y.setAttribute('aria-pressed', y === b); }); sh.querySelector('.pg-gdesc').textContent = GAMES[game].d; }));
     sh.querySelector('[data-go]').onclick = () => { sfx.unlock(); shut(); play(L, game); };
   }
   async function play(L, game) {
@@ -429,7 +460,7 @@ export function mountPlayTeacher(host, { students, classes, toast = () => {}, on
     }).sort((a, b) => b.stars - a.stars || b.plays - a.plays);
     host.innerHTML = `<div class="stack pgt">
       <div class="card stack">
-        <div><h2>🎮 «العب وتعلّم» — ${esc(TERM.t)}</h2><p class="small muted" style="margin:4px 0 0">دروس المنهج (${esc(TERM.book)}) على شكل ألعاب: سباق سيارات يظهر فيه سؤال عند كل منعطف، وعدّاء يجيب عند كل بوابة. لكل درس ٣ نجوم حسب نسبة الإجابات (٥٠٪ / ٧٥٪ / ٩٠٪).</p></div>
+        <div><h2>🎮 «العب وتعلّم» — ${esc(TERM.t)}</h2><p class="small muted" style="margin:4px 0 0">دروس المنهج (${esc(TERM.book)}) على شكل ٩ ألعاب يختار منها الطالب: ${Object.values(GAMES).map((g) => g.ic + ' ' + g.t).join('، ')}. لكل درس ٣ نجوم حسب نسبة الإجابات (٥٠٪ / ٧٥٪ / ٩٠٪).</p></div>
         <b class="small">من يرى التبويب؟</b>
         <div class="pg-modes">${[['none', 'لا أحد'], ['pns', 'طلاب أختارهم (تجربة)'], ['classes', 'صفوف كاملة'], ['all', 'جميع الطلاب']].map(([k, l]) => `<label class="pg-mode${cfg.mode === k ? ' on' : ''}"><input type="radio" name="pgMode" value="${k}" ${cfg.mode === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
         ${cfg.mode === 'classes' ? `<div class="pg-cls">${classes.map((c) => `<label class="chip-check"><input type="checkbox" data-cl="${esc(c.id)}" ${clSet.has(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</div>` : ''}
