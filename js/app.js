@@ -170,6 +170,8 @@ function whenModalFree(fn) {
 function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal' || e.target.closest('[data-close]')) closeModal(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+/** رقم عشري بالأرقام العربية (منزلة واحدة) — متاح في كل الصفحات */
+function arDec(x) { return ar(String(Math.round(x * 10) / 10).replace('.', '٫')); }
 function confirmBox(text, okLabel = 'حذف') {
   return new Promise((res) => {
     openModal(`<h3>${esc(text)}</h3><div class="row" style="margin-top:20px"><button class="btn primary" id="cfYes">${esc(okLabel)}</button><button class="btn" id="cfNo">إلغاء</button></div>`, (m) => {
