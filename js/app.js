@@ -56,7 +56,7 @@ function voiceWk(v) {
 const TNAV = [['home', 'لوحة اليوم', '🏠', 1], ['subs', 'الواجبات والتسليم', '📥', 1], ['watch', 'المتابعة', '👀', 1], ['honor', 'لوحة الشرف', '🏆', 1],
   ['ann', 'الإعلانات', '📢'], ['fb', 'رأيك يهمنا', '💬'], ['reports', 'التقارير', '📊'], ['settings', 'الإعدادات', '⚙️']];
 /* أقسام «الواجبات والتسليم» الداخلية: [المفتاح، الاسم، الرمز] */
-const TSUB = [['subs', 'التسليمات', '📥'], ['tasks', 'الواجبات', '📝'], ['people', 'الصفوف والطلاب', '👥'], ['errors', 'الأخطاء والدرجات', '🎯'], ['iqra', 'اقرأ وارتقِ', '📖']];
+const TSUB = [['subs', 'التسليمات', '📥'], ['tasks', 'الواجبات', '📝'], ['people', 'الصفوف والطلاب', '👥'], ['errors', 'الأخطاء والدرجات', '🎯'], ['iqra', 'اقرأ وارتقِ', '📖'], ['play', 'العب وتعلّم', '🎮']];
 const TGROUP = Object.fromEntries(TSUB.map(([k]) => [k, 'subs']));
 /** كل الأقسام (للوحة اليوم والبحث) */
 const TALL = [...TNAV.slice(0, 2), ...TSUB.slice(1).map(([k, l, i]) => [k, l, i]), ...TNAV.slice(2)];
@@ -1651,7 +1651,7 @@ function viewStudent(app) {
   }
   /* --- بطولة الأبطال --- */
   let heroT = null, hM = [], offHero = null, offLive = null, hView = null, heroPend = null, offCheer = null;
-  let iqraOn = false, offIqra = null, offHonor = null;
+  let iqraOn = false, offIqra = null, offHonor = null, playOn = false, offPlay = null;
   const stopCheer = () => { offCheer?.(); offCheer = null; };
   if (deep && deep[1] === 'hero') heroPend = deep[2];
   async function loadHeroes() {
@@ -2215,6 +2215,8 @@ function viewStudent(app) {
     store.listSeasons().then((L) => { mySeasons = L; paintSeason(); }).catch(() => {});
     loadHeroes();
     iqraCfg().then((c) => { const on = (c.pns || []).includes(me.id); if (on !== iqraOn) { iqraOn = on; if ($('#stBody', app) && !offIqra) draw(); } }).catch(() => {});
+    // «العب وتعلّم»: يظهر لمن اختارهم المعلم (طلاب، أو صفوف، أو الجميع)
+    store.getPlayCfg().then((c) => { const on = !!c && (c.mode === 'all' || (c.mode === 'classes' && (c.classes || []).includes(me.classId)) || (c.mode === 'pns' && (c.pns || []).includes(me.id))); if (on !== playOn) { playOn = on; if ($('#stBody', app) && !offPlay) draw(); } }).catch(() => {});
     loadKhatmas().then(() => { if (openKhId) { const id = openKhId; openKhId = null; openKhatma(id); } });
     // تقييمات المعلم تصل فوراً (حتى أثناء التلاوة)
     const gSig = (L) => JSON.stringify(L.map((x) => [x.id, x.teacher?.total ?? null, x.teacher?.at || '', x.retakeRequested?.id || '']).sort());
@@ -2301,8 +2303,9 @@ function viewStudent(app) {
   }
 
   function draw() {
-    comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null; offHonor?.(); offHonor = null;
+    comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null; offHonor?.(); offHonor = null; offPlay?.(); offPlay = null;
     if (tab === 'iqra' && !iqraOn) tab = 'tasks';
+    if (tab === 'play' && !playOn) tab = 'tasks';
     if (tab !== HB.pg) { if (HB.pg === 'practice') practiceSummary(); HB.pg = tab; hbBeat(false); }
     const cls = data.classes.find((c) => c.id === me.classId);
     const graded = data.subs.filter((x) => x.percent != null);
@@ -2328,7 +2331,7 @@ function viewStudent(app) {
       ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="onStu" class="on-stu" hidden></div><div id="voiceStu"></div>' : ''}
       <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ...(playOn ? [['play', '🎮 العب وتعلّم']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>
       <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
@@ -2364,6 +2367,7 @@ function viewStudent(app) {
     if (tab === 'rewards') drawRewards(body);
     if (tab === 'heroes') drawHeroes(body);
     if (tab === 'iqra') offIqra = mountIqraStudent(body, { me, toast, confetti });
+    if (tab === 'play') { body.innerHTML = '<div class="loading">جارٍ تحميل الرحلة…</div>'; let gone = false; offPlay = () => { gone = true; }; import('./play/play.js').then((m) => { if (!gone && tab === 'play' && body.isConnected) offPlay = m.mountPlayStudent(body, { me, toast, confetti }); }).catch((e) => { body.innerHTML = `<div class="card">تعذّر التحميل: ${esc(e.message)}</div>`; }); }
     if (tab === 'settings') drawStSettings(body);
   }
 
@@ -2550,7 +2554,8 @@ function viewStudent(app) {
   /** لوحة الشرف للطالب: تتحدّث لحظة نشرها، ومعها «نقاطك الآن» بما كسبه بعد آخر تحديث */
   async function drawHonor(body) {
     body.innerHTML = '<div class="loading">جارٍ تحميل لوحة الشرف…</div>';
-    let board, myRank, myHim = null, first = true;
+    let board, myRank, myHim = null, first = true, playPts = null;
+    if (playOn) Promise.all([import('./play/play.js'), store.getPlay(me.id), store.getPlayCfg()]).then(([m, st, c]) => { playPts = m.playTotal(me.id, st, { ...m.PLAY_DEFAULT, ...(c || {}) }); paint(); }).catch(() => {});
     const paint = () => {
       if (tab !== 'honor' || board === undefined || myRank === undefined) return;
       if (first) {
@@ -2565,9 +2570,11 @@ function viewStudent(app) {
         const cur = myHim.reduce((k, h) => k + (h.hp > 0 ? Math.round((h.hp / HM.ratio) * 10) / 10 : 0), 0);
         pend = Math.max(0, Math.round((cur - myRank.hb) * 10) / 10) + queued;
       } else pend = pref.get('hmLog_' + me.id, []).filter((x) => x.t > at).reduce((k, x) => k + x.pts, 0) / HM.ratio; // قبل أن ينشر المعلم بالإصدار الجديد
+      // نجوم «العب وتعلّم» بعد آخر نشر (pb: ما دخل اللوحة منها)
+      if (playPts != null && myRank?.pb != null) pend += Math.max(0, playPts - myRank.pb);
       const pts = (myRank?.month?.points || 0) + pend;
       $('#hbLive', body).innerHTML = `<div class="hb-live"><span class="on-dot"></span><div><b>نقاطك الآن: ${fmt10(Math.round(pts * 10) / 10)}</b>${(() => { const q = boardWithMine(board, myRank, pend).myRank?.month; return `${q?.cls ? ` · ترتيبك في صفك ${ar(q.cls)}` : ''}${q?.stage ? ` · وعلى المرحلة ${ar(q.stage)}` : ''}`; })()}
-        <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك الأخير، وقد أُضيفت إلى ترتيبك في اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
+        <small class="muted">${pend > 0 ? `منها <b dir="ltr">+${arDec(pend)}</b> من تدريبك ولعبك الأخير، وقد أُضيفت إلى ترتيبك في اللوحة.` : `اللوحة محدّثة${at ? ` · آخر تحديث ${esc(timeAgo(board.at))}` : ''}، وتتحدّث هنا تلقائياً.`}</small></div></div>`;
       const L = boardWithMine(board, myRank, pend);
       mountBoard($('#hbB', body), L.board, { me: me.id, myClass: me.classId, myRank: L.myRank, classes: data.classes });
       const LL = listsWithMine(board?.lists, myRank?.lists, myHim);
@@ -3014,6 +3021,7 @@ function viewTeacher(app) {
     store.listKhatmas().then((L) => { D.khatmas = L; schedulePublish(); if (tab === 'honor') drawBody(); }).catch((e) => console.warn('khatmas', e));
     loadHeroesT();
     loadIqraT();
+    loadPlayT();
     loadRewardsT().catch((e) => console.warn('rewards', e));
     unsub?.();
     watchPresenceT();
@@ -3154,6 +3162,7 @@ function viewTeacher(app) {
       ann: ['أرسل إعلاناً أو صمّمه'],
       honor: [`الفائزون بعد ${nWord(daysLeft, 'يوم', 'يومين', 'أيام', 'يوماً')} · المتجر وصوت الأسبوع`],
       iqra: [badgeVal.iqra ? `${badgeVal.iqra} بانتظار مراجعتك` : 'خطة الضعاف في القراءة', badgeVal.iqra ? 1 : 0, 'r'],
+      play: ['دروس المنهج على شكل ألعاب', 0, ''],
       errors: ['أكثر الأخطاء ودرجاتها'],
       fb: [badgeVal.fb ? `${badgeVal.fb} رسائل جديدة` : 'آراء الطلاب وشكاواهم', badgeVal.fb ? 1 : 0, 'r'],
       reports: ['تقارير وتصدير Excel'],
@@ -3197,6 +3206,24 @@ function viewTeacher(app) {
         ${a.pct >= 1 ? `كل تحليل إضافي يكلف نحو ${fmtUsd(a.perCost)}، والتكلفة هذا الشهر حتى الآن ${fmtUsd(a.cost)}.` : `يتبقى مجاناً نحو ${nAnalyses(a.remainingN)} حتى بداية الشهر القادم.`} لإيقاف التحليل مؤقتاً اجعل «الحد الأقصى للنسخ» صفراً في Cloud Run.</div>`);
     }
   }
+  /* «العب وتعلّم»: الإعداد وتقدّم الطلاب (لنقاط النجوم في لوحة الشرف) */
+  let offPlayT = null;
+  function drawPlayT(body) {
+    body.innerHTML = '<div class="loading">جارٍ التحميل…</div>';
+    let gone = false; offPlayT = () => { gone = true; };
+    import('./play/play.js').then((m) => { if (gone || tab !== 'play') return; D.playMod = m; offPlayT = m.mountPlayTeacher(body, { students: D.students, classes: D.classes, toast, onChange: ({ cfg, states }) => { D.playCfg = cfg; D.play = states; schedulePublish(); } }); })
+      .catch((e) => { body.innerHTML = `<div class="card">تعذّر التحميل: ${esc(e.message)}</div>`; });
+  }
+  async function loadPlayT() {
+    try {
+      const m = await import('./play/play.js'); D.playMod = m;
+      const cfg = await m.playCfg();
+      const pns = m.playPns(cfg, D.students);
+      const S = await Promise.all(pns.map((p) => store.getPlay(p).catch(() => null)));
+      D.playCfg = cfg; D.play = Object.fromEntries(pns.map((p, i) => [p, S[i]]).filter(([, x]) => x));
+    } catch (e) { console.warn('play', e); D.play = D.play || {}; }
+    schedulePublish();
+  }
   let offIqraT = null;
   function drawIqraT(body) {
     offIqraT = mountIqraTeacher(body, { students: D.students.filter(hasAcc), classes: D.classes, toast, onChange: ({ cfg, states }) => { D.iqraCfg = cfg; D.iqra = states; schedulePublish(); } });
@@ -3217,7 +3244,7 @@ function viewTeacher(app) {
   function drawBody() {
     drawHead();
     const body = $('#tBody', app); if (!body) return;
-    offIqraT?.(); offIqraT = null;
+    offIqraT?.(); offIqraT = null; offPlayT?.(); offPlayT = null;
     $('#tHome', app)?.toggleAttribute('hidden', tab !== 'home'); $('#tHomeTop', app)?.toggleAttribute('hidden', tab !== 'home');
     const sub = $('#tSub', app);
     if (sub) {
@@ -3229,7 +3256,7 @@ function viewTeacher(app) {
       }
     }
     if (tab !== 'home') { const h = $('#tHero', app); if (h) h.innerHTML = ''; }
-    ({ home: drawHome, subs: drawSubs, watch: drawWatch, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
+    ({ home: drawHome, subs: drawSubs, watch: drawWatch, tasks: drawTasks, people: drawPeople, ann: drawAnn, errors: drawErrors, honor: drawHonorT, iqra: drawIqraT, play: drawPlayT, fb: drawFb, reports: drawReports, settings: drawSettings })[tab](body);
     sectionize(body);
   }
 
@@ -4967,7 +4994,7 @@ function viewTeacher(app) {
   let lastBoardJson = null, boardTimer = null, lastBoard = null;
   // التسليمات + نقاط التحديات الودّية المحسومة
   const boardSubs = () => {
-    const base = D.subs.concat(voiceBonus(), D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : []);
+    const base = D.subs.concat(voiceBonus(), D.himma?.length ? himmaBonus(D.himma) : [], D.challenges?.length ? chBonus(D.challenges) : [], D.khatmas?.length ? khBonus(D.khatmas) : [], D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [], D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : [], D.play && D.playMod ? D.playMod.playBonus(D.play, D.playCfg) : []);
     return D.seasons?.length ? base.concat(seasonExtra(base, D.seasons)) : base; // مضاعف نقاط المواسم
   };
   /** نشر اللوحة: لا يؤجّل نشراً أقرب مُجدولاً (حتى لا تتأخر الدرجات بتتابع التحديثات) */
@@ -4989,12 +5016,14 @@ function viewTeacher(app) {
   async function publishBoard() {
     if (!D.students.length) return;
     // لا ننشر قبل أن تكتمل مصادر النقاط (حتى لا تنزل اللوحة لحظةً ثم تعود)
-    if ((D.grants === undefined || D.khatmas === undefined || D.seasons === undefined) && (publishBoard.wait = (publishBoard.wait || 0) + 1) < 20) { schedulePublish(800); return; }
+    if ((D.grants === undefined || D.khatmas === undefined || D.seasons === undefined || D.play === undefined) && (publishBoard.wait = (publishBoard.wait || 0) + 1) < 20) { schedulePublish(800); return; }
     const all = boardSubs();
     const { board, ranks } = computeBoard(all, D.students, D.classes, new Date(), roundPer());
     // ما دخل اللوحة من نقاط التدريب لكل طالب (بالتقريب نفسه)، ليعرف جواله بدقة ما كسبه بعد هذا النشر
     { const hbm = {}; (D.himma || []).forEach((h) => { if (h.hp > 0) hbm[h.pn] = (hbm[h.pn] || 0) + Math.round((h.hp / HM.ratio) * 10) / 10; });
       Object.keys(ranks).forEach((pn) => { ranks[pn].hb = Math.round((hbm[pn] || 0) * 10) / 10; }); }
+    // ونقاط نجوم «العب وتعلّم» التي دخلت اللوحة (pb)
+    if (D.play && D.playMod) { const pbm = {}; D.playMod.playBonus(D.play, D.playCfg).forEach((x) => { pbm[x.pn] = (pbm[x.pn] || 0) + x.bonus; }); Object.keys(ranks).forEach((pn) => { ranks[pn].pb = pbm[pn] || 0; }); }
     // الموسم الجاري: ترتيب كل طالب، وأوائل المرحلة وكل صف للطلاب
     const ss = activeSeason(D.seasons || []);
     if (ss) {

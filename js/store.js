@@ -200,6 +200,13 @@ const local = {
   async saveProgress(pn, patch) { LS.set('progress_' + pn, { ...(LS.get('progress_' + pn, {}) || {}), ...patch }); },
   // «اقرأ وارتقِ»: إعداد المعلم (الطلاب المختارون والعدد والنسبة)، وتقدم الطالب، والكلمات المتعثرة لسماع المعلم
   async getIqraCfg() { return LS.get('iqraCfg', null); },
+  // «العب وتعلّم»
+  async getPlayCfg() { return LS.get('playCfg', null); },
+  async setPlayCfg(c) { LS.set('playCfg', { ...c, at: now() }); },
+  async getPlayQ() { return LS.get('playQ', null); },
+  async setPlayQ(q) { LS.set('playQ', { ...q, at: now() }); },
+  async getPlay(pn) { return LS.get('play_' + pn, null); },
+  async savePlay(pn, id, rec) { const x = LS.get('play_' + pn, {}) || {}; x.st = { ...(x.st || {}), [id]: rec }; x.at = now(); LS.set('play_' + pn, x); },
   async setIqraCfg(c) { LS.set('iqraCfg', c); },
   async getIqra(pn) { return LS.get('iqra_' + pn, null); },
   async saveIqra(pn, patch) { LS.set('iqra_' + pn, { ...(LS.get('iqra_' + pn, {}) || {}), ...patch, at: now() }); },
@@ -622,6 +629,13 @@ async function makeCloud() {
     async getProgress(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'map')); return d.exists() ? d.data() : null; },
     async saveProgress(pn, patch) { await setDoc(doc(db, 'roster', pn, 'progress', 'map'), { ...patch, at: now() }, { merge: true }); },
     async getIqraCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'iqraCfg')); return d.exists() ? d.data() : null; },
+    // «العب وتعلّم»: الإعداد والأسئلة المعدّلة في leaderboard، وتقدّم الطالب في progress/play
+    async getPlayCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'playCfg')); return d.exists() ? d.data() : null; },
+    async setPlayCfg(c) { await setDoc(doc(db, 'leaderboard', 'playCfg'), { ...c, at: now() }); },
+    async getPlayQ() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'playQ')); return d.exists() ? d.data() : null; },
+    async setPlayQ(q) { await setDoc(doc(db, 'leaderboard', 'playQ'), { ...q, at: now() }); },
+    async getPlay(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'play')); return d.exists() ? d.data() : null; },
+    async savePlay(pn, id, rec) { await setDoc(doc(db, 'roster', pn, 'progress', 'play'), { st: { [id]: rec }, at: now() }, { merge: true }); },
     async setIqraCfg(c) { await setDoc(doc(db, 'leaderboard', 'iqraCfg'), { ...c, at: now() }); },
     async getIqra(pn) { await ensureAnon(); const d = await getDoc(doc(db, 'roster', pn, 'progress', 'iqra')); return d.exists() ? d.data() : null; },
     async saveIqra(pn, patch) { const d = { ...patch, at: now() }; await setDoc(doc(db, 'roster', pn, 'progress', 'iqra'), d, { mergeFields: Object.keys(d) }); }, // الحقول تُستبدل كاملة (لا دمج عميق) فيُحذف ما حُذف من الخرائط
