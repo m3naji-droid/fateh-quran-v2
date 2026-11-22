@@ -10,10 +10,32 @@ export const CH_V = 2;
 export const isStrict = (c) => (c?.v || 0) >= CH_V;
 /** نقاط التحدي في لوحة الشرف: يضبطها المعلم (leaderboard/challengeCfg.pts)، وهذه قيمها الافتراضية */
 export const CH_PTS = { ...CH_DEFAULT_PTS };
-export function setChPts(p) {
-  const n = (v, d) => (Number.isFinite(+v) && +v >= 0 && +v <= 20 ? Math.round(+v * 2) / 2 : d);
-  Object.assign(CH_PTS, { win: n(p?.win, CH_DEFAULT_PTS.win), lose: n(p?.lose, CH_DEFAULT_PTS.lose), tie: n(p?.tie, CH_DEFAULT_PTS.tie), cancel: n(p?.cancel, CH_DEFAULT_PTS.cancel) });
+const normPts = (p) => { const n = (v, d) => (Number.isFinite(+v) && +v >= 0 && +v <= 20 ? Math.round(+v * 2) / 2 : d); return { win: n(p?.win, CH_DEFAULT_PTS.win), lose: n(p?.lose, CH_DEFAULT_PTS.lose), tie: n(p?.tie, CH_DEFAULT_PTS.tie), cancel: n(p?.cancel, CH_DEFAULT_PTS.cancel) }; };
+/** القيم الحالية (للتحديات الجديدة)، وhist: سجل التغييرات [{ from: ISO, pts }] فيُحسب كل تحدٍّ بنقاط وقت إنشائه */
+let HIST = [];
+export function setChPts(p, hist) {
+  Object.assign(CH_PTS, normPts(p));
+  HIST = (Array.isArray(hist) ? hist : []).filter((h) => h && typeof h.from === 'string').map((h) => ({ from: h.from, pts: normPts(h.pts) })).sort((a, b) => a.from.localeCompare(b.from));
 }
+/** سجل جديد عند تغيير المعلم للنقاط: القيم السابقة تبقى للتحديات القديمة، والجديدة للتحديات من الآن */
+export function nextChHist(oldPts, hist, pts, at = new Date().toISOString()) {
+  const H = Array.isArray(hist) && hist.length ? hist.slice() : [{ from: '', pts: normPts(oldPts) }];
+  H.push({ from: at, pts: normPts(pts) });
+  return H;
+}
+/** مضاعف «النقاط المضاعفة» ليوم إنشاء التحدي (يضبطه التطبيق من boost.js) */
+let BOOST = () => 1;
+export function setChBoost(fn) { BOOST = typeof fn === 'function' ? fn : () => 1; }
+const rDay = (iso) => (iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date(iso)) : '');
+/** نقاط تحدٍّ بعينه: بقيم وقت إنشائه، والفوز والمشاركة والتعادل مضروبة في مضاعف يومه (الخصم لا يُضاعف) */
+export function chPtsFor(c) {
+  let p = CH_PTS;
+  if (HIST.length && c?.createdAt) { p = HIST[0].pts; for (const h of HIST) if (h.from <= c.createdAt) p = h.pts; }
+  const x = c?.createdAt ? BOOST(rDay(c.createdAt)) : 1;
+  return { win: p.win * x, lose: p.lose * x, tie: p.tie * x, cancel: p.cancel, x };
+}
+/** نقاط التحدي إن أُرسل الآن (مع المضاعف الجاري) */
+export const chPtsNow = () => chPtsFor({ createdAt: new Date().toISOString() });
 
 // review: أحدهما لم يتعرف جهازه على كلامه، فأرسل تسجيله ليقيّمه المعلم
 export const chStatus = (c, now = Date.now()) =>
@@ -38,6 +60,7 @@ export function chWinner(c, now = Date.now()) {
 export function chBonus(list, now = Date.now()) {
   const out = [];
   list.forEach((c) => {
+    const CH_PTS = chPtsFor(c);
     if (c.cancel && !c.cancel.free && CH_PTS.cancel) out.push({ pn: c.cancel.by, bonus: -CH_PTS.cancel, createdAt: c.cancel.at || c.createdAt });
     const w = chWinner(c, now);
     if (!w) return;

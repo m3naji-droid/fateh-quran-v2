@@ -2024,3 +2024,24 @@ html.pg-lock, html.pg-lock body { overflow: hidden; overscroll-behavior: none; }
 .hmr { border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 8px; }
 .hmr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .hmr-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px dotted var(--line); padding: 2px 0; }
+
+/* 🔥 النقاط المضاعفة */
+.bst { position: relative; overflow: hidden; display: flex; align-items: center; gap: 16px; margin: 0 0 14px; padding: 14px 18px; border-radius: 18px; color: #fff;
+  background: linear-gradient(120deg, #0b4a37 0%, #137a5b 45%, #0b4a37 100%); background-size: 200% 100%; animation: bstBg 6s ease-in-out infinite;
+  box-shadow: 0 10px 26px rgba(11,74,55,.35), inset 0 0 0 2px rgba(255,214,102,.55); }
+@keyframes bstBg { 50% { background-position: 100% 0; } }
+.bst-x { flex: none; font: 900 54px/1 var(--f-display); direction: ltr; background: linear-gradient(180deg, #fff7d1, #ffd666 45%, #f0a81c); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 3px 0 #7a4a05); animation: bstPulse 1.8s ease-in-out infinite; }
+.bst-x small { font-size: 32px; vertical-align: 30%; }
+@keyframes bstPulse { 50% { transform: scale(1.08) rotate(-3deg); } }
+.bst-t { display: grid; gap: 3px; min-width: 0; }
+.bst-t b { font: 700 19px/1.4 var(--f-display); color: #ffe08a; }
+.bst-t span { font-size: 14.5px; line-height: 1.55; }
+.bst-t small { font-size: 12.5px; opacity: .9; }
+.bst-t em { display: block; margin-top: 2px; font-style: normal; font-weight: 700; color: #ffe08a; }
+.bst-s { position: absolute; color: #ffd666; font-style: normal; opacity: .8; animation: bstTw 2.4s ease-in-out infinite; pointer-events: none; }
+.bst-s.s1 { top: 8px; inset-inline-end: 22px; font-size: 18px; } .bst-s.s2 { bottom: 10px; inset-inline-end: 70px; font-size: 12px; animation-delay: .8s; } .bst-s.s3 { top: 40%; inset-inline-end: 130px; font-size: 10px; animation-delay: 1.5s; }
+@keyframes bstTw { 50% { opacity: .15; transform: scale(.6); } }
+.bst.prev { margin-top: 6px; }
+.bst-pill { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 999px; padding: 1px 10px; font-size: 12.5px; }
+.bst-box { border-color: #f0a81c; background: color-mix(in srgb, #ffd666 10%, var(--card)); }
+@media (prefers-reduced-motion: reduce) { .bst, .bst-x, .bst-s { animation: none; } }

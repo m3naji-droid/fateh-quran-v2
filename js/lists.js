@@ -4,6 +4,7 @@
 //    وسقف ٢٠٠ نقطة يومياً)، ومن لا يعمل عنده التعرّف على الكلام: نقطة لكل دقيقة تلاوة (حتى ٣٠ يومياً).
 //    وتُضاف إلى نقاط لوحة الشرف بنسبة نقطة لكل ١٠ نقاط همّة.
 // لكل قائمة «هذا الشهر» و«منذ البداية»، وعلى مستوى المدرسة وكل صف، وأفضل ١٠ مع ترتيب الطالب نفسه.
+import { boostX } from './boost.js';
 import { chStatus, chWinner, chView } from './challenge.js';
 import { ayahScores } from './mushaf.js';
 import { toArabicDigits as ar } from './quran.js';
@@ -60,7 +61,7 @@ export function himmaToday(pn, day) { const st = dayState(pn, day); return { pts
 let RATES = [];
 export function setHmRates(list) { RATES = (Array.isArray(list) ? list : []).filter((x) => x && /^\d{4}-\d{2}-\d{2}$/.test(x.from) && +x.r > 0).map((x) => ({ from: x.from, r: +x.r })).sort((a, b) => a.from.localeCompare(b.from)); }
 export const HM_BASE = () => 1 / HM.ratio;
-export function hmRate(day) { let r = 1 / HM.ratio; for (const x of RATES) if (x.from <= day) r = x.r; return r; }
+export function hmRate(day) { let r = 1 / HM.ratio; for (const x of RATES) if (x.from <= day) r = x.r; return r * boostX(day, 'hm'); } // مع «النقاط المضاعفة» إن كان اليوم ضمن فترتها
 export const hmHonor = (pts, day) => Math.round(pts * hmRate(day) * 10) / 10;
 /** نقاط الهمة في لوحة الشرف: همّة اليوم × قيمة الهمة في ذلك اليوم، مؤرّخة بيومها */
 export function himmaBonus(himma) {

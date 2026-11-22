@@ -5,7 +5,8 @@ import { RecitationSession, devCaps, AyahPlayer, RECITERS, hasRecognition, hasRe
 import { initStore, store, cloudError } from './store.js';
 import { TAJWEED_API, PUSH } from './firebase-config.js';
 import { registerSW, platform, promptInstall, onInstallChange, watchUpdates } from './pwa.js';
-import { CH_HOURS, CH_DAILY, CH_LIM, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft } from './challenge.js';
+import { CH_HOURS, CH_DAILY, CH_LIM, CH_PTS, CH_DEFAULT_PTS, CH_V, isStrict, setChPts, chStatus, chWinner, chBonus, chView, timeLeft, chPtsFor, chPtsNow, nextChHist, setChBoost } from './challenge.js';
+import { setBoosts, getBoosts, boostX, activeBoost, boostStatus, boostBannerHtml, fmtBoostDay, boostWhat, todayR } from './boost.js';
 import { mountTalqeen } from './talqeen.js';
 import { earnHimma, himmaPeek, setHmCap, setHmRates, hmRate, hmHonor, himmaToday, himmaBonus, computeLists, mountLists, HM } from './lists.js';
 import { mountCheer, cheerCfg, cleanCfg, setCfgCache, splitEmojis, CHEER_MAX, PHRASE_MAX } from './cheer.js';
@@ -170,6 +171,7 @@ function whenModalFree(fn) {
 function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal' || e.target.closest('[data-close]')) closeModal(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+setChBoost((day) => boostX(day, 'ch')); // التحديات المُرسلة في فترة «النقاط المضاعفة» تُضاعف نقاطها
 /** رقم عشري بالأرقام العربية (منزلة واحدة) — متاح في كل الصفحات */
 function arDec(x) { return ar(String(Math.round(x * 10) / 10).replace('.', '٫')); }
 function confirmBox(text, okLabel = 'حذف') {
@@ -1014,7 +1016,7 @@ function viewHome(app) {
     ['🤖', 'تحليل التجويد بالذكاء الاصطناعي', 'المدود والغنة والقلقلة والحركات لكل كلمة، للإعانة لا للاعتماد.'],
     ['👨‍🏫', 'للمعلم', 'درجة من ١٠ وملاحظات، ونظام يتعلم من تقييماتك، وتقارير بالكلمات الأكثر خطأً، وتصدير Excel.'],
   ];
-  app.innerHTML = `
+  app.innerHTML = `<div id="homeBoost"></div>
   <section class="hero hero-solo">
     <div>
       <div class="hero-brand"><svg class="hero-logo" viewBox="0 0 32 32" aria-hidden="true"><g fill="#d9b45a"><rect x="7" y="7" width="18" height="18" rx="2"/><rect x="7" y="7" width="18" height="18" rx="2" transform="rotate(45 16 16)"/></g><circle cx="16" cy="16" r="5" fill="#0d5c46"/><circle cx="16" cy="16" r="3" fill="#f3e7c6"/></svg><div class="hero-name">مقرأة الفاتح</div><svg class="hero-orn" viewBox="0 0 540 40" aria-hidden="true"><g fill="#d9b45a"><g transform="translate(30 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(90 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(150 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(210 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(270 20)"><rect x="-12" y="-12" width="24" height="24"/><rect x="-12" y="-12" width="24" height="24" transform="rotate(45)"/></g><g transform="translate(330 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(390 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(450 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><g transform="translate(510 20)"><rect x="-6" y="-6" width="12" height="12"/><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g></g><path d="M20 20H250M290 20H520" stroke="#d9b45a" stroke-width="1.5" opacity=".6"/></svg></div>
@@ -1032,6 +1034,8 @@ function viewHome(app) {
     ${feats.map(([i, h, d]) => `<li><span class="fi" aria-hidden="true">${i}</span><span><b>${h}:</b> ${d}</span></li>`).join('')}
   </ul>`;
   mountAyahOfDay($('#aodHome', app));
+  // إعلان «النقاط المضاعفة» في الصفحة الرئيسية طوال فترته فقط
+  store.getLimits?.().then((L) => { setBoosts(L?.boosts); const h = $('#homeBoost', app); if (h) h.innerHTML = boostBannerHtml(); }).catch(() => {});
 }
 
 /* ================= التدريب الحر (للطلاب المسجلين والمعلم فقط) ================= */
@@ -1109,7 +1113,7 @@ function viewStudent(app) {
   /** الحدود اليومية من المعلم: سقف همّة التدريب وعدد التحديات */
   async function loadLimits() {
     const L = (await store.getLimits().catch(() => null)) || {};
-    setHmCap(L.hmCap || 200); setHmRates(L.hmRates);
+    setHmCap(L.hmCap || 200); setHmRates(L.hmRates); setBoosts(L.boosts); paintBoost();
     const d = Math.round(+L.chDaily); CH_LIM.daily = Number.isFinite(d) && d >= 1 && d <= 10 ? d : CH_DAILY;
   }
   /** همّة اليوم الحقيقية: ما حُفظ في قاعدة البيانات (من كل أجهزته) + ما ينتظر الإرسال من هذا الجهاز */
@@ -1818,6 +1822,8 @@ function viewStudent(app) {
 
   /* --- الموسم --- */
   let mySeasons = [];
+  /** إعلان «النقاط المضاعفة» في أعلى صفحة الطالب طوال فترتها فقط */
+  function paintBoost() { const h = $('#boostBar', app); if (h) h.innerHTML = boostBannerHtml(); }
   function paintSeason() {
     const host = $('#seasonBar', app); if (!host) return;
     const s = activeSeason(mySeasons) || mySeasons.filter((x) => seasonStatus(x) === 'soon').sort((a, b) => a.from.localeCompare(b.from))[0];
@@ -1870,7 +1876,7 @@ function viewStudent(app) {
 
   /* --- التحدي الودّي --- */
   async function loadChallenges() {
-    try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); setChPts(chCfg?.pts); } catch (e) { console.warn('challenges', e); }
+    try { [myCh, chCfg] = await Promise.all([store.listMyChallenges(me.id), store.getChallengeCfg().catch(() => ({ off: false }))]); setChPts(chCfg?.pts, chCfg?.ptsHist); } catch (e) { console.warn('challenges', e); }
     myCh.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     paintChBar();
     setTimeout(() => checkAch(), 2500);
@@ -1910,7 +1916,7 @@ function viewStudent(app) {
     };
     host.innerHTML = `<div class="card ch-card stack" style="gap:10px;margin-bottom:16px">
       <div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3><span class="small muted">انتصاراتك: <b>${ar(wins)}</b> من ${ar(played)}</span></div>
-      <p class="small muted" style="margin:0">تحدَّ زميلاً من صفك في مقطع تختاره: ${chModes().length > 1 ? 'تسميع غيباً أو تلاوة نظراً' : modeTxt(chModes()[0])}، محاولة واحدة لكلٍّ منكما خلال ${ar(CH_HOURS)} ساعة. الأدق يفوز (+${ar(CH_PTS.win)} نقاط)، والمشارك +${ar(CH_PTS.lose)}.</p>
+      <p class="small muted" style="margin:0">تحدَّ زميلاً من صفك في مقطع تختاره: ${chModes().length > 1 ? 'تسميع غيباً أو تلاوة نظراً' : modeTxt(chModes()[0])}، محاولة واحدة لكلٍّ منكما خلال ${ar(CH_HOURS)} ساعة. الأدق يفوز (+${ar(chPtsNow().win)} نقاط)، والمشارك +${ar(chPtsNow().lose)}.${chPtsNow().x > 1 ? ` <b class="bst-pill">🔥 النقاط مضاعفة ×${ar(chPtsNow().x)} الآن</b>` : ''}</p>
       ${chCfg.off ? '<div class="notice">أوقف المعلم التحديات مؤقتاً.</div>' : `<div class="row"><button class="btn primary" type="button" id="chNew" ${sentToday >= CH_LIM.daily ? 'disabled' : ''}>تحدَّ زميلاً</button><span class="small muted">${sentToday >= CH_LIM.daily ? `وصلت إلى ${ar(CH_LIM.daily)} تحديات اليوم. عُد غداً!` : `يتبقى لك اليوم ${ar(CH_LIM.daily - sentToday)} من ${ar(CH_LIM.daily)}`}</span></div>`}
       ${active.length ? `<b class="small">تحديات جارية</b><ul class="ch-list">${active.map(row).join('')}</ul>` : ''}
       ${recent.length ? `<b class="small">آخر النتائج</b><ul class="ch-list">${recent.map(row).join('')}</ul>` : ''}
@@ -2051,8 +2057,8 @@ function viewStudent(app) {
     const head = st === 'review' ? `⏳ وصل تسجيل ${v.mine?.pend ? 'ك' : esc(v.other.name)} إلى المعلم ليقيّمه بنفسه، وتظهر النتيجة بعد تقييمه.`
       : st === 'open' ? `سمّعت بدقة ${ar(v.mine.p)}٪، والآن ننتظر ${esc(v.other.name)} (${esc(ar(timeLeft(c)))}).`
       : st === 'declined' ? 'اعتذر عن التحدي.'
-      : st === 'cancelled' ? (w === me.id ? `🏆 ألغى ${esc(v.other.name)} التحدي بعد تسميعك، فالفوز لك! +${ar(CH_PTS.win)} نقاط.` : c.cancel.by === me.id ? `أُلغي التحدي${c.cancel.free ? ' مجاناً' : ` (−${ar(CH_PTS.cancel)})`}.` : `ألغى ${esc(v.other.name)} التحدي.`)
-      : w === 'tie' ? `🤝 تعادل! +${ar(CH_PTS.tie)} نقطة لكلٍّ منكما.` : w === me.id ? `🏆 فزت بالتحدي! +${ar(CH_PTS.win)} نقاط في لوحة الشرف.` : w ? `انتهى التحدي لصالح ${esc(v.other.name)}. ${v.mine ? `+${ar(CH_PTS.lose)} نقطة على مشاركتك.` : ''}` : 'انتهى الوقت ولم يسمّع أحد.';
+      : st === 'cancelled' ? (w === me.id ? `🏆 ألغى ${esc(v.other.name)} التحدي بعد تسميعك، فالفوز لك! +${ar(chPtsFor(c).win)} نقاط.` : c.cancel.by === me.id ? `أُلغي التحدي${c.cancel.free ? ' مجاناً' : ` (−${ar(CH_PTS.cancel)})`}.` : `ألغى ${esc(v.other.name)} التحدي.`)
+      : w === 'tie' ? `🤝 تعادل! +${ar(chPtsFor(c).tie)} نقطة لكلٍّ منكما.` : w === me.id ? `🏆 فزت بالتحدي! +${ar(chPtsFor(c).win)} نقاط في لوحة الشرف.` : w ? `انتهى التحدي لصالح ${esc(v.other.name)}. ${v.mine ? `+${ar(chPtsFor(c).lose)} نقطة على مشاركتك.` : ''}` : 'انتهى الوقت ولم يسمّع أحد.';
     body.innerHTML = `<div class="card stack ch-result" style="gap:14px"><h2 style="margin:0">${head}</h2>
       <div class="ch-vs">${tile(v.me, v.mine)}<span class="ch-x">⚔️</span>${tile(v.other, v.theirs)}</div>
       <div class="row"><button class="btn primary" type="button" id="chHome">إلى لوحة الشرف</button>${st !== 'open' && chCfg.off !== true ? '<button class="btn gold" type="button" id="chAgain">تحدٍّ جديد</button>' : ''}</div></div>`;
@@ -2332,7 +2338,7 @@ function viewStudent(app) {
         <span class="rw-kpi-ic" aria-hidden="true">🏅</span><span class="rw-kpi-tx"><b>خزانتي</b><small>${nAch ? `${ar(nAch)} ${nAch === 1 ? 'وسام' : 'أوسمة'}` : 'لا أوسمة بعد'} · ${nOwn ? `${ar(nOwn)} من المتجر` : 'المتجر بانتظارك 🛍️'}</small></span>
         <span class="rw-kpi-c">🪙 ${ar(myCoins())}</span><span class="rw-kpi-go" aria-hidden="true">←</span></button>`; })() : ''}
       ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="onStu" class="on-stu" hidden></div><div id="voiceStu"></div>' : ''}
-      <div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
+      <div id="boostBar"></div><div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ...(playOn ? [['play', '🎮 العب وتعلّم']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -2342,7 +2348,7 @@ function viewStudent(app) {
     paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar();
+    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar(); paintBoost();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
     if (tab === 'tasks') {
       mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
@@ -3013,7 +3019,7 @@ function viewTeacher(app) {
     refreshPush(tOwner);
     loadFb(); loadLate(); pendingAiQueue();
     Promise.all([store.listAllChallenges(), store.getChallengeCfg().catch(() => null), store.listAllHimma().catch((e) => { console.warn('himma', e); return []; })]).then(([L, cfg, H]) => {
-      setChPts(cfg?.pts); D.challenges = L; D.himma = H; schedulePublish(); if (tab === 'honor') drawBody();
+      setChPts(cfg?.pts, cfg?.ptsHist); D.challenges = L; D.himma = H; schedulePublish(); if (tab === 'honor') drawBody();
       // بعد التحميل الأول: متابعة لحظية، فكل تدريب أو تحدٍّ يعيد حساب اللوحة ونشرها خلال ثوانٍ
       D._offHm?.(); D._offCh?.();
       let hj = '', cj = '';
@@ -3114,7 +3120,7 @@ function viewTeacher(app) {
   }
   /** بطاقة سريعة لطالب من البحث */
   // قيمة الهمة بتواريخها لازمة قبل نشر اللوحة، وإلا حُسبت الأيام المعدّلة بالقيمة الأصلية
-  (store.getLimits?.() || Promise.resolve(null)).then((L) => { setHmCap(L?.hmCap || 200); setHmRates(L?.hmRates); }).catch(() => {}).finally(() => { D.limOk = true; schedulePublish?.(); });
+  (store.getLimits?.() || Promise.resolve(null)).then((L) => { setHmCap(L?.hmCap || 200); setHmRates(L?.hmRates); setBoosts(L?.boosts); if (tab === 'home' && $('#tBody', app)) drawHome($('#tBody', app)); }).catch(() => {}).finally(() => { D.limOk = true; schedulePublish?.(); });
   function openStudentQuick(pn) {
     const st = D.students.find((x) => x.id === pn); if (!st) return;
     const P = D.presence?.[pn], miss = missingOf(st, doneMap()), subs = D.subs.filter((x) => x.pn === pn).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -3172,7 +3178,7 @@ function viewTeacher(app) {
       reports: ['تقارير وتصدير Excel'],
       settings: ['الإعداد والمساحة والتنبيهات'],
     };
-    body.innerHTML = `<div class="th-tiles">${TALL.filter((t) => t[0] !== 'home').map(([k, l, i, main]) => `<button type="button" class="th-tile${main ? ' big' : ''}" data-go="${k}">${T[k]?.[1] ? `<b class="th-n ${T[k][2]}">${k === 'iqra' || k === 'fb' ? esc(badgeVal[k]) : ar(T[k][1])}</b>` : ''}<i>${i}</i><b>${l}</b><small>${esc(T[k]?.[0] || '')}</small></button>`).join('')}</div>`;
+    body.innerHTML = `${boostBannerHtml()}<div class="th-tiles">${TALL.filter((t) => t[0] !== 'home').map(([k, l, i, main]) => `<button type="button" class="th-tile${main ? ' big' : ''}" data-go="${k}">${T[k]?.[1] ? `<b class="th-n ${T[k][2]}">${k === 'iqra' || k === 'fb' ? esc(badgeVal[k]) : ar(T[k][1])}</b>` : ''}<i>${i}</i><b>${l}</b><small>${esc(T[k]?.[0] || '')}</small></button>`).join('')}</div>`;
     $$('[data-go]', body).forEach((b) => (b.onclick = () => goTab(b.dataset.go)));
   }
   function drawHead() {
@@ -5983,16 +5989,30 @@ function viewTeacher(app) {
     const open = L.filter((c) => chStatus(c) === 'open');
     let cfg = { off: false };
     try { cfg = (await store.getChallengeCfg()) || cfg; } catch {}
-    setChPts(cfg.pts);
+    setChPts(cfg.pts, cfg.ptsHist);
     let lim = {};
     try { lim = (await store.getLimits()) || {}; } catch {}
-    const chD = +lim.chDaily || CH_DAILY, hmC = +lim.hmCap || 200; setHmCap(hmC); setHmRates(lim.hmRates);
+    const chD = +lim.chDaily || CH_DAILY, hmC = +lim.hmCap || 200; setHmCap(hmC); setHmRates(lim.hmRates); setBoosts(lim.boosts);
     const today = riyadhDay(), rNow = hmRate(today), fx2 = (n) => ar(String(Math.round(n * 100) / 100)).replace('.', '٫');
     const xOf = (r) => fx2(r / (1 / HM.ratio)), perPt = (r) => fx2(1 / r);
     const rates = (lim.hmRates || []).slice().sort((a, b) => a.from.localeCompare(b.from));
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">⚔️ تحدّي الزملاء</h3>
         <label class="row small" style="gap:6px"><input type="checkbox" id="chOn" ${cfg.off ? '' : 'checked'}> التحديات مفعّلة</label></div>
       <label class="row small" style="gap:6px">نوع التحدي المسموح<select id="chModes"><option value="both" ${!cfg.modes || cfg.modes === 'both' ? 'selected' : ''}>الطالب يختار: غيباً أو نظراً</option><option value="hifz" ${cfg.modes === 'hifz' ? 'selected' : ''}>تسميع غيباً فقط</option><option value="recite" ${cfg.modes === 'recite' ? 'selected' : ''}>تلاوة نظراً فقط</option></select></label>
+      <div class="lim-box bst-box"><b class="small">🔥 النقاط المضاعفة (فترة محددة مع إعلان)</b>
+        <p class="small muted" style="margin:0">تُضاعف نقاط التدريب الحر و/أو التحديات المُرسلة في الفترة، ويظهر للطلاب إعلان في الصفحة الرئيسية وصفحتهم من يوم البدء ويختفي بعد يوم النهاية. ما قبل الفترة وما بعدها لا يتغير.</p>
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:end">
+          <label class="field" style="min-width:110px">المضاعف<select id="bsX">${[2, 3, 4, 5, 10].map((n) => `<option value="${n}" ${n === 5 ? 'selected' : ''}>×${ar(n)}</option>`).join('')}</select></label>
+          <label class="field" style="min-width:140px">من يوم<input type="date" id="bsFrom" value="${addDays(today, 1)}"></label>
+          <label class="field" style="min-width:140px">حتى يوم (يشمله)<input type="date" id="bsTo" value="${(() => { const [y, m] = today.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); })()}"></label>
+        </div>
+        <div class="row small" style="gap:14px;flex-wrap:wrap"><label class="row" style="gap:6px"><input type="checkbox" id="bsHm" checked> التدريب الحر</label><label class="row" style="gap:6px"><input type="checkbox" id="bsCh" checked> تحديات الزملاء</label></div>
+        <label class="field">عنوان الإعلان (اختياري)<input id="bsT" maxlength="60" placeholder="🔥 نقاط مضاعفة ×٥"></label>
+        <label class="field">نص الإعلان (اختياري)<input id="bsD" maxlength="120" placeholder="في التدريب الحر وتحديات الزملاء — فرصتك لتغيير مركزك في لوحة الشرف!"></label>
+        <div class="row" style="gap:8px"><button type="button" class="btn sm" id="bsPrev">👁️ معاينة الإعلان</button><button type="button" class="btn primary sm" id="bsSave">حفظ ونشر الفترة</button></div>
+        <div id="bsPrevBox"></div>
+        ${getBoosts().length ? `<ul class="hmr-list small">${getBoosts().slice().sort((a, b) => b.from.localeCompare(a.from)).map((b) => `<li><span>×${ar(b.x)} ${esc(boostWhat(b))}: ${esc(fmtBoostDay(b.from))} ← ${esc(fmtBoostDay(b.to))} <span class="pill ${{ live: 'ok', soon: 'mute', ended: '' }[boostStatus(b)]}">${{ live: 'جارية الآن', soon: 'قادمة', ended: 'انتهت' }[boostStatus(b)]}</span></span><button type="button" class="btn sm ghost danger" data-bsdel="${esc(b.id)}" aria-label="حذف">✕</button></li>`).join('')}</ul>` : ''}
+      </div>
       <div class="lim-box"><b class="small">⏱️ الحدود اليومية (تبدأ كل يوم الساعة ١٢ ليلاً بتوقيت البحرين)</b>
         <div class="row" style="gap:10px;flex-wrap:wrap">
           <label class="row small" style="gap:6px">تحديات يرسلها الطالب في اليوم<select id="limCh">${[1, 2, 3, 4, 5, 6, 8, 10].map((n) => `<option value="${n}" ${n === chD ? 'selected' : ''}>${ar(n)}</option>`).join('')}</select></label>
@@ -6020,6 +6040,26 @@ function viewTeacher(app) {
     const saveLim = async (patch, msg) => { try { lim = { ...lim, ...patch }; await store.setLimits(lim); if (patch.hmCap) { setHmCap(patch.hmCap); schedulePublish(300); } toast(msg); } catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); } };
     $('#limCh', host).onchange = (e) => saveLim({ chDaily: +e.target.value }, `صار حد التحديات ${ar(+e.target.value)} في اليوم لكل طالب.`);
     $('#limHm', host).onchange = (e) => saveLim({ hmCap: +e.target.value }, `صار سقف همّة التدريب ${ar(+e.target.value)} في اليوم (= ${fx2(+e.target.value * rNow)} نقطة شرف).`);
+    const bsRead = () => ({ id: 'b' + Date.now().toString(36), x: +$('#bsX', host).value, from: $('#bsFrom', host).value, to: $('#bsTo', host).value, hm: $('#bsHm', host).checked, ch: $('#bsCh', host).checked, t: $('#bsT', host).value.trim(), d: $('#bsD', host).value.trim() });
+    const bsCheck = (b) => !b.from || !b.to ? 'اختر يوم البدء ويوم النهاية.' : b.to < b.from ? 'يوم النهاية قبل يوم البدء.' : !b.hm && !b.ch ? 'اختر التدريب الحر أو التحديات (أو كليهما).' : '';
+    $('#bsPrev', host).onclick = () => { const b = bsRead(), e = bsCheck(b); if (e) return toast(e); $('#bsPrevBox', host).innerHTML = boostBannerHtml(b, { preview: true }); };
+    const saveBoosts = async (list, msg) => {
+      const prev = lim.boosts;
+      try { lim = { ...lim, boosts: list }; await store.setLimits(lim); setBoosts(list); schedulePublish(300); toast(msg); drawBody(); }
+      catch (x) { lim = { ...lim, boosts: prev }; setBoosts(prev); toast('تعذر الحفظ: ' + (x.code || x.message)); }
+    };
+    $('#bsSave', host).onclick = async () => {
+      const b = bsRead(), e = bsCheck(b); if (e) return toast(e);
+      if (b.from < today && !(await confirmBox('يوم البدء في الماضي، فستتضاعف نقاط الأيام السابقة من ذلك اليوم أيضاً. متأكد؟', 'نعم، احفظ'))) return;
+      if (!b.t) delete b.t; if (!b.d) delete b.d;
+      saveBoosts([...(lim.boosts || []), b], `حُفظت: ×${ar(b.x)} من ${fmtBoostDay(b.from)} حتى ${fmtBoostDay(b.to)}. سيظهر الإعلان للطلاب في الفترة.`);
+    };
+    host.querySelectorAll('[data-bsdel]').forEach((x) => (x.onclick = async () => {
+      const b = (lim.boosts || []).find((y) => y.id === x.dataset.bsdel); if (!b) return;
+      const used = boostStatus(b) !== 'soon';
+      if (!(await confirmBox(used ? 'حذف هذه الفترة يُرجع نقاط أيامها (التدريب والتحديات) إلى القيمة العادية ويخفي إعلانها. متأكد؟' : 'حذف هذه الفترة القادمة وإعلانها؟'))) return;
+      saveBoosts((lim.boosts || []).filter((y) => y.id !== b.id), 'حُذفت الفترة.');
+    }));
     host.querySelectorAll('[data-hmx]').forEach((b) => (b.onclick = () => { $('#hmrV', host).value = Math.round((+b.dataset.hmx / HM.ratio) * 100) / 100; }));
     const saveRates = async (list, msg) => {
       const prev = lim.hmRates;
@@ -6048,7 +6088,7 @@ function viewTeacher(app) {
     $('#chLog', host).onclick = () => openChLog();
     $('#chPtsBtn', host).onclick = () => openModal(`<form id="cpF" class="stack" style="gap:12px">
         <h2>⚙️ نقاط تحدّي الزملاء</h2>
-        <p class="small muted" style="margin:0">تُضاف إلى لوحة الشرف عند حسم كل تحدٍّ. التغيير يسري على حساب النقاط كله، ومنه التحديات السابقة، أما نتائج الأشهر المعلنة فتبقى كما هي.</p>
+        <p class="small muted" style="margin:0">تُضاف إلى لوحة الشرف عند حسم كل تحدٍّ. التغيير يسري على التحديات التي تُرسل من الآن فقط، أما التحديات السابقة فتبقى بنقاطها. ولمضاعفة النقاط لفترة محددة استخدم «🔥 النقاط المضاعفة».</p>
         ${[['win', '🏆 الفائز'], ['lose', '🤝 المشارك الخاسر (إن سمّع)'], ['tie', '⚖️ التعادل (لكلٍّ منهما)'], ['cancel', '✖️ خصم إلغاء التحدي بعد قبوله']].map(([k, l]) => `<label class="row" style="gap:10px;justify-content:space-between"><span>${l}</span><input type="number" id="cp_${k}" min="0" max="20" step="0.5" value="${CH_PTS[k]}" style="width:90px" inputmode="decimal"></label>`).join('')}
         <div class="row"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="cpDef">القيم الافتراضية (٣ · ١ · ٢ · خصم ١)</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
       $('#cpDef', m).onclick = () => Object.entries(CH_DEFAULT_PTS).forEach(([k, v]) => ($('#cp_' + k, m).value = v));
@@ -6056,7 +6096,7 @@ function viewTeacher(app) {
         e.preventDefault();
         const pts = { win: +$('#cp_win', m).value, lose: +$('#cp_lose', m).value, tie: +$('#cp_tie', m).value, cancel: +$('#cp_cancel', m).value };
         if (Object.values(pts).some((v) => !Number.isFinite(v) || v < 0 || v > 20)) return toast('اكتب أرقاماً من ٠ إلى ٢٠.');
-        try { cfg = { ...cfg, pts }; await store.setChallengeCfg(cfg); setChPts(pts); closeModal(); schedulePublish(); toast('حُفظت نقاط التحدي، وستُحدَّث لوحة الشرف.'); drawBody(); }
+        try { const ptsHist = nextChHist(cfg.pts, cfg.ptsHist, pts); cfg = { ...cfg, pts, ptsHist }; await store.setChallengeCfg(cfg); setChPts(pts, ptsHist); closeModal(); schedulePublish(); toast('حُفظت نقاط التحدي، وتسري على التحديات التي تُرسل من الآن.'); drawBody(); }
         catch (x) { toast('تعذر الحفظ: ' + (x.code || x.message)); }
       };
     });
