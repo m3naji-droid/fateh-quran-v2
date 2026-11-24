@@ -304,6 +304,8 @@ const local = {
   async getMyRank(me) { const r = LS.get('roster', {})[me.id]; return r ? { ...(r.rank || {}), _badges: r.badges || [], _rw: { wallet: r.wallet || {}, owned: r.owned || [], ach: r.ach || {}, look: r.look || null } } : null; },
   // المكافآت: المتجر، وزينة الأسماء، ومحفظة الطالب، وصوت الأسبوع
   async getShop() { return LS.get('shop', null); },
+  async getCertCfg() { return LS.get('certCfg', null); },
+  async setCertCfg(c) { LS.set('certCfg', c); },
   async setShop(x) { LS.set('shop', x); },
   async getLooks() { return LS.get('looks', {}); },
   async setMyLook(pn, look) { const m = LS.get('looks', {}); m['u' + pn] = { ...(look || {}), pn }; LS.set('looks', m); },
@@ -801,6 +803,9 @@ async function makeCloud() {
     },
     async getMyRank(me) { const d = await getDoc(doc(db, 'roster', me.id)); if (!d.exists()) return null; const x = d.data(); return { ...(x.rank || {}), _badges: x.badges || [], _rw: { wallet: x.wallet || {}, owned: x.owned || [], ach: x.ach || {}, look: x.look || null } }; },
     async getShop() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'shop')); return d.exists() ? d.data() : null; },
+    // الموقّعون على شهادات التقدير (المدير والمعلم الأول)
+    async getCertCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'certCfg')); return d.exists() ? d.data() : null; },
+    async setCertCfg(c) { await setDoc(doc(db, 'leaderboard', 'certCfg'), c); },
     async setShop(x) { await setDoc(doc(db, 'leaderboard', 'shop'), { ...x, at: now() }); },
     async getLooks() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'looks')); return d.exists() ? d.data() : {}; },
     async setLooksAll(m) { await setDoc(doc(db, 'leaderboard', 'looks'), m, { merge: true }); },

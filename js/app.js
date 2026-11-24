@@ -107,7 +107,7 @@ async function playAnnVoice(b, aid) {
 }
 const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
-import { downloadCertificatePNG, downloadCertificatesPDF } from './certificate.js';
+import { downloadCertificatePNG, downloadCertificatesPDF, renderCertificate, setCertSigners, CERT_SIGN_DEFAULT } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
 import { G, autoGrade, coverage, readEnd, gradeV2, capped, aiErrors } from './grading.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
@@ -6434,7 +6434,25 @@ function viewTeacher(app) {
   }
 
   /* --- الإعدادات --- */
+  /** إعداد الموقّعين على الشهادات، مع معاينة كل لون */
+  function wireCertSet(body) {
+    const box = $('#certSet', body); if (!box) return;
+    let cfg = { principal: { ...CERT_SIGN_DEFAULT.principal }, head: { ...CERT_SIGN_DEFAULT.head } };
+    const fill = () => { $('#cfHeadN', box).value = cfg.head.name; $('#cfHeadR', box).value = cfg.head.role; $('#cfPrinN', box).value = cfg.principal.name; $('#cfPrinR', box).value = cfg.principal.role; };
+    fill();
+    store.getCertCfg().then((c) => { if (c) { cfg = { principal: { ...cfg.principal, ...(c.principal || {}) }, head: { ...cfg.head, ...(c.head || {}) } }; fill(); } }).catch(() => {});
+    const read = () => ({ head: { name: $('#cfHeadN', box).value.trim(), role: $('#cfHeadR', box).value.trim() }, principal: { name: $('#cfPrinN', box).value.trim(), role: $('#cfPrinR', box).value.trim() } });
+    $('#cfSave', box).onclick = async () => { const c = read(); try { await store.setCertCfg(c); cfg = c; setCertSigners(c); toast('حُفظ الموقّعون، وستظهر أسماؤهم في الشهادات.'); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); } };
+    box.querySelectorAll('[data-cfpv]').forEach((b) => (b.onclick = async () => {
+      const r = +b.dataset.cfpv; setCertSigners(read());
+      const titles = ['شيخ المرحلة', 'المركز الثاني على المرحلة', 'المركز الثالث في الصف', 'المركز الرابع في الصف'], lines = ['المركز الأول على المرحلة كلها', 'المركز الثاني على المرحلة كلها', 'المركز الثالث في صفه', 'المركز الرابع في صفه'];
+      const cv = await renderCertificate({ name: 'محمد أحمد عبدالله', title: titles[r - 1], line: lines[r - 1], rank: r, month: 'نوفمبر', points: 128.5, className: 'الثالث الإعدادي ١', teacher: s.name || 'معلم المادة', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) });
+      openModal(`<div class="stack"><h3 style="margin:0">معاينة الشهادة</h3><img src="${cv.toDataURL('image/jpeg', 0.85)}" alt="معاينة الشهادة" style="width:100%;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15)"><div class="row"><button class="btn" type="button" data-close>إغلاق</button></div></div>`);
+      setCertSigners(cfg);
+    }));
+  }
   function drawSettings(body) {
+    queueMicrotask(() => wireCertSet(body));
     const u = dbUsage(D.subs, D.students);
     const graded = D.subs.filter((x) => x.hasAudio && x.teacher);
     body.innerHTML = `<div class="grid2" style="align-items:start">
@@ -6458,6 +6476,12 @@ function viewTeacher(app) {
           </div>
           <div id="clInfo" class="small muted"></div>
         </div>
+      </div>
+      <div class="card stack" style="gap:10px" id="certSet"><h3>🎓 الموقّعون على شهادات التقدير</h3>
+        <p class="small muted" style="margin:0">تظهر أسفل كل شهادة: معلم المادة (اسمك) يميناً، والمعلم الأول في الوسط، ومدير المدرسة يساراً.</p>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field" style="flex:1 1 180px">اسم المعلم الأول<input id="cfHeadN" maxlength="40"></label><label class="field" style="flex:1 1 120px">لقبه<input id="cfHeadR" maxlength="30"></label></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field" style="flex:1 1 180px">اسم مدير المدرسة<input id="cfPrinN" maxlength="40"></label><label class="field" style="flex:1 1 120px">لقبه<input id="cfPrinR" maxlength="30"></label></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn primary sm" id="cfSave">حفظ</button><span class="small muted">معاينة:</span>${[1, 2, 3, 4].map((r) => `<button type="button" class="btn sm" data-cfpv="${r}">${['🥇 الأول', '🥈 الثاني', '🥉 الثالث', '🟢 الرابع'][r - 1]}</button>`).join('')}</div>
       </div>
       <div class="card stack" style="gap:10px"><h3>حفظ البيانات</h3>
         ${store.mode === 'cloud' ? '<p style="margin:0"><span class="pill ok">سحابي</span> البيانات محفوظة في Firebase وتظهر على كل الأجهزة.</p>' : '<p style="margin:0"><span class="pill warn">محلي</span> البيانات محفوظة في هذا المتصفح فقط. للعمل بين أجهزة الطلاب والمعلم فعّل Firebase (راجع ملف README).</p>'}
