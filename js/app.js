@@ -27,7 +27,7 @@ import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js'
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts, fmtWhen } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
-import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS } from './rewards.js';
+import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS, setMonthTitles, monthTitlesFrom } from './rewards.js';
 import { dayTimes, thisMonthStart } from './prayer.js';
 /** الاحتفال، ومعه تأثير الطالب الخاص من المتجر إن اختاره */
 const FX = { kind: '' };
@@ -171,7 +171,14 @@ function whenModalFree(fn) {
 function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal' || e.target.closest('[data-close]')) closeModal(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
-setChBoost((day) => boostX(day, 'ch')); // التحديات المُرسلة في فترة «النقاط المضاعفة» تُضاعف نقاطها
+setChBoost((day) => boostX(day, 'ch'));
+/** ألقاب الشهر الماضي تظهر تحت أسماء الفائزين طوال هذا الشهر (بعد إعلان نتائجه) */
+function loadMonthTitles() {
+  const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date()).split('-').map(Number);
+  const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1, ym = `${py}-${String(pm).padStart(2, '0')}`;
+  const name = new Date(Date.UTC(py, pm - 1, 15)).toLocaleDateString('ar', { month: 'long' });
+  store.getMonthResult(ym).then((r) => setMonthTitles(monthTitlesFrom(r, name))).catch(() => {});
+} // التحديات المُرسلة في فترة «النقاط المضاعفة» تُضاعف نقاطها
 /** رقم عشري بالأرقام العربية (منزلة واحدة) — متاح في كل الصفحات */
 function arDec(x) { return ar(String(Math.round(x * 10) / 10).replace('.', '٫')); }
 function confirmBox(text, okLabel = 'حذف') {
@@ -1309,13 +1316,14 @@ function viewStudent(app) {
     shopItems(SHOP).filter((x) => x.kind !== 'title' && x.earn && !x.hidden && !own.has(x.id)).forEach((x) => {
       if (earnLevel(x, ctx) >= 1) { up.push({ t: x, lv: 1, old: 0 }); own.add(x.id); }
     });
-    if (!up.length) return;
+    if (!up.length) return syncTitles();
     const owned = [...own], patch = { owned, ach };
     const worn = up.find((u) => u.t.kind === 'title' && RW.look?.t === u.t.v);
     if (worn) patch.look = { ...RW.look, tl: worn.lv };
     await store.saveRewards(me.id, patch);
     RW = { ...RW, ...patch };
     if (worn) { await store.setMyLook(me.id, RW.look).catch(() => {}); setLook(me.id, RW.look); }
+    syncTitles();
     const { t, lv, old } = up[up.length - 1], isWorn = worn && worn.t === t;
     whenModalFree(() => {
       const isT = t.kind === 'title', why = esc(earnText(t, lv).replace(/^يُختار صوته/, 'اختير صوتك').replace(/^ي/, 'ت').replace(' ثم يواظب', ' ثم تواظب'));
@@ -1334,6 +1342,15 @@ function viewStudent(app) {
       setTimeout(() => confetti(), 150);
     });
     if ($('#stBody', app)) draw();
+  }
+  /** قائمة ألقابه كلها (مع مستوياتها) تُحفظ في زينته، ليظهر عددها بجانب اسمه ويُعرض كلها عند الضغط */
+  async function syncTitles() {
+    if (!RW) return;
+    const own = new Set(RW.owned || []);
+    const tt = shopItems(SHOP).filter((x) => x.kind === 'title' && own.has(x.id)).map((x) => [x.v, titleLv(x)]).sort((a, b) => b[1] - a[1]);
+    if (JSON.stringify(RW.look?.tt || []) === JSON.stringify(tt) || (!tt.length && !RW.look)) return;
+    const lk = { ...(RW.look || {}), tt };
+    try { await store.saveRewards(me.id, { look: lk }); await store.setMyLook(me.id, lk); RW = { ...RW, look: lk }; setLook(me.id, lk); } catch (e) { console.warn('titles list', e); }
   }
   /** يفتح الأوسمة المستحقة ويضيف مكافآتها، مع احتفال لكل وسام جديد */
   async function checkAch() {
@@ -2220,7 +2237,8 @@ function viewStudent(app) {
     if (RW.look) setLook(me.id, RW.look);
     draw();
     pruneImageCache();
-    Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({}))]).then(([sh, lk]) => { SHOP = sh; setLooks({ ...looksMap(lk), ...(RW.look ? { [me.id]: RW.look } : {}) }); if (tab === 'rewards' && $('#stBody', app)) draw(); });
+    Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({}))]).then(([sh, lk]) => { SHOP = sh; setLooks({ ...looksMap(lk), ...(RW.look ? { [me.id]: RW.look } : {}) }); if (tab === 'rewards' && $('#stBody', app)) draw(); syncTitles(); });
+    loadMonthTitles();
     store.listSeasons().then((L) => { mySeasons = L; paintSeason(); }).catch(() => {});
     loadHeroes();
     iqraCfg().then((c) => { const on = (c.pns || []).includes(me.id); if (on !== iqraOn) { iqraOn = on; if ($('#stBody', app) && !offIqra) draw(); } }).catch(() => {});
@@ -3031,6 +3049,7 @@ function viewTeacher(app) {
     loadHeroesT();
     loadIqraT();
     loadPlayT();
+    loadMonthTitles();
     loadRewardsT().catch((e) => console.warn('rewards', e));
     unsub?.();
     watchPresenceT();

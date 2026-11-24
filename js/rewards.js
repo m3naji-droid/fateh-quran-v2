@@ -168,6 +168,18 @@ export function balance(points, wallet) {
 // مفاتيح المعاينة __pv_<نور>: اسم تجريبي يلبس كل نور (في المتجر وعند المعلم)
 const PV = () => Object.fromEntries(Object.keys(GLOW).map((g) => ['__pv_' + g, { g }]));
 let LOOKS = {};
+/* ألقاب الشهر الماضي: { رقم الطالب: { t: 'قارئ الصف', r: 1, m: 'نوفمبر' } } تظهر تحت اسم الفائز طوال الشهر التالي */
+let MT = {};
+export function setMonthTitles(m) { MT = m || {}; document.querySelectorAll?.('[data-lk]').forEach((el) => delete el.dataset.lkSig); decorateAll(); }
+/** ألقاب الشهر من نتيجة شهر معلنة (أوائل المرحلة وأوائل كل صف، حتى المركز الثالث) */
+export function monthTitlesFrom(res, monthName) {
+  const out = {};
+  if (!res || res.round) return out;
+  const ord = ['', 'الأول', 'الثاني', 'الثالث'];
+  Object.values(res.byClass || {}).forEach((L) => (L || []).slice(0, 3).forEach((x, i) => { if (x?.id && x.points > 0) out[x.id] = { t: i === 0 ? 'قارئ الصف' : `${ord[i + 1]} في الصف`, r: i + 1, m: monthName }; }));
+  (res.stage || []).slice(0, 3).forEach((x, i) => { if (x?.id && x.points > 0 && (!out[x.id] || i === 0)) out[x.id] = { t: i === 0 ? 'شيخ المرحلة' : `${ord[i + 1]} على المرحلة`, r: i + 1, m: monthName, st: 1 }; });
+  return out;
+}
 export const setLooks = (m) => { LOOKS = { ...PV(), ...(m || {}) }; decorateAll(); };
 export const lookOf = (pn) => LOOKS[pn] || null;
 export function setLook(pn, look) { LOOKS = { ...LOOKS, [pn]: look }; decorateAll(); }
@@ -175,18 +187,26 @@ export function setLook(pn, look) { LOOKS = { ...LOOKS, [pn]: look }; decorateAl
 /** يُطبّق الزينة على كل عنصر يحمل data-lk="رقم الطالب" (الاسم يبقى نصاً كما هو) */
 function decorate(el) {
   const pn = el.dataset.lk, L = LOOKS[pn] || (pn.startsWith('__pv_') && GLOW[pn.slice(5)] != null ? { g: pn.slice(5) } : undefined);
-  const sig = JSON.stringify(L || {});
+  const M = el.dataset.lkNoTitle == null ? MT[pn] : null;
+  const sig = JSON.stringify([L || {}, M || 0]);
   if (el.dataset.lkSig === sig) return;
   el.dataset.lkSig = sig;
-  el.querySelectorAll(':scope > .lk-i, :scope > .lk-t, :scope > .lk-gx').forEach((x) => x.remove());
+  el.querySelectorAll(':scope > .lk-i, :scope > .lk-t, :scope > .lk-gx, :scope > .lk-m').forEach((x) => x.remove());
   el.classList.remove('lk', 'lk-f-green', 'lk-f-silver', 'lk-f-stars', 'lk-f-gold', 'lk-f-crown', 'lk-g', ...[...el.classList].filter((c) => c.startsWith('lk-g-')));
   el.style.removeProperty('--lkc');
+  if (M) { el.classList.add('lk'); el.insertAdjacentHTML('beforeend', `<span class="lk-m r${M.r}${M.st ? ' st' : ''}">${M.r === 1 ? (M.st ? '👑' : '🏆') : M.r === 2 ? '🥈' : '🥉'} ${esc(M.t)} · ${esc(M.m)}</span>`); }
   if (!L) return;
   el.classList.add('lk');
   if (L.f) el.classList.add('lk-f-' + L.f);
   if (L.c) el.style.setProperty('--lkc', L.c);
   if (L.i) el.insertAdjacentHTML('afterbegin', `<span class="lk-i" aria-hidden="true">${esc(L.i)}</span>`);
-  if (L.t && el.dataset.lkNoTitle == null) el.insertAdjacentHTML('beforeend', `<span class="lk-t${L.tl ? ' tl' + L.tl : ''}">${L.tl ? MEDALS[L.tl - 1] + ' ' : ''}${esc(L.t)}</span>`);
+  if (el.dataset.lkNoTitle == null) {
+    // اللقب الذي اختاره، وبجانبه عدد بقية ألقابه (يُضغط لعرضها كلها)
+    const all = Array.isArray(L.tt) ? L.tt : [], more = all.filter((x) => x[0] !== L.t).length;
+    const chip = more ? `<span class="lk-n"${L.t ? ' dir="ltr"' : ''} role="button" tabindex="0" data-lkn="${esc(pn)}" aria-label="${esc(`ألقابه كلها (${all.length})`)}">${L.t ? '+' + ar(more) : `🏷️ ${ar(all.length)} ${all.length === 1 ? 'لقب' : all.length === 2 ? 'لقبان' : all.length <= 10 ? 'ألقاب' : 'لقباً'}`}</span>` : '';
+    if (L.t) el.insertAdjacentHTML('beforeend', `<span class="lk-t${L.tl ? ' tl' + L.tl : ''}">${L.tl ? MEDALS[L.tl - 1] + ' ' : ''}${esc(L.t)}${chip ? ' ' + chip : ''}</span>`);
+    else if (chip) el.insertAdjacentHTML('beforeend', `<span class="lk-t">${chip}</span>`);
+  }
   if (L.g && GLOW[L.g] != null) { el.classList.add('lk-g', 'lk-g-' + L.g); if (GLOW[L.g]) el.insertAdjacentHTML(L.g === 'lantern' || L.g === 'star8' ? 'afterbegin' : 'beforeend', `<span class="lk-gx" aria-hidden="true">${GLOW[L.g]}</span>`); glowIO ? glowIO.observe(el) : el.classList.add('lk-on'); }
 }
 /* ---------------- الأنوار: عناصر إضافية لكل نور (والحركة في CSS) ---------------- */
@@ -210,6 +230,24 @@ export const GLOWS = Object.keys(GLOW);
 // تتحرك الأنوار في الأسماء الظاهرة على الشاشة فقط، حفاظاً على الجوالات الضعيفة
 const glowIO = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((es) => es.forEach((e) => e.target.classList.toggle('lk-on', e.isIntersecting)), { rootMargin: '40px' }) : null;
 let dq = 0;
+/* نافذة صغيرة بألقاب الطالب كلها مرتبة (الذهبي أولاً) عند الضغط على عدد الألقاب */
+function showTitles(chip) {
+  document.querySelector('.lk-pop')?.remove();
+  const pn = chip.dataset.lkn, L = LOOKS[pn] || {}, all = (L.tt || []).slice().sort((a, b) => (b[1] || 0) - (a[1] || 0));
+  if (!all.length) return;
+  const pop = document.createElement('div'); pop.className = 'lk-pop'; pop.setAttribute('role', 'dialog');
+  pop.innerHTML = `<b>🏷️ ألقابه (${ar(all.length)})</b><ul>${all.map(([t, l]) => `<li class="${t === L.t ? 'on' : ''}${l ? ' tl' + l : ''}">${l ? MEDALS[l - 1] : '🎖️'} ${esc(t)}${t === L.t ? ' <small>(يضعه تحت اسمه)</small>' : ''}</li>`).join('')}</ul>${MT[pn] ? `<p>${MT[pn].r === 1 ? (MT[pn].st ? '👑' : '🏆') : MT[pn].r === 2 ? '🥈' : '🥉'} ${esc(MT[pn].t)} · ${esc(MT[pn].m)}</p>` : ''}`;
+  document.body.appendChild(pop);
+  const r = chip.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+  pop.style.top = (r.bottom + h + 8 > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6) + 'px';
+}
+if (typeof document !== 'undefined') {
+  const hit = (e) => { const c = e.target.closest?.('.lk-n'); if (c) { e.preventDefault(); e.stopPropagation(); showTitles(c); return true; } if (!e.target.closest?.('.lk-pop')) document.querySelector('.lk-pop')?.remove(); return false; };
+  document.addEventListener('click', hit, true);
+  document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('lk-n')) hit(e); if (e.key === 'Escape') document.querySelector('.lk-pop')?.remove(); }, true);
+  document.addEventListener('scroll', () => document.querySelector('.lk-pop')?.remove(), true);
+}
 export function decorateAll(root = document) {
   root.querySelectorAll?.('[data-lk]').forEach(decorate);
 }

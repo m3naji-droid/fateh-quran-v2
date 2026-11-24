@@ -2045,3 +2045,16 @@ html.pg-lock, html.pg-lock body { overflow: hidden; overscroll-behavior: none; }
 .bst-pill { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 999px; padding: 1px 10px; font-size: 12.5px; }
 .bst-box { border-color: #f0a81c; background: color-mix(in srgb, #ffd666 10%, var(--card)); }
 @media (prefers-reduced-motion: reduce) { .bst, .bst-x, .bst-s { animation: none; } }
+/* عدد الألقاب بجانب اللقب، ولقب الشهر تحت اسم الفائز */
+.lk-n { display: inline-block; margin-inline-start: 3px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1.6; color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, transparent); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); cursor: pointer; vertical-align: 1px; }
+.lk-n:hover, .lk-n:focus-visible { background: color-mix(in srgb, var(--gold) 26%, transparent); outline: none; }
+.lk-m { display: block; flex-basis: 100%; font-size: 10.5px; font-weight: 700; line-height: 1.5; color: #b45309; }
+.lk-m.r1 { color: #a16207; background: linear-gradient(90deg, #fde68a, #fef3c7 60%, transparent); border-radius: 6px; padding-inline: 5px; width: fit-content; }
+.lk-m.r1.st { background: linear-gradient(90deg, #fcd34d, #fde68a 60%, transparent); color: #78350f; }
+[data-theme="dark"] .lk-m { color: #fbbf24; } [data-theme="dark"] .lk-m.r1 { color: #78350f; }
+.lk-pop { position: fixed; z-index: 500; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,.25); padding: 10px 14px; max-width: min(300px, calc(100vw - 16px)); font-size: 13.5px; }
+.lk-pop b { display: block; margin-bottom: 4px; color: var(--gold); }
+.lk-pop ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.lk-pop li.on { font-weight: 700; } .lk-pop li small { color: var(--muted); font-weight: 400; }
+.lk-pop li.tl3 { color: #a16207; }
+.lk-pop p { margin: 6px 0 0; padding-top: 6px; border-top: 1px dashed var(--line); font-weight: 700; color: #b45309; }
