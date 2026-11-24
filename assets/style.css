@@ -2058,3 +2058,21 @@ html.pg-lock, html.pg-lock body { overflow: hidden; overscroll-behavior: none; }
 .lk-pop li.on { font-weight: 700; } .lk-pop li small { color: var(--muted); font-weight: 400; }
 .lk-pop li.tl3 { color: #a16207; }
 .lk-pop p { margin: 6px 0 0; padding-top: 6px; border-top: 1px dashed var(--line); font-weight: 700; color: #b45309; }
+/* 📅 نقاط الشرف يوماً بيوم (بطاقة الطالب) */
+.sq-dp summary { cursor: pointer; }
+.dp-wrap { overflow-x: auto; margin-top: 8px; }
+.dp-t { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 460px; }
+.dp-t th { font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 5px 4px; border-bottom: 2px solid var(--line); text-align: center; }
+.dp-t td { padding: 5px 4px; text-align: center; border-bottom: 1px solid var(--line); }
+.dp-t td:first-child, .dp-t th:first-child { text-align: start; white-space: nowrap; }
+.dp-t tr.zero td { color: var(--muted); opacity: .6; }
+.dp-t tr.has { cursor: pointer; }
+.dp-t tr.has:hover, .dp-t tr.has.open { background: color-mix(in srgb, var(--green) 7%, transparent); }
+.dp-t tr.has td:last-child b { color: var(--green); }
+.dp-t tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: 0; background: var(--paper); }
+.dp-det td { background: var(--paper); text-align: start !important; }
+.dp-dg { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); padding: 4px 2px; }
+.dp-dg div { display: grid; gap: 2px; font-size: 12.5px; }
+.dp-dg b { font-size: 12px; }
+.dp-dg span { color: var(--ink); }
+.sq-dp + .row { margin-top: 4px; }

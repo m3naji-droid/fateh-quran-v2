@@ -3140,6 +3140,56 @@ function viewTeacher(app) {
   /** بطاقة سريعة لطالب من البحث */
   // قيمة الهمة بتواريخها لازمة قبل نشر اللوحة، وإلا حُسبت الأيام المعدّلة بالقيمة الأصلية
   (store.getLimits?.() || Promise.resolve(null)).then((L) => { setHmCap(L?.hmCap || 200); setHmRates(L?.hmRates); setBoosts(L?.boosts); if (tab === 'home' && $('#tBody', app)) drawHome($('#tBody', app)); }).catch(() => {}).finally(() => { D.limOk = true; schedulePublish?.(); });
+  /** نقاط الشرف يوماً بيوم لطالب، من المصادر نفسها التي تُحسب منها اللوحة (فيطابق مجموعها اللوحة) */
+  const DP_CATS = [['t', '🎤 التسميع'], ['c', '⚔️ التحديات والمسابقات'], ['h', '🌟 التدريب الحر'], ['o', '➕ أخرى']];
+  function dailyPoints(pn) {
+    const days = {};
+    const add = (iso, cat, src, v) => { if (!iso || !v) return; const d = riyadhDay(new Date(iso)); const r = (days[d] ||= { t: 0, c: 0, h: 0, o: 0, det: {} }); r[cat] += v; const k = cat + '|' + src; r.det[k] = (r.det[k] || 0) + v; };
+    const mine = (L) => (L || []).filter((x) => x.pn === pn);
+    const seas = (list, cat) => { if (D.seasons?.length) seasonExtra(list, D.seasons).forEach((x) => add(x.createdAt, cat, '✨ مضاعف الموسم', x.bonus)); };
+    // التسميع: ما زاده كل يوم على أفضل درجة سابقة له في الواجب نفسه (فالمجموع = أفضل درجاته كما في اللوحة)
+    const tname = (id) => D.tasks.find((t) => t.id === id)?.title || 'واجب';
+    const subs = D.subs.filter((x) => x.pn === pn && x.taskId).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    const best = {};
+    subs.forEach((x) => { const sc = subScore(x); if (sc == null) return; const p = best[x.taskId] ?? 0; if (sc > p) { add(x.createdAt, 't', '«' + tname(x.taskId) + '»' + (best[x.taskId] != null ? ' (تحسين)' : ''), sc - p); best[x.taskId] = sc; } });
+    seas(subs, 't');
+    const groups = [
+      ['c', '⚔️ تحدي الزملاء', mine(D.challenges?.length ? chBonus(D.challenges) : [])],
+      ['c', '🏆 المسابقات', mine(D.tourneys?.length ? heroBonus(D.tourneys, D.hMatches || {}) : [])],
+      ['h', '🌟 همّة التدريب', D.himma?.length ? himmaBonus(D.himma.filter((h) => h.pn === pn)) : []],
+      ['o', '📜 الختمات', mine(D.khatmas?.length ? khBonus(D.khatmas) : [])],
+      ['o', '📖 اقرأ وارتقِ', mine(D.iqra ? iqraBonus(D.iqra, D.iqraCfg?.pts ?? IQ_DEFAULT.pts, D.iqraCfg?.dayPts ?? IQ_DEFAULT.dayPts) : [])],
+      ['o', '🎮 العب وتعلّم', mine(D.play && D.playMod ? D.playMod.playBonus(D.play, D.playCfg) : [])],
+      ['o', '🎙️ صوت الأسبوع', (D.voices || []).filter((v) => v.pn === pn && v.pts).map((v) => ({ pn, bonus: v.pts, createdAt: v.at }))],
+      ['o', '🎁 منح المعلم', (D.grants || []).filter((g) => g.pn === pn && g.pts).map((g) => ({ pn, bonus: g.pts, createdAt: g.at }))],
+    ];
+    groups.forEach(([cat, src, L]) => { L.forEach((x) => add(x.createdAt, cat, src, x.bonus)); seas(L, cat); });
+    return days;
+  }
+  function dailyPointsHtml(pn, n = 14) {
+    const days = dailyPoints(pn), today = riyadhDay(), f = (v) => (Math.abs(v) < 0.05 ? '—' : (v < 0 ? '−' : '') + arDec(Math.abs(v)));
+    const list = []; for (let i = 0; i < n; i++) list.push(addDays(today, -i));
+    const tot = { t: 0, c: 0, h: 0, o: 0 };
+    const rows = list.map((d) => {
+      const r = days[d]; const sum = r ? r.t + r.c + r.h + r.o : 0;
+      if (r) DP_CATS.forEach(([k]) => (tot[k] += r[k]));
+      const lbl = d === today ? 'اليوم' : d === addDays(today, -1) ? 'أمس' : ar(new Date(d + 'T12:00:00').toLocaleDateString('ar', { weekday: 'short', day: 'numeric', month: 'numeric' }));
+      const det = r ? DP_CATS.map(([k, l]) => { const items = Object.entries(r.det).filter(([x]) => x.startsWith(k + '|')); return items.length ? `<div><b>${l}</b>${items.map(([x, v]) => `<span>${esc(x.slice(2))}: <bdi dir="ltr">${v > 0 ? '+' : ''}${f(v)}</bdi></span>`).join('')}</div>` : ''; }).join('') : '';
+      return `<tr class="${sum ? 'has' : 'zero'}" ${r ? `data-dpd="${d}" tabindex="0" title="اضغط للتفصيل"` : ''}><td>${esc(lbl)}</td>${DP_CATS.map(([k]) => `<td>${r ? f(r[k]) : '—'}</td>`).join('')}<td><b>${sum ? f(sum) : '—'}</b></td></tr>${r ? `<tr class="dp-det" data-dpx="${d}" hidden><td colspan="6"><div class="dp-dg">${det}</div></td></tr>` : ''}`;
+    }).join('');
+    const all = tot.t + tot.c + tot.h + tot.o;
+    return `<div class="dp-wrap"><table class="dp-t"><thead><tr><th>اليوم</th>${DP_CATS.map(([, l]) => `<th>${l}</th>`).join('')}<th>المجموع</th></tr></thead><tbody>${rows}</tbody>
+      <tfoot><tr><td>آخر ${ar(n)} يوماً</td>${DP_CATS.map(([k]) => `<td>${f(tot[k])}</td>`).join('')}<td><b>${f(all)}</b></td></tr></tfoot></table></div>`;
+  }
+  function wireDaily(box, pn) {
+    let n = 14;
+    const paint = () => {
+      box.innerHTML = dailyPointsHtml(pn, n) + (n < 90 ? `<button type="button" class="btn sm ghost" data-dpmore>عرض ${n < 30 ? 'الشهر (٣٠ يوماً)' : '٩٠ يوماً'} ↓</button>` : '');
+      box.querySelectorAll('[data-dpd]').forEach((tr) => { const tog = () => { const x = box.querySelector(`[data-dpx="${tr.dataset.dpd}"]`); x.hidden = !x.hidden; tr.classList.toggle('open', !x.hidden); }; tr.onclick = tog; tr.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tog(); } }; });
+      const m = box.querySelector('[data-dpmore]'); if (m) m.onclick = () => { n = n < 30 ? 30 : 90; paint(); };
+    };
+    paint();
+  }
   function openStudentQuick(pn) {
     const st = D.students.find((x) => x.id === pn); if (!st) return;
     const P = D.presence?.[pn], miss = missingOf(st, doneMap()), subs = D.subs.filter((x) => x.pn === pn).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -3155,7 +3205,10 @@ function viewTeacher(app) {
         return `<details class="sq-hm" ${H[0]?.d === today ? 'open' : ''}><summary><b>🌟 تدريبه المحفوظ</b> <small class="muted">${H[0]?.d === today ? `اليوم: ${ar(H[0].hp || 0)} همّة من ${ar(HM.dayCap)}${(H[0].hp || 0) >= HM.dayCap ? ' (بلغ سقف اليوم)' : ''}` : 'لم يُحفظ له تدريب اليوم'}</small></summary>
           ${H.length ? `<table class="sq-hmt"><tr><th>اليوم</th><th>همّة</th><th>آيات</th><th>وقت</th><th>آخر حفظ</th></tr>${H.map((h) => `<tr><td>${esc(h.d === today ? 'اليوم' : h.d)}</td><td>${ar(h.hp || 0)}</td><td>${ar(h.ha || 0)}</td><td>${h.hs ? fmtS(h.hs) : h.hm ? ar(h.hm) + ' د' : '—'}</td><td>${h.at ? esc(timeAgo(h.at)) : '—'}</td></tr>`).join('')}</table>` : '<p class="small muted" style="margin:6px 0 0">لا يوجد تدريب محفوظ له.</p>'}
           <p class="small muted" style="margin:6px 0 0">كل آية صحيحة (٨٠٪ فأكثر) = همّة، والآية نفسها حتى ٣ مرات في اليوم، وسقف اليوم ${ar(HM.dayCap)} همّة (= ${arDec(HM.dayCap * hmRate(riyadhDay()))} نقطة شرف اليوم).</p></details>`; })()}
+      <details class="sq-dp" open><summary><b>📅 نقاط الشرف يوماً بيوم</b> <small class="muted">اضغط أي يوم لتفصيل مصادره</small></summary><div id="sqDp"></div>
+        <p class="small muted" style="margin:6px 0 0">التسميع: ما زاده الطالب ذلك اليوم على أفضل درجة سابقة له في الواجب نفسه، فالمجموع يطابق لوحة الشرف. «أخرى»: الختمات، اقرأ وارتقِ، العب وتعلّم، صوت الأسبوع، ومنحك.</p></details>
       <div class="row"><button class="btn" type="button" id="sqM">📖 مصحفه وأخطاؤه</button>${miss.length ? '<button class="btn" type="button" id="sqR">🔔 ذكّره بواجباته</button>' : ''}<button class="btn" type="button" id="sqS">📥 تسليماته</button><button class="btn" type="button" id="sqW">👀 في المتابعة</button><button class="btn primary" type="button" data-close>إغلاق</button></div></div>`, (m) => {
+      wireDaily($('#sqDp', m), pn);
       $('#sqM', m).onclick = () => { closeModal(); openStudentMushaf(st); };
       $('#sqW', m).onclick = () => goTab('watch');
       $('#sqS', m).onclick = () => { filters = { cls: 'all', task: 'all', q: st.name, status: 'all' }; goTab('subs'); };
