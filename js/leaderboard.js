@@ -237,3 +237,11 @@ export function monthTitle(r) {
   if (r.cls && r.cls <= TOP) return { key: 'cls', title: `المركز ${ord[r.cls]} في الصف`, line: `المركز ${ord[r.cls]} في صفه`, rank: r.cls, scope: 'cls' };
   return null;
 }
+/** كل إنجازات الطالب في الشهر (المرحلة والصف) لدمجها في شهادة واحدة: الأعلى أولاً */
+export function monthWins(r) {
+  if (!r) return [];
+  const ord = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس'], out = [];
+  if (r.stage && r.stage <= TOP) out.push(r.stage === 1 ? { key: 'stage1', title: 'شيخ المرحلة', line: 'المركز الأول على المرحلة كلها', rank: 1, scope: 'stage' } : { key: 'stage', title: `المركز ${ord[r.stage]} على المرحلة`, line: `المركز ${ord[r.stage]} على المرحلة كلها`, rank: r.stage, scope: 'stage' });
+  if (r.cls && r.cls <= TOP) out.push(r.cls === 1 ? { key: 'cls1', title: 'قارئ الصف', line: 'المركز الأول في صفه', rank: 1, scope: 'cls' } : { key: 'cls', title: `المركز ${ord[r.cls]} في الصف`, line: `المركز ${ord[r.cls]} في صفه`, rank: r.cls, scope: 'cls' });
+  return out;
+}

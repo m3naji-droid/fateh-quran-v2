@@ -27,7 +27,7 @@ import { mountIssueTile, drawIssuesTeacher, capCheck } from './speech-issues.js'
 import { mountMonthCountdown, mountPrayerTile, startPrayerAlerts, fmtWhen } from './countdown.js';
 import { renderPages, downloadPDF, printPages, DEFAULT_NOTES, PER_PAGE } from './cards.js';
 import { confetti as confetti0, pickHigh, pickLow } from './celebrate.js';
-import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS, setMonthTitles, monthTitlesFrom } from './rewards.js';
+import { CATALOG, KINDS, SLOT, earnText, earnSteps, earnLevel, earnProgress, MEDALS, shopItems, ACH, LEVELS, achLevels, meetsNeed, balance, setLooks, setLook, playFx, EARN_KEYS, GLOWS, setMonthTitles, monthTitlesFrom, lookOf } from './rewards.js';
 import { dayTimes, thisMonthStart } from './prayer.js';
 /** الاحتفال، ومعه تأثير الطالب الخاص من المتجر إن اختاره */
 const FX = { kind: '' };
@@ -106,8 +106,8 @@ async function playAnnVoice(b, aid) {
   b.disabled = false;
 }
 const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
-import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, subScore } from './leaderboard.js';
-import { downloadCertificatePNG, downloadCertificatesPDF, renderCertificate, setCertSigners, CERT_SIGN_DEFAULT } from './certificate.js';
+import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, monthWins, subScore } from './leaderboard.js';
+import { downloadCertificatePNG, downloadCertificatesPDF, renderCertificate, setCertSigners, CERT_SIGN_DEFAULT, CERT_OPT_DEFAULT, CERT_OPT_LABELS, certOpt, loadCertCfg, certCode } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
 import { G, autoGrade, coverage, readEnd, gradeV2, capped, aiErrors } from './grading.js';
 import { train, predict, studentRates, riskyWords, weakRules, segmentRules, pack, ruleName, EXTRA, aiReliability } from './learn.js';
@@ -975,7 +975,31 @@ function tjMarksHtml(sub) {
 /* ================= التوجيه ================= */
 let current = null;
 let booted = false; // اكتمل تحميل المصحف وقاعدة البيانات
-const routes = { '': viewHome, practice: viewPractice, student: viewStudent, teacher: viewTeacher };
+const routes = { '': viewHome, practice: viewPractice, student: viewStudent, teacher: viewTeacher, verify: viewVerify };
+/** صفحة التحقق من الشهادة (يفتحها رمز QR): تعرض ما في سجل نتائج المقرأة لا ما في الرابط */
+function viewVerify(app) {
+  const [, ym = '', pn = '', code = ''] = location.hash.replace(/^#\/?/, '').split('/').map((x) => { try { return decodeURIComponent(x); } catch { return x; } });
+  app.innerHTML = '<div class="loading">جارٍ التحقق من الشهادة…</div>';
+  const show = (ok, c, r) => {
+    const label = r?.label || (/^\d{4}-\d{2}$/.test(ym) ? new Date(ym + '-15T12:00:00').toLocaleDateString('ar', { month: 'long', year: 'numeric' }) : ym);
+    app.innerHTML = `<section class="card vf ${ok ? 'ok' : 'bad'}">
+      <div class="vf-ic">${ok ? '✓' : '✕'}</div>
+      <h2>${ok ? 'شهادة صحيحة صادرة من مقرأة الفاتح' : 'لم نتمكن من التحقق من هذه الشهادة'}</h2>
+      ${ok ? `<dl class="vf-d"><dt>الطالب</dt><dd>${esc(c.name || '')}</dd><dt>الإنجاز</dt><dd>${esc((c.wins && c.wins.length > 1 ? c.wins.map((w) => w.title).join(' و') : c.title) || '')}</dd><dt>الفترة</dt><dd>${esc(ar(label))}</dd><dt>رقم التحقق</dt><dd dir="ltr">${esc(code)}</dd></dl>`
+        : `<p class="muted">الرقم ${esc(code)} غير موجود في سجل نتائج المقرأة، أو لم تُعلن نتائج هذه الفترة بعد. تأكد من مسح الرمز من الشهادة الأصلية.</p>`}
+      <a class="btn" href="#/">الصفحة الرئيسية</a></section>`;
+  };
+  store.getMonthResult(ym).then((r) => {
+    let c = r?.certs?.[pn] || null;
+    if (!c && r) { // نتائج أُعلنت قبل حفظ سجل الشهادات
+      const si = (r.stage || []).findIndex((x) => x.id === pn); let ci = -1, cl = null;
+      Object.values(r.byClass || {}).forEach((L) => { const i = (L || []).findIndex((x) => x.id === pn); if (i >= 0) { ci = i; cl = L[i]; } });
+      const w = monthTitle({ stage: si >= 0 ? si + 1 : null, cls: ci >= 0 ? ci + 1 : null });
+      if (w) c = { name: (r.stage || [])[si]?.name || cl?.name || '', title: w.title };
+    }
+    show(!!c && (!c.code || c.code === code), c, r);
+  }).catch(() => show(false, null, null));
+}
 function navTo(r) { location.hash = '#/' + r; }
 function render() {
   current?.destroy?.();
@@ -1667,7 +1691,7 @@ function viewStudent(app) {
       ${w ? `<div class="row"><button class="btn gold" type="button" id="cfPng">🏅 حمّل شهادتك (صورة)</button><button class="btn" type="button" id="cfPdf">PDF</button></div>` : ''}
       <div class="row"><button class="btn primary" type="button" data-close>${w ? 'الحمد لله' : 'سأجتهد بإذن الله'}</button></div></div>`, (m) => {
       if (!w) return;
-      const cert = { ym: n.ym, name: me.name, title: w.title, line: w.line, rank: w.rank, month: n.label, points: r.points, className: n.className, teacher: n.teacher, ...(n.type === 'season' ? { season: n.label, period: `في ${n.label}`, color: n.color } : {}), date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+      const cert = { ym: n.ym, pn: me.id, name: me.name, title: n.cert?.title || w.title, line: n.cert?.line || w.line, rank: n.cert?.rank || w.rank, wins: n.cert?.wins, extras: n.cert?.extras, tier: n.cert?.tier || undefined, special: n.cert?.special || undefined, month: n.label, points: r.points, className: n.className, teacher: n.teacher, ...(n.type === 'season' ? { season: n.label, period: `في ${n.label}`, color: n.color } : {}), date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
       $('#cfPng', m).onclick = (e) => { e.currentTarget.disabled = true; downloadCertificatePNG(cert).catch((x) => toast(x.message)).finally(() => (e.currentTarget.disabled = false)); };
       $('#cfPdf', m).onclick = (e) => { const b = e.currentTarget; b.disabled = true; downloadCertificatesPDF([cert], `certificate-${n.ym}.pdf`).catch((x) => toast(x.message)).finally(() => (b.disabled = false)); };
     });
@@ -6239,9 +6263,40 @@ function viewTeacher(app) {
     $('#mbGo', host).onclick = () => openMonthReview(ym);
     $('#mbNo', host).onclick = () => { pref.set('monthBarOff_' + ym, true); host.innerHTML = ''; };
   }
-  function certFor(res, st, r) {
-    const w = monthTitle(r); if (!w) return null;
-    return { ym: res.ym, name: st.name, title: w.title, line: w.line, rank: w.rank, month: res.label && /^جولة/.test(res.label) ? res.label : monthLabel(res.ym), points: r.points, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+  /** إضافات الشهادة لكل طالب في الفترة: مركزه على المرحلة في التحديات والهمة، والآيات، والدقة، وألقابه الذهبية */
+  function certExtrasAll(ym, per) {
+    const mEnd = (k) => { const [y, m] = k.split('-').map(Number); return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10); };
+    const from = per?.from ? Date.parse(per.from) : Date.parse(ym + '-01T00:00:00+03:00');
+    const to = per?.to ? Date.parse(per.to) : Date.parse(mEnd(ym) + 'T00:00:00+03:00');
+    const inT = (iso) => { const t = Date.parse(iso || ''); return t >= from && t < to; };
+    const inD = (d) => { const t = Date.parse((d || '') + 'T12:00:00+03:00'); return t >= from && t < to; };
+    const chs = (D.challenges || []).filter((c) => inT(c.createdAt)), hms = (D.himma || []).filter((h) => inD(h.d));
+    let L = { ranks: {} }; try { L = computeLists(chs, hms, D.students); } catch (e) { console.warn('cert lists', e); }
+    const out = {};
+    D.students.forEach((st) => {
+      const rk = L.ranks[st.id] || {};
+      const subs = D.subs.filter((x) => x.pn === st.id && x.taskId && inT(x.createdAt));
+      const tasks = {}; subs.forEach((x) => { const n = Math.max(0, (x.to - x.from + 1) || 0); tasks[x.taskId] = Math.max(tasks[x.taskId] || 0, n); });
+      const ayC = chs.filter((c) => { if (c.a?.pn !== st.id && c.b?.pn !== st.id) return false; try { return !!chView(c, st.id).mine; } catch { return false; } }).reduce((k, c) => k + Math.max(0, (c.to - c.from + 1) || 0), 0);
+      const P = subs.filter((x) => x.percent != null);
+      out[st.id] = { chR: rk.ch?.as || null, hmR: rk.hm?.as || null, ayT: Object.values(tasks).reduce((a, b) => a + b, 0), ayC, ayP: hms.filter((h) => h.pn === st.id).reduce((k, h) => k + (h.ha || 0), 0),
+        acc: P.length ? Math.round(P.reduce((k, x) => k + x.percent, 0) / P.length) : 0, gold: (lookOf(st.id)?.tt || []).filter((x) => x[1] === 3).map((x) => x[0]) };
+    });
+    return out;
+  }
+  const ORD10 = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
+  function certFor(res, st, r, ext = null) {
+    const O = certOpt(), w = monthTitle(r), X = ext || {};
+    const base = { ym: res.ym, pn: st.id, name: st.name, month: res.label && /^جولة/.test(res.label) ? res.label : monthLabel(res.ym), points: r?.points || 0, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })), at: new Date().toISOString(), extras: X };
+    if (w) return { ...base, title: w.title, line: w.line, rank: w.rank, wins: monthWins(r) };
+    if (!O.special) return null;
+    // شهادة خاصة لأوائل التحديات والهمة على المرحلة (العشرة الأوائل) من غير الفائزين
+    const sp = [];
+    if (X.chR && X.chR <= 10) sp.push({ key: 'ch', title: 'فارس التحديات', line: `المركز ${ORD10[X.chR]} على المرحلة في تحديات الزملاء`, rank: X.chR });
+    if (X.hmR && X.hmR <= 10) sp.push({ key: 'hm', title: 'صاحب الهمة العالية', line: `المركز ${ORD10[X.hmR]} على المرحلة في الهمة العالية`, rank: X.hmR });
+    if (!sp.length) return null;
+    sp.sort((a, b) => a.rank - b.rank);
+    return { ...base, title: sp[0].title, line: sp[0].line, rank: sp[0].rank, wins: sp, tier: 'green', special: sp.length > 1 ? 'both' : sp[0].key };
   }
   async function openMonthReview(ym, per = null, onDone = null) {
     const res = computeMonth(boardSubs(), D.students, D.classes, ym, per);
@@ -6249,7 +6304,9 @@ function viewTeacher(app) {
     const ungraded = D.subs.filter((x) => inP(x) && x.taskId && !x.teacher).length;
     let done = null; try { done = await store.getMonthResult(ym); } catch {}
     const isCur = !per && ym === new Date().toISOString().slice(0, 7);
-    const winners = D.students.map((st) => certFor(res, st, res.ranks[st.id])).filter(Boolean);
+    await loadCertCfg();
+    const EXT = certExtrasAll(ym, per);
+    const winners = D.students.map((st) => certFor(res, st, res.ranks[st.id], EXT[st.id])).filter(Boolean);
     const row = (x, i) => `<li><span class="mr-n">${ar(i + 1)}</span><span>${esc(x.name)}</span><b class="num">${fmt10(x.points)}</b></li>`;
     openModal(`<div class="stack month-review">
       <h2>${per ? `🏁 نتائج ${esc(per.label)}` : `📅 نتائج شهر ${esc(monthLabel(ym))}`}</h2>
@@ -6268,6 +6325,7 @@ function viewTeacher(app) {
       </div></div>`, (m) => {
       $('#mrCerts', m).onclick = async (e) => {
         const b = e.currentTarget; b.disabled = true; b.textContent = 'جارٍ التجهيز…';
+        if (!per) for (const w of winners) { const st = D.students.find((x) => x.id === w.pn); if (st && w.extras && w.extras.streak == null) w.extras.streak = await bestStreak(st, ym).catch(() => 0); }
         try { await downloadCertificatesPDF(winners, `maqraa-certificates-${ym}.pdf`, (i, n) => (b.textContent = `جارٍ التجهيز ${ar(i)} من ${ar(n)}…`)); toast('حُمّلت الشهادات.'); }
         catch (x) { toast('تعذر التجهيز: ' + x.message); }
         b.disabled = false; b.textContent = 'شهادات الفائزين (PDF)';
@@ -6287,20 +6345,24 @@ function viewTeacher(app) {
   async function announceMonth(res, ym, opts = {}) {
     const label = opts.label || monthLabel(ym), items = [], ofL = opts.label ? label : `شهر ${label}`, inL = opts.label ? `في ${label}` : `لشهر ${label}`;
     if (!opts.silent && !(await confirmBox(`إعلان نتائج ${ofL} لكل الطلاب (${ar(D.students.length)})؟ يصل لكل طالب إشعار بنتيجته.`, 'أعلن النتائج'))) return false;
+    await loadCertCfg();
+    const EXT = certExtrasAll(ym, opts.from ? { from: opts.from, to: opts.to } : null), CERTS = {};
     const { ok, fail } = await runBulk('إعلان نتائج الشهر', D.students, async (st) => {
       const r = res.ranks[st.id] || { points: 0 };
-      const w = monthTitle(r);
       const streak = await bestStreak(st, ym);
+      const cert = certFor({ ym, label: opts.label || null }, st, r, { ...(EXT[st.id] || {}), streak });
+      const w = monthTitle(r) || (cert ? { key: 'special', title: cert.title, line: cert.line, rank: cert.rank } : null);
+      if (cert) CERTS[st.id] = { name: st.name, title: cert.title, line: cert.line, rank: cert.rank, wins: cert.wins, tier: cert.tier || null, special: cert.special || null, extras: cert.extras, code: certCode(cert) };
       const cp = res.classPos[st.classId] || null;
       const title = w ? (w.key === 'stage1' ? `👑 مبارك! أنت شيخ المرحلة ${inL}` : w.key === 'cls1' ? `🏆 مبارك! أنت قارئ الصف ${inL}` : `🏅 مبارك! ${w.title} ${inL}`) : `📊 نتائج ${ofL}`;
-      const body = w ? `${w.line} بـ${fmt10(r.points)} نقطة. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.`
+      const body = w?.key === 'special' ? `${w.line} ${inL}. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.` : w ? `${w.line} بـ${fmt10(r.points)} نقطة. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.`
         : r.points > 0 ? `ترتيبك ${ar(r.cls)} في صفك بـ${fmt10(r.points)} نقطة. ${opts.label ? 'الجولة الجديدة' : 'الشهر الجديد'} فرصة جديدة، وكل واجب ترفع به ترتيبك.`
         : `لم تُحسب لك نقاط ${opts.label ? 'في هذه الجولة' : 'هذا الشهر'}. ابدأ ${opts.label ? 'الجولة الجديدة' : 'الشهر الجديد'} بواجب واحد، وستجد اسمك في لوحة الشرف بإذن الله.`;
       const id = 'month-' + ym;
-      await store.addStudentNotifId(st.id, id, { type: 'month', ym, label, round: !!opts.label, title, body, link: './#/student/month/' + ym, tag: id, r: { points: r.points, cls: r.cls || null, clsOf: r.clsOf || null, stage: r.stage || null, stageOf: r.stageOf || null }, classPos: cp, streak, win: w, teacher: s.name || '', className: className(st.classId) });
+      await store.addStudentNotifId(st.id, id, { type: 'month', ym, label, round: !!opts.label, title, body, link: './#/student/month/' + ym, tag: id, r: { points: r.points, cls: r.cls || null, clsOf: r.clsOf || null, stage: r.stage || null, stageOf: r.stageOf || null }, classPos: cp, streak, win: w, cert: CERTS[st.id] || null, teacher: s.name || '', className: className(st.classId) });
       items.push({ notif: id, student: st.id });
     });
-    await store.saveMonthResult(ym, { ym, label, round: !!opts.label, from: opts.from || null, to: opts.to || null, stage: res.stage, byClass: res.byClass, challenge: res.challenge, announcedAt: new Date().toISOString(), teacher: s.name || '', students: ok, auto: !!opts.silent });
+    await store.saveMonthResult(ym, { ym, label, round: !!opts.label, from: opts.from || null, to: opts.to || null, stage: res.stage, byClass: res.byClass, challenge: res.challenge, certs: CERTS, announcedAt: new Date().toISOString(), teacher: s.name || '', students: ok, auto: !!opts.silent });
     let pushed = null;
     try { for (let i = 0; i < items.length; i += 200) { const r = await sendPushBatch(items.slice(i, i + 200)); if (r) pushed = { sent: (pushed?.sent || 0) + r.sent, deferred: (pushed?.deferred || 0) + (r.deferred || 0) }; } } catch (e) { console.warn(e); }
     toast(`أُعلنت نتائج ${label} لـ${nWord(ok, 'طالب واحد', 'طالبين', 'طلاب', 'طالباً')}${pushed && pushed.sent ? `، ووصل إشعار إلى ${ar(pushed.sent)} جهازاً` : ''}${deferNote(pushed)}${fail ? `، وتعذر ${ar(fail)}` : ''}.`);
@@ -6388,7 +6450,8 @@ function viewTeacher(app) {
     (r.stage || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).stage = i + 1));
     Object.values(r.byClass || {}).forEach((a) => (a || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).cls = i + 1)));
     const res = { ym: r.ym, label: r.round ? r.label : null };
-    return D.students.map((st) => ranksOf[st.id] && certFor(res, st, ranksOf[st.id])).filter(Boolean);
+    const EXT = /^\d{4}-\d{2}$/.test(r.ym || '') || (r.from && r.to) ? certExtrasAll(r.ym, r.round && r.from ? { from: r.from, to: r.to } : null) : {};
+    return D.students.map((st) => { const X = { ...(EXT[st.id] || {}), ...(r.certs?.[st.id]?.extras || {}) }; return (ranksOf[st.id] || (certOpt().special && ((X.chR && X.chR <= 10) || (X.hmR && X.hmR <= 10)))) ? certFor(res, st, ranksOf[st.id] || { points: 0 }, X) : null; }).filter(Boolean);
   }
   function seasonCerts(x) {
     const [f, to] = seasonRange(x), res = computeRange(boardSubs(), D.students, D.classes, f, to);
@@ -6490,16 +6553,18 @@ function viewTeacher(app) {
   /** إعداد الموقّعين على الشهادات، مع معاينة كل لون */
   function wireCertSet(body) {
     const box = $('#certSet', body); if (!box) return;
-    let cfg = { principal: { ...CERT_SIGN_DEFAULT.principal }, head: { ...CERT_SIGN_DEFAULT.head } };
-    const fill = () => { $('#cfHeadN', box).value = cfg.head.name; $('#cfHeadR', box).value = cfg.head.role; $('#cfPrinN', box).value = cfg.principal.name; $('#cfPrinR', box).value = cfg.principal.role; };
+    let cfg = { principal: { ...CERT_SIGN_DEFAULT.principal }, head: { ...CERT_SIGN_DEFAULT.head }, opt: { ...CERT_OPT_DEFAULT } };
+    const fill = () => { $('#cfHeadN', box).value = cfg.head.name; $('#cfHeadR', box).value = cfg.head.role; $('#cfPrinN', box).value = cfg.principal.name; $('#cfPrinR', box).value = cfg.principal.role; box.querySelectorAll('[data-cfo]').forEach((x) => (x.checked = cfg.opt[x.dataset.cfo] !== false)); };
     fill();
-    store.getCertCfg().then((c) => { if (c) { cfg = { principal: { ...cfg.principal, ...(c.principal || {}) }, head: { ...cfg.head, ...(c.head || {}) } }; fill(); } }).catch(() => {});
-    const read = () => ({ head: { name: $('#cfHeadN', box).value.trim(), role: $('#cfHeadR', box).value.trim() }, principal: { name: $('#cfPrinN', box).value.trim(), role: $('#cfPrinR', box).value.trim() } });
+    store.getCertCfg().then((c) => { if (c) { cfg = { principal: { ...cfg.principal, ...(c.principal || {}) }, head: { ...cfg.head, ...(c.head || {}) }, opt: { ...CERT_OPT_DEFAULT, ...(c.opt || {}) } }; fill(); } }).catch(() => {});
+    const read = () => ({ head: { name: $('#cfHeadN', box).value.trim(), role: $('#cfHeadR', box).value.trim() }, principal: { name: $('#cfPrinN', box).value.trim(), role: $('#cfPrinR', box).value.trim() }, opt: Object.fromEntries([...box.querySelectorAll('[data-cfo]')].map((x) => [x.dataset.cfo, x.checked])) });
     $('#cfSave', box).onclick = async () => { const c = read(); try { await store.setCertCfg(c); cfg = c; setCertSigners(c); toast('حُفظ الموقّعون، وستظهر أسماؤهم في الشهادات.'); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); } };
     box.querySelectorAll('[data-cfpv]').forEach((b) => (b.onclick = async () => {
       const r = +b.dataset.cfpv; setCertSigners(read());
       const titles = ['شيخ المرحلة', 'المركز الثاني على المرحلة', 'المركز الثالث في الصف', 'المركز الرابع في الصف'], lines = ['المركز الأول على المرحلة كلها', 'المركز الثاني على المرحلة كلها', 'المركز الثالث في صفه', 'المركز الرابع في صفه'];
-      const cv = await renderCertificate({ name: 'محمد أحمد عبدالله', title: titles[r - 1], line: lines[r - 1], rank: r, month: 'نوفمبر', points: 128.5, className: 'الثالث الإعدادي ١', teacher: s.name || 'معلم المادة', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) });
+      const wins = r === 1 ? [{ title: 'شيخ المرحلة', line: 'المركز الأول على المرحلة كلها' }, { title: 'قارئ الصف', line: 'المركز الأول في صفه' }] : null;
+      const extras = { chR: 3, hmR: 1, ayT: 120, ayC: 35, ayP: 340, streak: 18, acc: 92, gold: ['حامل الراية', 'المُتقِن'] };
+      const cv = await renderCertificate({ ym: '2026-11', pn: '5000', wins, extras, name: 'محمد أحمد عبدالله', title: titles[r - 1], line: lines[r - 1], rank: r, month: 'نوفمبر', points: 128.5, className: 'الثالث الإعدادي ١', teacher: s.name || 'معلم المادة', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) });
       openModal(`<div class="stack"><h3 style="margin:0">معاينة الشهادة</h3><img src="${cv.toDataURL('image/jpeg', 0.85)}" alt="معاينة الشهادة" style="width:100%;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15)"><div class="row"><button class="btn" type="button" data-close>إغلاق</button></div></div>`);
       setCertSigners(cfg);
     }));
@@ -6534,6 +6599,8 @@ function viewTeacher(app) {
         <p class="small muted" style="margin:0">تظهر أسفل كل شهادة: معلم المادة (اسمك) يميناً، والمعلم الأول في الوسط، ومدير المدرسة يساراً.</p>
         <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field" style="flex:1 1 180px">اسم المعلم الأول<input id="cfHeadN" maxlength="40"></label><label class="field" style="flex:1 1 120px">لقبه<input id="cfHeadR" maxlength="30"></label></div>
         <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field" style="flex:1 1 180px">اسم مدير المدرسة<input id="cfPrinN" maxlength="40"></label><label class="field" style="flex:1 1 120px">لقبه<input id="cfPrinR" maxlength="30"></label></div>
+        <b class="small">ماذا يظهر في الشهادة؟</b>
+        <div class="cf-opts">${CERT_OPT_LABELS.map(([k, l, d]) => `<label class="ie-check"><input type="checkbox" data-cfo="${k}" checked> <span><b>${l}</b>${d ? `<br><small class="muted">${d}</small>` : ''}</span></label>`).join('')}</div>
         <div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn primary sm" id="cfSave">حفظ</button><span class="small muted">معاينة:</span>${[1, 2, 3, 4].map((r) => `<button type="button" class="btn sm" data-cfpv="${r}">${['🥇 الأول', '🥈 الثاني', '🥉 الثالث', '🟢 الرابع'][r - 1]}</button>`).join('')}</div>
       </div>
       <div class="card stack" style="gap:10px"><h3>حفظ البيانات</h3>

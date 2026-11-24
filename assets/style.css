@@ -2076,3 +2076,11 @@ html.pg-lock, html.pg-lock body { overflow: hidden; overscroll-behavior: none; }
 .dp-dg b { font-size: 12px; }
 .dp-dg span { color: var(--ink); }
 .sq-dp + .row { margin-top: 4px; }
+/* صفحة التحقق من الشهادة */
+.vf { max-width: 520px; margin: 30px auto; text-align: center; display: grid; gap: 12px; justify-items: center; }
+.vf-ic { width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; font: 800 40px var(--f-display); color: #fff; background: var(--green); box-shadow: 0 0 0 8px color-mix(in srgb, var(--green) 18%, transparent); }
+.vf.bad .vf-ic { background: var(--bad); box-shadow: 0 0 0 8px color-mix(in srgb, var(--bad) 18%, transparent); }
+.vf h2 { margin: 0; }
+.vf-d { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; text-align: start; margin: 0; width: 100%; background: var(--paper); border-radius: 12px; padding: 12px 16px; }
+.vf-d dt { color: var(--muted); } .vf-d dd { margin: 0; font-weight: 700; }
+.cf-opts { display: grid; gap: 6px; }

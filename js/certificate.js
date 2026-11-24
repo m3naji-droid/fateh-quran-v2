@@ -32,7 +32,29 @@ const tierOf = (rank) => (rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank ===
 /* الموقّعون: يضبطهم المعلم من الإعدادات (leaderboard/certCfg) */
 export const CERT_SIGN_DEFAULT = { principal: { name: 'أ. محمد مصباح يوسف', role: 'مدير المدرسة' }, head: { name: 'د. أحمد عسكر', role: 'المعلم الأول' } };
 let SIGN = null;
-export function setCertSigners(c) { SIGN = { principal: { ...CERT_SIGN_DEFAULT.principal, ...(c?.principal || {}) }, head: { ...CERT_SIGN_DEFAULT.head, ...(c?.head || {}) } }; }
+/** خيارات الشهادة (يتحكم بها المعلم من الإعدادات) */
+export const CERT_OPT_DEFAULT = { merge: true, ch: true, hm: true, ayat: true, special: true, qr: true, streak: true, hijri: true, gold: true };
+export const CERT_OPT_LABELS = [
+  ['merge', 'دمج إنجازات المرحلة والصف في شهادة واحدة', 'مثل: «شيخ المرحلة وقارئ الصف»'],
+  ['ch', 'مركزه في التحديات (إن كان من العشرة الأوائل على المرحلة)', ''],
+  ['hm', 'مركزه في الهمة العالية (إن كان من العشرة الأوائل على المرحلة)', ''],
+  ['ayat', 'عدد الآيات التي سمّعها وتدرّب عليها', ''],
+  ['special', 'شهادة خاصة لأوائل التحديات والهمة من غير الفائزين', '«فارس التحديات» و«صاحب الهمة العالية» بالأخضر'],
+  ['streak', 'أطول سلسلة أيام ومتوسط الدقة', ''],
+  ['gold', 'ألقابه الذهبية', 'مثل: 🥇 حامل الراية'],
+  ['qr', 'رقم تحقق ورمز QR', 'يُمسح فيفتح صفحة تؤكد أن الشهادة صادرة من المقرأة'],
+  ['hijri', 'التاريخ الهجري بجانب الميلادي', ''],
+];
+export function setCertSigners(c) { SIGN = { principal: { ...CERT_SIGN_DEFAULT.principal, ...(c?.principal || {}) }, head: { ...CERT_SIGN_DEFAULT.head, ...(c?.head || {}) }, opt: { ...CERT_OPT_DEFAULT, ...(c?.opt || {}) } }; }
+export const certOpt = () => SIGN?.opt || CERT_OPT_DEFAULT;
+export async function loadCertCfg() { return signers(); }
+/** رقم التحقق: مختصر ثابت من الشهر ورقم الطالب واللقب */
+export function certCode(c) {
+  let h = 2166136261; const str = `${c.ym}|${c.pn}|${c.title}`;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `${String(c.ym || '').replace('-', '').slice(2)}-${c.pn}-${(h >>> 0).toString(36).toUpperCase().slice(0, 5)}`;
+}
+export const certUrl = (c) => `${location.origin}${location.pathname}#/verify/${encodeURIComponent(c.ym)}/${encodeURIComponent(c.pn)}/${certCode(c)}`;
 async function signers() {
   if (SIGN) return SIGN;
   try { const { store } = await import('./store.js'); setCertSigners(await store.getCertCfg()); } catch { setCertSigners(null); }
@@ -79,17 +101,17 @@ function medal(ctx, cx, cy, rank, T) {
 
 function sign(ctx, x, role, name, T) {
   ctx.textAlign = 'center'; ctx.fillStyle = T.muted; ctx.font = `500 27px ${FONT}`;
-  ctx.fillText(role || '', x, 1000);
+  ctx.fillText(role || '', x, 1012);
   fit(ctx, name || '', 700, 34, 380);
-  ctx.fillStyle = T.name; ctx.fillText(name || '', x, 1058);
-  ctx.strokeStyle = T.frame2; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - 170, 1080); ctx.lineTo(x + 170, 1080); ctx.stroke();
+  ctx.fillStyle = T.name; ctx.fillText(name || '', x, 1064);
+  ctx.strokeStyle = T.frame2; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - 170, 1084); ctx.lineTo(x + 170, 1084); ctx.stroke();
 }
 
 /** يرسم الشهادة ويعيد canvas */
 export async function renderCertificate(c) {
   try { await Promise.all([document.fonts.load(`700 40px ${FONT}`), document.fonts.load(`400 30px ${FONT}`), document.fonts.load(`400 40px ${QFONT}`), document.fonts.load(`700 60px ${RFONT}`)]); } catch {}
   const SG = await signers();
-  const rank = c.rank || 1, T = TIERS[tierOf(rank)];
+  const rank = c.rank || 1, T = TIERS[c.tier || tierOf(rank)];
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
   // الورق بلون المركز، مع زخرفة الشاشة الرئيسية وتوهّج في الوسط
@@ -119,26 +141,67 @@ export async function renderCertificate(c) {
   fit(ctx, c.name, 800, 86, W - 760);
   ctx.fillStyle = T.name; ctx.fillText(c.name, W / 2, 558);
   ctx.strokeStyle = T.frame2; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(W / 2 - 380, 585); ctx.lineTo(W / 2 + 380, 585); ctx.stroke();
-  // اللقب
+  // اللقب (أو الإنجازان مدموجين)
+  const O = SG.opt, wins = O.merge && Array.isArray(c.wins) && c.wins.length > 1 ? c.wins : null;
+  const title = wins ? wins.map((w) => w.title).join(' و') : c.title;
+  const line = wins ? wins.map((w) => w.line).join('، و') : c.line;
   ctx.fillStyle = T.ink; ctx.font = `500 34px ${FONT}`;
-  ctx.fillText(`${c.className ? c.className + ' · ' : ''}لحصوله على`, W / 2, 645);
-  fit(ctx, c.title, 800, 70, W - 640);
-  ctx.fillStyle = T.head; ctx.fillText(c.title, W / 2, 728);
-  const tw = ctx.measureText(c.title).width;
-  star(ctx, W / 2 - tw / 2 - 40, 706, 12, T.frame2); star(ctx, W / 2 + tw / 2 + 40, 706, 12, T.frame2);
-  ctx.fillStyle = T.ink; fit(ctx, `${c.line} ${c.period || 'في شهر ' + c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`, 400, 32, W - 320);
-  ctx.fillText(`${c.line} ${c.period || 'في شهر ' + c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`, W / 2, 790);
-  ctx.fillStyle = C.green; ctx.font = `400 42px ${QFONT}`;
-  ctx.fillText('﴿ وَرَتِّلِ ٱلْقُرْءَانَ تَرْتِيلًا ﴾', W / 2, 862);
-  ctx.fillStyle = T.muted; ctx.font = `400 25px ${FONT}`;
-  ctx.fillText('بارك الله فيه، وجعله من أهل القرآن الذين هم أهل الله وخاصته', W / 2, 912);
+  ctx.fillText(`${c.className ? c.className + '، ' : ''}لحصوله على`, W / 2, 640);
+  fit(ctx, title, 800, 66, W - 640);
+  ctx.fillStyle = T.head; ctx.fillText(title, W / 2, 716);
+  const tw = ctx.measureText(title).width;
+  star(ctx, W / 2 - tw / 2 - 40, 695, 12, T.frame2); star(ctx, W / 2 + tw / 2 + 40, 695, 12, T.frame2);
+  const main = c.special ? `${line} ${c.period || 'في شهر ' + c.month}.` : `${line} ${c.period || 'في شهر ' + c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`;
+  ctx.fillStyle = T.ink; fit(ctx, main, 400, 31, W - 320); ctx.fillText(main, W / 2, 772);
+  // إنجازات إضافية (كلٌّ حسب إعداد المعلم)
+  const X = c.extras || {}, ex = [];
+  const ord = (n) => (['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'][n] || ar(n));
+  const rk = [];
+  if (O.ch && X.chR && X.chR <= 10 && !(c.special === 'ch' || c.special === 'both')) rk.push(`⚔️ ${ord(X.chR)} على المرحلة في التحديات`);
+  if (O.hm && X.hmR && X.hmR <= 10 && !(c.special === 'hm' || c.special === 'both')) rk.push(`⚡ ${ord(X.hmR)} على المرحلة في الهمة العالية`);
+  if (rk.length) ex.push(rk.join('   ،   '));
+  if (O.ayat) {
+    const rec = (X.ayT || 0) + (X.ayC || 0), pr = X.ayP || 0;
+    const recTxt = rec ? `سمّع ${ar(rec)} آية${X.ayC && X.ayT ? ` (منها ${ar(X.ayC)} في التحديات)` : X.ayC && !X.ayT ? ' في التحديات' : ''}` : '';
+    const prTxt = pr ? `تدرّب على ${ar(pr)} آية` : '';
+    const t = recTxt && prTxt ? `📖 ${recTxt}، و${prTxt}` : recTxt ? `📖 ${recTxt}` : prTxt ? `📖 ${prTxt}` : '';
+    if (t) ex.push(t);
+  }
+  if (O.streak && (X.streak > 1 || X.acc)) ex.push([X.streak > 1 ? `🔥 واظب ${ar(X.streak)} يوماً متتالية` : '', X.acc ? `🎯 متوسط دقته ${ar(X.acc)}٪` : ''].filter(Boolean).join('   ،   '));
+  if (O.gold && X.gold?.length) ex.push('🥇 ' + X.gold.slice(0, 4).join('، '));
+  let y = 818;
+  ex.slice(0, 4).forEach((t) => { ctx.fillStyle = T.accent; fit(ctx, t, 500, 27, W - 420); ctx.fillText(t, W / 2, y); y += 40; });
+  ctx.fillStyle = C.green; ctx.font = `400 ${ex.length > 2 ? 34 : 40}px ${QFONT}`;
+  ctx.fillText('﴿ وَرَتِّلِ ٱلْقُرْءَانَ تَرْتِيلًا ﴾', W / 2, Math.max(y + 22, 870));
+  if (ex.length <= 1) { ctx.fillStyle = T.muted; ctx.font = `400 25px ${FONT}`; ctx.fillText('بارك الله فيه، وجعله من أهل القرآن الذين هم أهل الله وخاصته', W / 2, 922); }
   // المركز أعلى اليسار
   medal(ctx, 250, 235, rank, T);
   // التوقيعات: معلم المادة يميناً، المعلم الأول وسطاً، مدير المدرسة يساراً
   sign(ctx, W - 330, 'معلم المادة', c.teacher || '', T);
   sign(ctx, W / 2, SG.head.role, SG.head.name, T);
   sign(ctx, 330, SG.principal.role, SG.principal.name, T);
-  if (c.date) { ctx.fillStyle = T.muted; ctx.font = `400 23px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText(`حُرّرت في ${c.date}`, W / 2, 1128); }
+  // التاريخ أسفل اليمين
+  if (c.date) {
+    let hij = '';
+    if (O.hijri) { try { hij = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric' }).format(c.at ? new Date(c.at) : new Date()); } catch {} }
+    ctx.fillStyle = T.muted; ctx.font = `400 22px ${FONT}`; ctx.textAlign = 'center';
+    ctx.fillText(`حُرّرت في ${c.date}`, W - 330, 1118); if (hij) ctx.fillText(`الموافق ${ar(hij)}`, W - 330, 1146);
+  }
+  // رقم التحقق ورمز QR أعلى اليمين
+  if (O.qr && c.pn && c.ym) {
+    try {
+      await loadScript(LIBS.qr);
+      const qr = window.qrcode(0, 'M'); qr.addData(certUrl(c)); qr.make();
+      const n = qr.getModuleCount(), size = 150, cell = size / n, x0 = W - 250 - size / 2, y0 = 150;
+      ctx.fillStyle = '#fff'; ctx.fillRect(x0 - 10, y0 - 10, size + 20, size + 20);
+      ctx.strokeStyle = T.frame2; ctx.lineWidth = 2; ctx.strokeRect(x0 - 10, y0 - 10, size + 20, size + 20);
+      ctx.fillStyle = '#111';
+      for (let r = 0; r < n; r++) for (let q = 0; q < n; q++) if (qr.isDark(r, q)) ctx.fillRect(Math.floor(x0 + q * cell), Math.floor(y0 + r * cell), Math.ceil(cell), Math.ceil(cell));
+      ctx.fillStyle = T.muted; ctx.font = `500 19px ${FONT}`; ctx.textAlign = 'center'; ctx.direction = 'ltr';
+      ctx.fillText(certCode(c), W - 250, y0 + size + 36); ctx.direction = 'rtl';
+      ctx.font = `400 17px ${FONT}`; ctx.fillText('امسح للتحقق من الشهادة', W - 250, y0 + size + 60);
+    } catch (e) { console.warn('qr', e); }
+  }
   return cv;
 }
 

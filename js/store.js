@@ -763,7 +763,7 @@ async function makeCloud() {
     async listAnnReads(aid) { return (await getDocs(collection(db, 'announcements', aid, 'reads'))).docs.map((d) => d.id); },
     async getErrorCatalog() { await ensureAnon(); const d = await getDoc(doc(db, 'catalog', 'errors')).catch(() => null); return d?.exists() ? d.data() : null; },
     async saveErrorCatalog(c) { await setDoc(doc(db, 'catalog', 'errors'), c); },
-    async getMonthResult(ym) { const d = await getDoc(doc(db, 'results', ym)); return d.exists() ? d.data() : null; },
+    async getMonthResult(ym) { await ensureAnon(); const d = await getDoc(doc(db, 'results', ym)); return d.exists() ? d.data() : null; },
     async saveMonthResult(ym, r) { await setDoc(doc(db, 'results', ym), r); },
     async listResults() { await ensureAnon(); return (await getDocs(collection(db, 'results'))).docs.map((d) => ({ ym: d.id, ...d.data() })); },
     async addStudentNotifId(pn, id, n) { await setDoc(doc(db, 'roster', pn, 'notifs', id), { ...n, studentId: pn, createdAt: now() }); return id; },
