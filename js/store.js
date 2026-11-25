@@ -305,6 +305,8 @@ const local = {
   // المكافآت: المتجر، وزينة الأسماء، ومحفظة الطالب، وصوت الأسبوع
   async getShop() { return LS.get('shop', null); },
   async getCertCfg() { return LS.get('certCfg', null); },
+  async getPrizeCfg() { return LS.get('prizeCfg', null); },
+  async setPrizeCfg(c) { LS.set('prizeCfg', c); },
   async setCertCfg(c) { LS.set('certCfg', c); },
   async setShop(x) { LS.set('shop', x); },
   async getLooks() { return LS.get('looks', {}); },
@@ -806,6 +808,9 @@ async function makeCloud() {
     // الموقّعون على شهادات التقدير (المدير والمعلم الأول)
     async getCertCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'certCfg')); return d.exists() ? d.data() : null; },
     async setCertCfg(c) { await setDoc(doc(db, 'leaderboard', 'certCfg'), c); },
+    // مبالغ الجوائز (حاسبة الجوائز)
+    async getPrizeCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'prizeCfg')); return d.exists() ? d.data() : null; },
+    async setPrizeCfg(c) { await setDoc(doc(db, 'leaderboard', 'prizeCfg'), c); },
     async setShop(x) { await setDoc(doc(db, 'leaderboard', 'shop'), { ...x, at: now() }); },
     async getLooks() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'looks')); return d.exists() ? d.data() : {}; },
     async setLooksAll(m) { await setDoc(doc(db, 'leaderboard', 'looks'), m, { merge: true }); },

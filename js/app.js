@@ -5193,6 +5193,7 @@ function viewTeacher(app) {
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="khAdm"></div>
       <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="przCard"></div>
       <div class="card stack month-card" style="gap:10px;margin-bottom:16px">
         <div class="row" style="justify-content:space-between"><h3>🎓 الشهادات والنتائج والأرشيف</h3><span class="small muted" id="mStat"></span></div>
         ${CDCFG.v?.start ? `<p class="small" style="margin:0">🏁 أنت على <b>نظام الجولات</b>: تُحسب النتائج عند موعد العداد ${CDCFG.v.auto ? 'وتُعلن تلقائياً' : 'ثم تراجعها وتعلنها'}، ${CDCFG.v.reset === false ? 'وتستمر النقاط في التراكم بعدها' : 'ثم تُصفَّر النقاط وتبدأ جولة جديدة'}. تعدّل ذلك من «⚙️ تعديل موعد العد التنازلي» في لوحة اليوم.</p>` : '<p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>'}
@@ -5208,6 +5209,14 @@ function viewTeacher(app) {
     { const L = computeLists(D.challenges || [], D.himma || [], D.students);
       mountLists($('#lsT', body), L.lists, { classes: D.classes, onExport: (k, st) => exportList(L.lists, k, st) }); }
     mountBoard($('#hbBoard', body), { ...board, at: null }, { classes: D.classes, pickClass: true });
+    { const pc = $('#przCard', body); if (pc) import('./prizes.js').then((m) => m.mountPrizes(pc, {
+      periods: months.map((m2) => ({ v: m2, t: monthLabel(m2) + (m2 === new Date().toISOString().slice(0, 7) ? ' (الشهر الحالي)' : '') })),
+      compute: async (ym) => {
+        const res = computeMonth(boardSubs(), D.students, D.classes, ym), EXT = certExtrasAll(ym);
+        return { label: res.label, rows: D.students.map((st) => ({ pn: st.id, name: st.name, cls: className(st.classId), hs: res.ranks[st.id]?.stage || null, hc: res.ranks[st.id]?.cls || null, hm: EXT[st.id]?.hmR || null, ch: EXT[st.id]?.chR || null })) };
+      },
+      loadCfg: () => store.getPrizeCfg(), saveCfg: (c) => store.setPrizeCfg(c), toast,
+    })).catch((e) => { pc.innerHTML = `<p class="muted">تعذّر تحميل حاسبة الجوائز: ${esc(e.message)}</p>`; }); }
     $('#mArch', body).onclick = openResultsArchive;
     $('#mAllC', body).onclick = (e) => downloadAllCerts(e.currentTarget);
     const pick = $('#mPick', body);
