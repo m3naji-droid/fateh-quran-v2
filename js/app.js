@@ -107,6 +107,7 @@ async function playAnnVoice(b, aid) {
 }
 const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, monthWins, subScore } from './leaderboard.js';
+import { ORD_CATS, ORD_MODES, normOrd, orderCerts, placeText, placeShort, placeTitle } from './certorder.js';
 import { downloadCertificatePNG, downloadCertificatesPDF, renderCertificate, setCertSigners, CERT_SIGN_DEFAULT, CERT_OPT_DEFAULT, CERT_OPT_LABELS, certOpt, loadCertCfg, certCode } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
 import { G, autoGrade, coverage, readEnd, gradeV2, capped, aiErrors } from './grading.js';
@@ -1691,7 +1692,7 @@ function viewStudent(app) {
       ${w ? `<div class="row"><button class="btn gold" type="button" id="cfPng">🏅 حمّل شهادتك (صورة)</button><button class="btn" type="button" id="cfPdf">PDF</button></div>` : ''}
       <div class="row"><button class="btn primary" type="button" data-close>${w ? 'الحمد لله' : 'سأجتهد بإذن الله'}</button></div></div>`, (m) => {
       if (!w) return;
-      const cert = { ym: n.ym, pn: me.id, name: me.name, title: n.cert?.title || w.title, line: n.cert?.line || w.line, rank: n.cert?.rank || w.rank, wins: n.cert?.wins, extras: n.cert?.extras, tier: n.cert?.tier || undefined, special: n.cert?.special || undefined, month: n.label, points: r.points, className: n.className, teacher: n.teacher, ...(n.type === 'season' ? { season: n.label, period: `في ${n.label}`, color: n.color } : {}), date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
+      const cert = { ym: n.ym, pn: me.id, name: me.name, title: n.cert?.title || w.title, line: n.cert?.line || w.line, rank: n.cert?.rank || w.rank, wins: n.cert?.wins, extras: n.cert?.extras, places: n.cert?.places || undefined, tier: n.cert?.tier || undefined, special: n.cert?.special || undefined, month: n.label, points: r.points, className: n.className, teacher: n.teacher, ...(n.type === 'season' ? { season: n.label, period: `في ${n.label}`, color: n.color } : {}), date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })) };
       $('#cfPng', m).onclick = (e) => { e.currentTarget.disabled = true; downloadCertificatePNG(cert).catch((x) => toast(x.message)).finally(() => (e.currentTarget.disabled = false)); };
       $('#cfPdf', m).onclick = (e) => { const b = e.currentTarget; b.disabled = true; downloadCertificatesPDF([cert], `certificate-${n.ym}.pdf`).catch((x) => toast(x.message)).finally(() => (b.disabled = false)); };
     });
@@ -5194,6 +5195,7 @@ function viewTeacher(app) {
       <div class="card cr-launch" style="margin-bottom:16px"><div><h3 style="margin:0">📺 وضع عرض الفصل</h3><span class="small muted">لوحة الشرف بحركة احتفالية، وتحدي الصفوف، وآية اليوم، وأبطال الأسبوع على البروجكتر. تتبدل كل ١٥ ثانية، وتتنقل بالأسهم.</span></div>
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="przCard"></div>
+      <div class="card stack" style="gap:10px;margin-bottom:16px" id="cordCard"></div>
       <div class="card stack month-card" style="gap:10px;margin-bottom:16px">
         <div class="row" style="justify-content:space-between"><h3>🎓 الشهادات والنتائج والأرشيف</h3><span class="small muted" id="mStat"></span></div>
         ${CDCFG.v?.start ? `<p class="small" style="margin:0">🏁 أنت على <b>نظام الجولات</b>: تُحسب النتائج عند موعد العداد ${CDCFG.v.auto ? 'وتُعلن تلقائياً' : 'ثم تراجعها وتعلنها'}، ${CDCFG.v.reset === false ? 'وتستمر النقاط في التراكم بعدها' : 'ثم تُصفَّر النقاط وتبدأ جولة جديدة'}. تعدّل ذلك من «⚙️ تعديل موعد العد التنازلي» في لوحة اليوم.</p>` : '<p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>'}
@@ -5217,6 +5219,7 @@ function viewTeacher(app) {
       },
       loadCfg: () => store.getPrizeCfg(), saveCfg: (c) => store.setPrizeCfg(c), toast,
     })).catch((e) => { pc.innerHTML = `<p class="muted">تعذّر تحميل حاسبة الجوائز: ${esc(e.message)}</p>`; }); }
+    { const oc = $('#cordCard', body); if (oc) mountCertOrd(oc, months); }
     $('#mArch', body).onclick = openResultsArchive;
     $('#mAllC', body).onclick = (e) => downloadAllCerts(e.currentTarget);
     const pick = $('#mPick', body);
@@ -6294,9 +6297,35 @@ function viewTeacher(app) {
     return out;
   }
   const ORD10 = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
-  function certFor(res, st, r, ext = null) {
+  /* ترتيب الشهادات (leaderboard/certOrd) مع مبالغ الجوائز إن كان «مجموع الجوائز» أساساً */
+  const CORD = { v: null, pz: null, mod: null };
+  async function loadCertOrd(force = false) {
+    if (CORD.v && !force) return CORD.v;
+    try { CORD.v = normOrd(await store.getCertOrd()); } catch { CORD.v = normOrd(null); }
+    if (CORD.v.on && CORD.v.by.includes('pz')) { try { CORD.mod = await import('./prizes.js'); CORD.pz = CORD.mod.normCfg(await store.getPrizeCfg()); } catch (e) { console.warn('prize cfg', e); } }
+    return CORD.v;
+  }
+  /** صفوف المراكز لكل طالب في الفترة */
+  const placeRows = (res, EXT) => D.students.map((st) => ({ pn: st.id, name: st.name, cls: className(st.classId), hs: res.ranks?.[st.id]?.stage || null, hc: res.ranks?.[st.id]?.cls || null, hm: EXT[st.id]?.hmR || null, ch: EXT[st.id]?.chR || null }));
+  /** ترتيب الشهادات حسب إعداد المعلم: undefined إن كان مطفأً (الطريقة المعتادة)، وإلا { pn: { rank, places } } */
+  function certOrderMap(res, EXT, cfg = CORD.v) {
+    if (!cfg?.on) return undefined;
+    const rows = placeRows(res, EXT);
+    const pz = cfg.by.includes('pz') && CORD.mod ? CORD.mod.computePrizes(rows, CORD.pz) : null;
+    return orderCerts(rows, cfg, pz).by;
+  }
+  const byCertRank = (L) => (CORD.v?.on ? L.sort((a, b) => (a.rank || 99) - (b.rank || 99)) : L);
+  function certFor(res, st, r, ext = null, oi = undefined) {
     const O = certOpt(), w = monthTitle(r), X = ext || {};
     const base = { ym: res.ym, pn: st.id, name: st.name, month: res.label && /^جولة/.test(res.label) ? res.label : monthLabel(res.ym), points: r?.points || 0, className: className(st.classId), teacher: s.name || '', date: ar(new Date().toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric' })), at: new Date().toISOString(), extras: X };
+    if (oi !== undefined) {
+      // الترتيب الذي اختاره المعلم: الرقم واللون من الترتيب العام، ومراكزه كلها شارات في الشهادة
+      const o = oi?.[st.id]; if (!o) return null;
+      const places = o.places.map((p) => placeText(p.k, p.r)).filter(Boolean);
+      if (w) return { ...base, title: w.title, line: w.line, rank: o.rank, wins: monthWins(r), places, ordered: true };
+      const t = placeTitle(o.places[0]);
+      return { ...base, ...t, rank: o.rank, places, ordered: true };
+    }
     if (w) return { ...base, title: w.title, line: w.line, rank: w.rank, wins: monthWins(r) };
     if (!O.special) return null;
     // شهادة خاصة لأوائل التحديات والهمة على المرحلة (العشرة الأوائل) من غير الفائزين
@@ -6313,9 +6342,9 @@ function viewTeacher(app) {
     const ungraded = D.subs.filter((x) => inP(x) && x.taskId && !x.teacher).length;
     let done = null; try { done = await store.getMonthResult(ym); } catch {}
     const isCur = !per && ym === new Date().toISOString().slice(0, 7);
-    await loadCertCfg();
-    const EXT = certExtrasAll(ym, per);
-    const winners = D.students.map((st) => certFor(res, st, res.ranks[st.id], EXT[st.id])).filter(Boolean);
+    await loadCertCfg(); await loadCertOrd(true);
+    const EXT = certExtrasAll(ym, per), OI = certOrderMap(res, EXT);
+    const winners = byCertRank(D.students.map((st) => certFor(res, st, res.ranks[st.id], EXT[st.id], OI)).filter(Boolean));
     const row = (x, i) => `<li><span class="mr-n">${ar(i + 1)}</span><span>${esc(x.name)}</span><b class="num">${fmt10(x.points)}</b></li>`;
     openModal(`<div class="stack month-review">
       <h2>${per ? `🏁 نتائج ${esc(per.label)}` : `📅 نتائج شهر ${esc(monthLabel(ym))}`}</h2>
@@ -6342,6 +6371,57 @@ function viewTeacher(app) {
       $('#mrGo', m).onclick = async () => { const ok = await announceMonth(res, ym, per ? { label: per.label, from: per.from, to: per.to } : {}); if (ok) { closeModal(); onDone?.(); } };
     });
   }
+  /** 🏅 ترتيب الشهادات: أساس الترتيب (أكثر من واحد بالأولوية)، وطريقة الدمج، وعدد المراكز، ومعاينة الترتيب */
+  function mountCertOrd(host, months) {
+    let cfg = normOrd(null), per = months[0] || '';
+    const draw = () => {
+      const on = cfg.on;
+      host.innerHTML = `<div class="row" style="justify-content:space-between"><h3>🏅 ترتيب الشهادات</h3><label class="row small" style="gap:6px"><input type="checkbox" id="coOn" ${on ? 'checked' : ''}> <b>مفعّل</b></label></div>
+        <p class="small muted" style="margin:0">${on ? 'تُرتَّب الشهادات ويُحدَّد من يأخذها بحسب اختيارك هنا: الأول ذهبية، والثاني فضية، والثالث برونزية، والبقية خضراء، وتُكتب في كل شهادة مراكز الطالب (بلا مبالغ).' : 'مطفأ: تُمنح الشهادات بالطريقة المعتادة (الخمسة الأوائل في المرحلة وفي كل صف، وأوائل التحديات والهمة). فعّله لتختار أنت أساس الترتيب.'}</p>
+        <div class="co-body${on ? '' : ' off'}">
+          <b class="small">١) أساس الترتيب <span class="muted">(اختر واحداً أو أكثر، والرقم = الأولوية)</span></b>
+          <div class="co-chips">${ORD_CATS.map((c) => { const i = cfg.by.indexOf(c.k); return `<button type="button" class="co-ch${i >= 0 ? ' on' : ''}" data-k="${c.k}" title="${esc(c.d || '')}">${i >= 0 ? `<i>${ar(i + 1)}</i>` : ''}${c.ic} ${esc(c.t)}</button>`; }).join('')}</div>
+          ${cfg.by.length > 1 ? `<b class="small">٢) كيف تُدمج؟</b>
+          <div class="co-modes">${ORD_MODES.map(([k, t, d]) => `<label class="co-m${cfg.mode === k ? ' on' : ''}"><input type="radio" name="coMode" value="${k}" ${cfg.mode === k ? 'checked' : ''}> <span><b>${t}</b><small>${d}</small></span></label>`).join('')}</div>` : ''}
+          <div class="row" style="justify-content:space-between;align-items:center"><b class="small">${cfg.by.length > 1 ? '٣' : '٢'}) عدد المراكز في كل فئة</b><button type="button" class="btn sm ghost" id="coCopy">📋 انسخ من حاسبة الجوائز</button></div>
+          <div class="co-n">${ORD_CATS.filter((c) => c.k !== 'pz').map((c) => `<label class="${cfg.by.includes(c.k) ? '' : 'dim'}"><span>${c.ic} ${esc(c.t)}${c.k === 'hc' ? ' <small class="muted">(لكل صف)</small>' : ''}</span><select data-n="${c.k}">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option value="${n}" ${n === cfg.n[c.k] ? 'selected' : ''}>${ar(n)}</option>`).join('')}</select></label>`).join('')}</div>
+          ${cfg.by.includes('pz') ? '<p class="small muted" style="margin:0">💰 «مجموع الجوائز» يأخذ مراكز الفئات ومبالغها من حاسبة الجوائز ويرتّب بها، ولا تظهر المبالغ في الشهادة.</p>' : ''}
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:end"><button type="button" class="btn primary sm" id="coSave">حفظ</button>
+          ${months.length ? `<label class="field" style="min-width:160px">معاينة الترتيب لـ<select id="coPer">${months.map((m) => `<option value="${m}" ${m === per ? 'selected' : ''}>${esc(monthLabel(m))}</option>`).join('')}</select></label>` : ''}</div>
+        <div id="coPrev"></div>`;
+      $('#coOn', host).onchange = (e) => { cfg.on = e.target.checked; draw(); };
+      $$('.co-ch', host).forEach((b) => (b.onclick = () => { const k = b.dataset.k, i = cfg.by.indexOf(k); if (i >= 0) cfg.by.splice(i, 1); else cfg.by.push(k); draw(); }));
+      $$('[name="coMode"]', host).forEach((x) => (x.onchange = () => { cfg.mode = x.value; draw(); }));
+      $$('[data-n]', host).forEach((x) => (x.onchange = () => { cfg.n[x.dataset.n] = +x.value; preview(); }));
+      $('#coCopy', host).onclick = async () => {
+        try { const m = await import('./prizes.js'), P = m.normCfg(await store.getPrizeCfg()); let k0 = 0; ['hs', 'hc', 'hm', 'ch'].forEach((k) => { if (P.cats[k].on) { cfg.n[k] = Math.max(1, P.cats[k].a.length); k0++; } }); toast(k0 ? 'نُسخ عدد المراكز من حاسبة الجوائز.' : 'لا فئات مفعّلة في حاسبة الجوائز.'); draw(); } catch (e) { toast('تعذر: ' + e.message); }
+      };
+      $('#coSave', host).onclick = async () => {
+        if (cfg.on && !cfg.by.length) return toast('اختر أساساً واحداً على الأقل للترتيب.');
+        const c = normOrd(cfg);
+        try { await store.setCertOrd(c); cfg = JSON.parse(JSON.stringify(c)); await loadCertOrd(true); draw(); toast(c.on ? 'حُفظ ترتيب الشهادات، وسيُطبَّق في المراجعة والإعلان والأرشيف.' : 'حُفظ: الشهادات بالطريقة المعتادة.'); } catch (e) { toast('تعذر الحفظ: ' + (e.code || e.message)); }
+      };
+      const sel = $('#coPer', host); if (sel) sel.onchange = () => { per = sel.value; preview(); };
+      preview();
+    };
+    const preview = async () => {
+      const box = $('#coPrev', host); if (!box || !per) return;
+      if (!cfg.on || !cfg.by.length) { box.innerHTML = ''; return; }
+      await loadCertCfg();
+      const C = normOrd({ ...cfg, on: true });
+      if (C.by.includes('pz') && !CORD.mod) { try { CORD.mod = await import('./prizes.js'); CORD.pz = CORD.mod.normCfg(await store.getPrizeCfg()); } catch {} }
+      const res = computeMonth(boardSubs(), D.students, D.classes, per), EXT = certExtrasAll(per), OI = certOrderMap(res, EXT, C);
+      const L = D.students.map((st) => certFor(res, st, res.ranks[st.id], EXT[st.id], OI)).filter(Boolean).sort((a, b) => a.rank - b.rank);
+      const tier = (r) => (r === 1 ? ['g', 'ذهبية'] : r === 2 ? ['s', 'فضية'] : r === 3 ? ['b', 'برونزية'] : ['gr', 'خضراء']);
+      box.innerHTML = L.length ? `<div class="co-prev"><table><thead><tr><th>#</th><th>الطالب</th><th>المراكز</th><th>الشهادة</th></tr></thead><tbody>${L.map((c) => { const o = OI[c.pn], [tc, tt] = tier(c.rank); return `<tr><td class="num">${ar(c.rank)}</td><td><b>${esc(c.name)}</b><br><small class="muted">${esc(c.className || '')}</small></td><td>${o.places.map((p) => `<span class="co-b">${esc(placeShort(p.k, p.r, ar))}</span>`).join('')}</td><td><span class="co-t ${tc}">${tt}</span></td></tr>`; }).join('')}</tbody></table></div>
+        <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="small muted">المجموع: ${nWord(L.length, 'شهادة واحدة', 'شهادتان', 'شهادات', 'شهادة')} (${ar(Math.min(3, L.length))} ملوّنة + ${ar(Math.max(0, L.length - 3))} خضراء)${cfg.on && JSON.stringify(normOrd(cfg)) !== JSON.stringify(CORD.v) ? ' · <b>لم يُحفظ بعد</b>' : ''}</span><button type="button" class="btn gold sm" id="coPdf">📄 الشهادات بهذا الترتيب (PDF)</button></div>`
+        : '<p class="small muted" style="margin:0">لا أحد ضمن المراكز المحددة في هذه الفترة.</p>';
+      const pb = $('#coPdf', box); if (pb) pb.onclick = async () => { pb.disabled = true; try { await downloadCertificatesPDF(L, `certificates-${per}.pdf`, (i, n) => (pb.textContent = `${ar(i)}/${ar(n)}…`)); } catch (e) { toast('تعذر: ' + e.message); } pb.disabled = false; pb.textContent = '📄 الشهادات بهذا الترتيب (PDF)'; };
+    };
+    host.innerHTML = '<p class="small muted">جارٍ التحميل…</p>';
+    loadCertOrd(true).then((v) => { cfg = JSON.parse(JSON.stringify(v)); draw(); }).catch(() => draw());
+  }
   /** أطول سلسلة للطالب في الشهر */
   async function bestStreak(st, ym) {
     let act = [];
@@ -6354,14 +6434,14 @@ function viewTeacher(app) {
   async function announceMonth(res, ym, opts = {}) {
     const label = opts.label || monthLabel(ym), items = [], ofL = opts.label ? label : `شهر ${label}`, inL = opts.label ? `في ${label}` : `لشهر ${label}`;
     if (!opts.silent && !(await confirmBox(`إعلان نتائج ${ofL} لكل الطلاب (${ar(D.students.length)})؟ يصل لكل طالب إشعار بنتيجته.`, 'أعلن النتائج'))) return false;
-    await loadCertCfg();
-    const EXT = certExtrasAll(ym, opts.from ? { from: opts.from, to: opts.to } : null), CERTS = {};
+    await loadCertCfg(); await loadCertOrd(true);
+    const EXT = certExtrasAll(ym, opts.from ? { from: opts.from, to: opts.to } : null), CERTS = {}, OI = certOrderMap(res, EXT);
     const { ok, fail } = await runBulk('إعلان نتائج الشهر', D.students, async (st) => {
       const r = res.ranks[st.id] || { points: 0 };
       const streak = await bestStreak(st, ym);
-      const cert = certFor({ ym, label: opts.label || null }, st, r, { ...(EXT[st.id] || {}), streak });
+      const cert = certFor({ ym, label: opts.label || null }, st, r, { ...(EXT[st.id] || {}), streak }, OI);
       const w = monthTitle(r) || (cert ? { key: 'special', title: cert.title, line: cert.line, rank: cert.rank } : null);
-      if (cert) CERTS[st.id] = { name: st.name, title: cert.title, line: cert.line, rank: cert.rank, wins: cert.wins, tier: cert.tier || null, special: cert.special || null, extras: cert.extras, code: certCode(cert) };
+      if (cert) CERTS[st.id] = { name: st.name, title: cert.title, line: cert.line, rank: cert.rank, wins: cert.wins, tier: cert.tier || null, special: cert.special || null, extras: cert.extras, places: cert.places || null, code: certCode(cert) };
       const cp = res.classPos[st.classId] || null;
       const title = w ? (w.key === 'stage1' ? `👑 مبارك! أنت شيخ المرحلة ${inL}` : w.key === 'cls1' ? `🏆 مبارك! أنت قارئ الصف ${inL}` : `🏅 مبارك! ${w.title} ${inL}`) : `📊 نتائج ${ofL}`;
       const body = w?.key === 'special' ? `${w.line} ${inL}. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.` : w ? `${w.line} بـ${fmt10(r.points)} نقطة. شهادة التقدير تنتظرك في المقرأة، فبارك الله فيك وزادك.`
@@ -6460,6 +6540,8 @@ function viewTeacher(app) {
     Object.values(r.byClass || {}).forEach((a) => (a || []).forEach((x, i) => ((ranksOf[x.id] = ranksOf[x.id] || { points: x.points }).cls = i + 1)));
     const res = { ym: r.ym, label: r.round ? r.label : null };
     const EXT = /^\d{4}-\d{2}$/.test(r.ym || '') || (r.from && r.to) ? certExtrasAll(r.ym, r.round && r.from ? { from: r.from, to: r.to } : null) : {};
+    const OI = certOrderMap({ ranks: ranksOf }, Object.fromEntries(D.students.map((st) => [st.id, { ...(EXT[st.id] || {}), ...(r.certs?.[st.id]?.extras || {}) }])));
+    if (OI) return byCertRank(D.students.map((st) => certFor(res, st, ranksOf[st.id] || { points: 0 }, { ...(EXT[st.id] || {}), ...(r.certs?.[st.id]?.extras || {}) }, OI)).filter(Boolean));
     return D.students.map((st) => { const X = { ...(EXT[st.id] || {}), ...(r.certs?.[st.id]?.extras || {}) }; return (ranksOf[st.id] || (certOpt().special && ((X.chR && X.chR <= 10) || (X.hmR && X.hmR <= 10)))) ? certFor(res, st, ranksOf[st.id] || { points: 0 }, X) : null; }).filter(Boolean);
   }
   function seasonCerts(x) {
@@ -6468,6 +6550,7 @@ function viewTeacher(app) {
   }
   /** كل المسابقات المنتهية التي لها شهادات */
   async function allCompetitions() {
+    await loadCertOrd(true);
     let R = [];
     try { R = await store.listResults(); } catch (e) { console.warn('results', e); }
     if (D.tourneys === undefined) await loadHeroesT().catch(() => {});

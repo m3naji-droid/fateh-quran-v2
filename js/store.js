@@ -308,6 +308,8 @@ const local = {
   async getPrizeCfg() { return LS.get('prizeCfg', null); },
   async setPrizeCfg(c) { LS.set('prizeCfg', c); },
   async setCertCfg(c) { LS.set('certCfg', c); },
+  async getCertOrd() { return LS.get('certOrd', null); },
+  async setCertOrd(c) { LS.set('certOrd', c); },
   async setShop(x) { LS.set('shop', x); },
   async getLooks() { return LS.get('looks', {}); },
   async setMyLook(pn, look) { const m = LS.get('looks', {}); m['u' + pn] = { ...(look || {}), pn }; LS.set('looks', m); },
@@ -808,6 +810,9 @@ async function makeCloud() {
     // الموقّعون على شهادات التقدير (المدير والمعلم الأول)
     async getCertCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'certCfg')); return d.exists() ? d.data() : null; },
     async setCertCfg(c) { await setDoc(doc(db, 'leaderboard', 'certCfg'), c); },
+    // ترتيب الشهادات (أساس الترتيب وعدد المراكز)
+    async getCertOrd() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'certOrd')); return d.exists() ? d.data() : null; },
+    async setCertOrd(c) { await setDoc(doc(db, 'leaderboard', 'certOrd'), c); },
     // مبالغ الجوائز (حاسبة الجوائز)
     async getPrizeCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'prizeCfg')); return d.exists() ? d.data() : null; },
     async setPrizeCfg(c) { await setDoc(doc(db, 'leaderboard', 'prizeCfg'), c); },

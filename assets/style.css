@@ -2099,3 +2099,25 @@ html.pg-lock, html.pg-lock body { overflow: hidden; overscroll-behavior: none; }
 .pz-t tfoot td { font-weight: 700; background: var(--paper); }
 .pz-bycat { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 8px; }
 .pz-bycat ol { margin: 4px 0 0; padding-inline-start: 18px; font-size: 13.5px; }
+/* 🏅 ترتيب الشهادات */
+.co-body{display:grid;gap:10px}
+.co-body.off{opacity:.45;pointer-events:none}
+.co-chips{display:flex;flex-wrap:wrap;gap:7px}
+.co-ch{border:1.5px solid var(--line,#d7e3dc);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;background:var(--card,#fff);color:inherit;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.co-ch.on{border-color:#0d5c46;background:#e6f3ed;color:#0d5c46;font-weight:700}
+.co-ch i{font-style:normal;background:#0d5c46;color:#fff;border-radius:50%;width:20px;height:20px;font-size:12px;display:grid;place-items:center}
+.co-modes{display:grid;gap:6px}
+.co-m{border:1.5px solid var(--line,#e3ebe6);border-radius:12px;padding:8px 10px;display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:13px}
+.co-m.on{border-color:#0d5c46;background:rgba(13,92,70,.06)}
+.co-m b{display:block}.co-m small{color:var(--muted,#6b7c73)}
+.co-n{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px}
+.co-n label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+.co-n label.dim{opacity:.5}
+.co-prev{overflow-x:auto;max-height:420px;overflow-y:auto;border-radius:10px}
+.co-prev table{width:100%;border-collapse:collapse;font-size:13px}
+.co-prev th{background:rgba(13,92,70,.07);font-weight:600;padding:6px;text-align:right;position:sticky;top:0}
+.co-prev td{padding:7px 6px;border-top:1px solid var(--line,#edf2ef);vertical-align:top}
+.co-b{display:inline-block;background:rgba(13,92,70,.07);border-radius:999px;padding:1px 8px;margin:2px 0 0 4px;font-size:12px;white-space:nowrap}
+.co-t{display:inline-block;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:700;white-space:nowrap}
+.co-t.g{background:#fbe9b7;color:#7a5600}.co-t.s{background:#e5e7eb;color:#374151}.co-t.b{background:#f3d3b5;color:#7c3d12}.co-t.gr{background:#d7f0e3;color:#0a5c46}
+.co-n select{width:auto;min-width:72px;flex:none}

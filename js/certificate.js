@@ -170,10 +170,35 @@ export async function renderCertificate(c) {
   if (O.streak && (X.streak > 1 || X.acc)) ex.push([X.streak > 1 ? `🔥 واظب ${ar(X.streak)} يوماً متتالية` : '', X.acc ? `🎯 متوسط دقته ${ar(X.acc)}٪` : ''].filter(Boolean).join('   ،   '));
   if (O.gold && X.gold?.length) ex.push('🥇 ' + X.gold.slice(0, 4).join('، '));
   let y = 818;
-  ex.slice(0, 4).forEach((t) => { ctx.fillStyle = T.accent; fit(ctx, t, 500, 27, W - 420); ctx.fillText(t, W / 2, y); y += 40; });
-  ctx.fillStyle = C.green; ctx.font = `400 ${ex.length > 2 ? 34 : 40}px ${QFONT}`;
-  ctx.fillText('﴿ وَرَتِّلِ ٱلْقُرْءَانَ تَرْتِيلًا ﴾', W / 2, Math.max(y + 22, 870));
-  if (ex.length <= 1) { ctx.fillStyle = T.muted; ctx.font = `400 25px ${FONT}`; ctx.fillText('بارك الله فيه، وجعله من أهل القرآن الذين هم أهل الله وخاصته', W / 2, 922); }
+  let nRows = 0;
+  if (c.places?.length) {
+    // شارات «المراكز التي حصل عليها»
+    ex.splice(0, rk.length ? 1 : 0);
+    ctx.font = `700 23px ${FONT}`;
+    const pads = 22, gap = 14, h = 44;
+    const ws = c.places.map((p) => ctx.measureText(p).width + pads * 2);
+    const rows = [[]]; let rw = 0; const maxW = W - 360;
+    ws.forEach((w, i) => { if (rw + w > maxW && rows.at(-1).length) { rows.push([]); rw = 0; } rows.at(-1).push(i); rw += w + gap; });
+    ctx.fillStyle = T.muted; ctx.font = `600 24px ${FONT}`; ctx.fillText('— المراكز التي حصل عليها —', W / 2, y - 6); y += 6;
+    rows.forEach((r) => {
+      const tot = r.reduce((s, i) => s + ws[i], 0) + gap * (r.length - 1);
+      let x = W / 2 + tot / 2;
+      r.forEach((i) => {
+        const w = ws[i], x0 = x - w;
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x0, y, w, h, 24); else ctx.rect(x0, y, w, h); ctx.fillStyle = 'rgba(255,255,255,.72)'; ctx.fill();
+        ctx.lineWidth = 2.5; ctx.strokeStyle = i === 0 ? T.frame : T.frame2; ctx.stroke();
+        ctx.fillStyle = i === 0 ? T.head : T.ink; ctx.font = `700 23px ${FONT}`; ctx.textAlign = 'center';
+        ctx.fillText(c.places[i], x0 + w / 2, y + 30);
+        x = x0 - gap;
+      });
+      y += h + 10;
+    });
+    y += 28; nRows = rows.length;
+  }
+  ex.slice(0, c.places?.length ? (nRows > 1 ? 0 : 1) : 4).forEach((t) => { ctx.fillStyle = T.accent; fit(ctx, t, 500, 27, W - 420); ctx.fillText(t, W / 2, y); y += 40; });
+  ctx.fillStyle = C.green; ctx.font = `400 ${ex.length > 2 || c.places?.length ? 34 : 40}px ${QFONT}`;
+  ctx.fillText('﴿ وَرَتِّلِ ٱلْقُرْءَانَ تَرْتِيلًا ﴾', W / 2, c.places?.length ? y + 14 : Math.max(y + 22, 870));
+  if (ex.length <= 1 && !c.places?.length) { ctx.fillStyle = T.muted; ctx.font = `400 25px ${FONT}`; ctx.fillText('بارك الله فيه، وجعله من أهل القرآن الذين هم أهل الله وخاصته', W / 2, 922); }
   // المركز أعلى اليسار
   medal(ctx, 250, 235, rank, T);
   // التوقيعات: معلم المادة يميناً، المعلم الأول وسطاً، مدير المدرسة يساراً
