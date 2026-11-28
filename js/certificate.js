@@ -134,7 +134,7 @@ export async function renderCertificate(c) {
   for (let i = 0; i < 9; i++) if (i !== 4) star(ctx, W / 2 + (i - 4) * 34, 298, 5, T.frame2);
   star(ctx, W / 2, 298, 9, T.accent);
 
-  ctx.fillStyle = T.head; ctx.font = `800 84px ${FONT}`; ctx.fillText('شهادة تقدير', W / 2, 395);
+  ctx.fillStyle = T.head; ctx.font = `800 84px ${FONT}`; ctx.fillText(c.head || 'شهادة تقدير', W / 2, 395);
   ctx.fillStyle = T.ink; ctx.font = `400 32px ${FONT}`;
   ctx.fillText('يسرّ مقرأة الفاتح أن تقدّم هذه الشهادة إلى الطالب', W / 2, 455);
   // الاسم
@@ -146,12 +146,12 @@ export async function renderCertificate(c) {
   const title = wins ? wins.map((w) => w.title).join(' و') : c.title;
   const line = wins ? wins.map((w) => w.line).join('، و') : c.line;
   ctx.fillStyle = T.ink; ctx.font = `500 34px ${FONT}`;
-  ctx.fillText(`${c.className ? c.className + '، ' : ''}لحصوله على`, W / 2, 640);
+  ctx.fillText(c.lead || `${c.className ? c.className + '، ' : ''}لحصوله على`, W / 2, 640);
   fit(ctx, title, 800, 66, W - 640);
   ctx.fillStyle = T.head; ctx.fillText(title, W / 2, 716);
   const tw = ctx.measureText(title).width;
   star(ctx, W / 2 - tw / 2 - 40, 695, 12, T.frame2); star(ctx, W / 2 + tw / 2 + 40, 695, 12, T.frame2);
-  const main = c.special ? `${line} ${c.period || 'في شهر ' + c.month}.` : `${line} ${c.period || 'في شهر ' + c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`;
+  const main = c.main ? c.main : c.special ? `${line} ${c.period || 'في شهر ' + c.month}.` : `${line} ${c.period || 'في شهر ' + c.month}، بمجموع ${ar(c.points)} نقطة في التسميع والحفظ والتجويد.`;
   ctx.fillStyle = T.ink; fit(ctx, main, 400, 31, W - 320); ctx.fillText(main, W / 2, 772);
   // إنجازات إضافية (كلٌّ حسب إعداد المعلم)
   const X = c.extras || {}, ex = [];
@@ -200,7 +200,7 @@ export async function renderCertificate(c) {
   ctx.fillText('﴿ وَرَتِّلِ ٱلْقُرْءَانَ تَرْتِيلًا ﴾', W / 2, c.places?.length ? y + 14 : Math.max(y + 22, 870));
   if (ex.length <= 1 && !c.places?.length) { ctx.fillStyle = T.muted; ctx.font = `400 25px ${FONT}`; ctx.fillText('بارك الله فيه، وجعله من أهل القرآن الذين هم أهل الله وخاصته', W / 2, 922); }
   // المركز أعلى اليسار
-  medal(ctx, 250, 235, rank, T);
+  if (!c.noMedal) medal(ctx, 250, 235, rank, T);
   // التوقيعات: معلم المادة يميناً، المعلم الأول وسطاً، مدير المدرسة يساراً
   sign(ctx, W - 330, 'معلم المادة', c.teacher || '', T);
   sign(ctx, W / 2, SG.head.role, SG.head.name, T);

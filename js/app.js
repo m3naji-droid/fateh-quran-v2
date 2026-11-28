@@ -107,6 +107,7 @@ async function playAnnVoice(b, aid) {
 }
 const looksMap = (d) => { const m = {}; Object.values(d || {}).forEach((v) => { if (v && v.pn) m[v.pn] = v; }); return m; };
 import { computeBoard, boardHtml, rankBadge, computeMonth, computeRange, monthTitle, monthWins, subScore } from './leaderboard.js';
+import { visibleTo as qasrVisible } from './qasr.js';
 import { ORD_CATS, ORD_MODES, normOrd, orderCerts, placeText, placeShort, placeTitle } from './certorder.js';
 import { downloadCertificatePNG, downloadCertificatesPDF, renderCertificate, setCertSigners, CERT_SIGN_DEFAULT, CERT_OPT_DEFAULT, CERT_OPT_LABELS, certOpt, loadCertCfg, certCode } from './certificate.js';
 import { CATS, defaultCatalog, mergeCatalog, findErr, makeMark, deduction, gradeFrom } from './errors.js';
@@ -1700,7 +1701,7 @@ function viewStudent(app) {
   }
   /* --- بطولة الأبطال --- */
   let heroT = null, hM = [], offHero = null, offLive = null, hView = null, heroPend = null, offCheer = null;
-  let iqraOn = false, offIqra = null, offHonor = null, playOn = false, offPlay = null;
+  let iqraOn = false, offIqra = null, offHonor = null, playOn = false, offPlay = null, qasrOn = false, offQasr = null;
   const stopCheer = () => { offCheer?.(); offCheer = null; };
   if (deep && deep[1] === 'hero') heroPend = deep[2];
   async function loadHeroes() {
@@ -2321,6 +2322,7 @@ function viewStudent(app) {
     loadHeroes(); loadHeroReg();
     iqraCfg().then((c) => { const on = (c.pns || []).includes(me.id); if (on !== iqraOn) { iqraOn = on; if ($('#stBody', app) && !offIqra) draw(); } }).catch(() => {});
     // «العب وتعلّم»: يظهر لمن اختارهم المعلم (طلاب، أو صفوف، أو الجميع)
+    Promise.all([store.getQasrCfg().catch(() => null), store.getWaqf().catch(() => null)]).then(([c, w]) => { const on = qasrVisible(c, me.id) || (!!w && w.status !== 'off' && qasrVisible(w, me.id)); if (on !== qasrOn) { qasrOn = on; if ($('#stBody', app) && !offQasr) draw(); } }).catch(() => {});
     store.getPlayCfg().then((c) => { const on = !!c && (c.mode === 'all' || (c.mode === 'classes' && (c.classes || []).includes(me.classId)) || (c.mode === 'pns' && (c.pns || []).includes(me.id))); if (on !== playOn) { playOn = on; if ($('#stBody', app) && !offPlay) draw(); } }).catch(() => {});
     loadKhatmas().then(() => { if (openKhId) { const id = openKhId; openKhId = null; openKhatma(id); } });
     // تقييمات المعلم تصل فوراً (حتى أثناء التلاوة)
@@ -2408,8 +2410,9 @@ function viewStudent(app) {
   }
 
   function draw() {
-    comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null; offHonor?.(); offHonor = null; offPlay?.(); offPlay = null;
+    comp?.destroy(); comp = null; stopCheer(); offIqra?.(); offIqra = null; offHonor?.(); offHonor = null; offPlay?.(); offPlay = null; offQasr?.(); offQasr = null;
     if (tab === 'iqra' && !iqraOn) tab = 'tasks';
+    if (tab === 'qasr' && !qasrOn) tab = 'tasks';
     if (tab === 'play' && !playOn) tab = 'tasks';
     if (tab !== HB.pg) { if (HB.pg === 'practice') practiceSummary(); HB.pg = tab; hbBeat(false); }
     const cls = data.classes.find((c) => c.id === me.classId);
@@ -2436,7 +2439,7 @@ function viewStudent(app) {
       ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="onStu" class="on-stu" hidden></div><div id="voiceStu"></div>' : ''}
       <div id="boostBar"></div><div id="regBar"></div><div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
-        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ...(playOn ? [['play', '🎮 العب وتعلّم']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ...(playOn ? [['play', '🎮 العب وتعلّم']] : []), ...(qasrOn ? [['qasr', '🏰 أرض المقرأة']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
       <div id="stBody" style="margin-top:16px"></div>
       <div class="fb-cta" id="fbCta"><span class="fb-ico" aria-hidden="true">💬</span><div><b>رأيك يهمنا</b><span>ملاحظتك مهمة لتطوير الموقع: تعليق، شكوى، اقتراح، أو ملاحظة.</span></div><button class="btn gold" type="button" id="stFb">أرسل ملاحظتك<span class="fb-n"></span></button></div>`;
@@ -2472,6 +2475,11 @@ function viewStudent(app) {
     if (tab === 'rewards') drawRewards(body);
     if (tab === 'heroes') drawHeroes(body);
     if (tab === 'iqra') offIqra = mountIqraStudent(body, { me, toast, confetti });
+    if (tab === 'qasr') { let gone2 = false; offQasr = () => { gone2 = true; }; body.innerHTML = '<div class="loading">جارٍ تجهيز أرض المقرأة…</div>';
+      import('./qasr.js').then((m) => { if (gone2 || tab !== 'qasr' || !body.isConnected) return; offQasr = m.mountQasrStudent(body, { me, toast, confetti, openModal, closeModal, confirmBox,
+        coins: () => myCoins(), spent: () => RW?.wallet?.spent || 0, uid: () => store.myUid?.() || '', className: cls?.name || '',
+        onSpend: (n) => { RW = { ...RW, wallet: { ...(RW?.wallet || {}), spent: n } }; const b = $('[data-tab="rewards"]', app); if (b) b.textContent = `🏅 خزانتي · 🪙 ${ar(myCoins())}`; },
+        stats: () => ({ cups: (lookOf(me.id)?.tt || []).length, certs: notifs.filter((n) => n.win).length }) }); }).catch((e) => { body.innerHTML = `<div class="card">تعذّر التحميل: ${esc(e.message)}</div>`; }); }
     if (tab === 'play') { body.innerHTML = '<div class="loading">جارٍ تحميل الرحلة…</div>'; let gone = false; offPlay = () => { gone = true; }; import('./play/play.js').then((m) => { if (!gone && tab === 'play' && body.isConnected) offPlay = m.mountPlayStudent(body, { me, toast, confetti }); }).catch((e) => { body.innerHTML = `<div class="card">تعذّر التحميل: ${esc(e.message)}</div>`; }); }
     if (tab === 'settings') drawStSettings(body);
   }
@@ -5249,6 +5257,7 @@ function viewTeacher(app) {
         <div class="row"><select id="crScope" aria-label="لمن العرض؟"><option value="stage">المرحلة كلها (شيخ المرحلة)</option>${D.classes.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (قارئ الصف)</option>`).join('')}</select><button class="btn primary" type="button" id="crGo">▶ ابدأ العرض</button></div></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="przCard"></div>
       <div class="card stack" style="gap:10px;margin-bottom:16px" id="cordCard"></div>
+      <div id="qasrT" style="margin-bottom:16px"><h3 style="margin:0 0 10px">🏰 أرض المقرأة والوقف</h3><div class="stack" id="qasrHost"></div></div>
       <div class="card stack month-card" style="gap:10px;margin-bottom:16px">
         <div class="row" style="justify-content:space-between"><h3>🎓 الشهادات والنتائج والأرشيف</h3><span class="small muted" id="mStat"></span></div>
         ${CDCFG.v?.start ? `<p class="small" style="margin:0">🏁 أنت على <b>نظام الجولات</b>: تُحسب النتائج عند موعد العداد ${CDCFG.v.auto ? 'وتُعلن تلقائياً' : 'ثم تراجعها وتعلنها'}، ${CDCFG.v.reset === false ? 'وتستمر النقاط في التراكم بعدها' : 'ثم تُصفَّر النقاط وتبدأ جولة جديدة'}. تعدّل ذلك من «⚙️ تعديل موعد العد التنازلي» في لوحة اليوم.</p>` : '<p class="small" style="margin:0">في أول كل شهر راجع نتائج الشهر الماضي ثم أعلنها: يصل لكل طالب إشعار بترتيبه، ويحصل الخمسة الأوائل في كل صف وفي المرحلة على شهادة تقدير.</p>'}
@@ -5273,6 +5282,7 @@ function viewTeacher(app) {
       loadCfg: () => store.getPrizeCfg(), saveCfg: (c) => store.setPrizeCfg(c), toast,
     })).catch((e) => { pc.innerHTML = `<p class="muted">تعذّر تحميل حاسبة الجوائز: ${esc(e.message)}</p>`; }); }
     { const oc = $('#cordCard', body); if (oc) mountCertOrd(oc, months); }
+    { const qh = $('#qasrHost', body); if (qh) import('./qasr.js').then((m) => qh.isConnected && m.mountQasrTeacher(qh, { toast, openModal, closeModal, confirmBox, students: D.students, classes: D.classes, teacherName: s.name || '', sendPush: (id) => sendPush(id) })).catch((e) => (qh.innerHTML = `<div class="card">تعذّر التحميل: ${esc(e.message)}</div>`)); }
     $('#mArch', body).onclick = openResultsArchive;
     $('#mAllC', body).onclick = (e) => downloadAllCerts(e.currentTarget);
     const pick = $('#mPick', body);

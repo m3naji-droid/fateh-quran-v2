@@ -21,6 +21,24 @@ service cloud.firestore {
       let p = /databases/$(database)/documents/leaderboard/heroReg;
       return exists(p) && get(p).data.get('status', '') == 'open' && request.time.toMillis() < get(p).data.get('closeMs', 0);
     }
+    // 📖 وقف المصاحف: الوقف مفتوح، والتبرع يزيد فقط، ويُخصم المبلغ نفسه من محفظة الطالب في الدفعة نفسها
+    function waqfOk(uid) {
+      let w = get(/databases/$(database)/documents/leaderboard/waqf).data;
+      let e = request.resource.data[uid];
+      let old = resource.data.get(uid, {'amt': 0}).get('amt', 0);
+      let r0 = get(/databases/$(database)/documents/roster/$(e.pn)).data;
+      let r1 = getAfter(/databases/$(database)/documents/roster/$(e.pn)).data;
+      return w.get('status', '') == 'open' && e.w == w.id
+        && e.keys().hasOnly(['pn', 'name', 'classId', 'amt', 'at', 'w'])
+        && isStudent(e.pn) && e.amt > old
+        && r1.get('wallet', {}).get('spent', 0) - r0.get('wallet', {}).get('spent', 0) == e.amt - old;
+    }
+    // 🏰 قطعة الأرض: صاحبها طالب، وكل شراء يُخصم من محفظته في الدفعة نفسها
+    function plotSpendOk(pn) {
+      let r0 = get(/databases/$(database)/documents/roster/$(pn)).data;
+      let r1 = getAfter(/databases/$(database)/documents/roster/$(pn)).data;
+      return r1.get('wallet', {}).get('spent', 0) >= r0.get('wallet', {}).get('spent', 0);
+    }
     function isTeacher() {
       return signedIn() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
     }
@@ -66,6 +84,9 @@ service cloud.firestore {
         && (!(request.auth.uid in request.resource.data)
             || (request.resource.data[request.auth.uid].keys().hasOnly(['pn', 'name', 'classId', 'at'])
                 && isStudent(request.resource.data[request.auth.uid].pn)));
+      allow update: if id == 'waqfDon' && signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid])
+        && waqfOk(request.auth.uid);
       // «ما شاء الله» على صوت الأسبوع: كل طالب يضيف إعجابه فقط
       allow update: if id == 'voice' && signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
@@ -220,6 +241,27 @@ service cloud.firestore {
       allow read, delete: if isTeacher();
       allow create, update: if isStudent(pn) && request.resource.data.pn == pn
         && request.resource.data.keys().hasOnly(['pn', 'cls', 'd']);
+    }
+    // 🏰 أرض المقرأة: يراها كل مسجّل، ويشتري الطالب قطعة فارغة باسمه، ويبني على قطعته فقط،
+    // ويضيف «ما شاء الله» (مفتاحه فقط) على قصور زملائه
+    match /plots/{id} {
+      allow read: if signedIn();
+      allow create: if isTeacher()
+        || (signedIn() && request.resource.data.uid == request.auth.uid && isStudent(request.resource.data.pn)
+            && request.resource.data.keys().hasOnly(['pn', 'name', 'classId', 'uid', 'lv', 'mat', 'dome', 'items', 'ext', 'at', 'likes', 'main'])
+            && plotSpendOk(request.resource.data.pn));
+      allow update: if isTeacher()
+        || (signedIn() && resource.data.uid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lv', 'mat', 'dome', 'items', 'ext', 'at', 'name'])
+            && plotSpendOk(resource.data.pn))
+        || (signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
+            && request.resource.data.get('likes', {}).diff(resource.data.get('likes', {})).affectedKeys().hasOnly([request.auth.uid]));
+      allow delete: if isTeacher();
+    }
+    // أرشيف الأوقاف المكتملة
+    match /waqfs/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
     }
     match /roster/{pn} {
       allow get: if isTeacher() || (signedIn() && resource.data.get('uid', '') == request.auth.uid);
