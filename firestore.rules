@@ -16,6 +16,11 @@ service cloud.firestore {
       return existsAfter(p) && getAfter(p).data.n <= lim('chDaily', 3)
         && ((!exists(p) && getAfter(p).data.n == 1) || (exists(p) && getAfter(p).data.n == get(p).data.n + 1));
     }
+    // التسجيل في بطولة الأبطال مفتوح (leaderboard/heroReg) ولم يحن موعد إغلاقه
+    function regOpen() {
+      let p = /databases/$(database)/documents/leaderboard/heroReg;
+      return exists(p) && get(p).data.get('status', '') == 'open' && request.time.toMillis() < get(p).data.get('closeMs', 0);
+    }
     function isTeacher() {
       return signedIn() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
     }
@@ -54,6 +59,13 @@ service cloud.firestore {
       allow update: if id == 'looks' && signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid])
         && isStudent(request.resource.data[request.auth.uid].pn);
+      // ✋ التسجيل في بطولة الأبطال: كل طالب يضيف أو يحذف مفتاحه فقط (معرّف حسابه)، والتسجيل مفتوح ولم يحن موعد إغلاقه
+      allow update: if id == 'heroRegs' && signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid])
+        && regOpen()
+        && (!(request.auth.uid in request.resource.data)
+            || (request.resource.data[request.auth.uid].keys().hasOnly(['pn', 'name', 'classId', 'at'])
+                && isStudent(request.resource.data[request.auth.uid].pn)));
       // «ما شاء الله» على صوت الأسبوع: كل طالب يضيف إعجابه فقط
       allow update: if id == 'voice' && signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])

@@ -1727,6 +1727,59 @@ function viewStudent(app) {
     host.innerHTML = `<div class="hero-bar"><span class="hb-ico">🏆</span><div><b>الأبطال: ${mine ? 'سلّمت، بانتظار' : 'مباراتك ضد'} ${esc(other.name)}</b><span class="small">${esc(hRange(m))} · ${esc(when)}</span></div><button class="btn sm gold" type="button" id="hbGo">${mine ? 'المباراة' : 'ابدأ'}</button></div>`;
     $('#hbGo', host).onclick = () => openMatch(m.id);
   }
+  /* ✋ التسجيل المسبق في بطولة الأبطال: مربع في الصفحة الرئيسية بعدّاد تنازلي حتى إغلاق التسجيل */
+  let REG = null, REGS = {}, regIv = null, regTk = null, regBusy = false;
+  const regList = () => Object.entries(REGS).filter(([k, v]) => k !== '_id' && v?.pn && REGS._id === REG?.id).map(([k, v]) => ({ k, ...v }));
+  const regMine = () => regList().find((x) => x.pn === me.id);
+  async function loadHeroReg() {
+    try {
+      const r = await store.getHeroReg();
+      const was = REG?.status;
+      REG = r && r.id && (r.draft?.classIds || []).includes(me.classId) ? r : null;
+      REGS = REG && REG.status !== 'done' ? await store.getHeroRegs() : {};
+      if (REG?.status === 'done' && was && was !== 'done') loadHeroes();
+    } catch (e) { console.warn('heroReg', e); }
+    paintRegBar();
+    clearInterval(regIv);
+    if (REG && REG.status !== 'done') regIv = setInterval(loadHeroReg, Date.now() >= REG.closeMs ? 30e3 : 60e3);
+  }
+  function regLeft() {
+    const t = Math.max(0, Math.floor((REG.closeMs - Date.now()) / 1000));
+    return [[Math.floor(t / 86400), 'يوم'], [Math.floor((t % 86400) / 3600), 'ساعة'], [Math.floor((t % 3600) / 60), 'دقيقة'], [t % 60, 'ثانية']];
+  }
+  function paintRegBar() {
+    const host = $('#regBar', app); clearInterval(regTk);
+    if (!host) return;
+    if (!REG || REG.status === 'done' || tab !== 'tasks') { host.innerHTML = ''; return; }
+    const L = regList(), mine = regMine(), closed = REG.status !== 'open' || Date.now() >= REG.closeMs;
+    const when = (() => { try { return ar(new Date(REG.closeMs).toLocaleString('ar', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })); } catch { return ''; } })();
+    const AV = ['#ffd666', '#86efac', '#fca5a5', '#93c5fd', '#f0abfc', '#fdba74'];
+    const initials = L.slice().sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 6).map((x, i) => `<i style="background:${AV[i % AV.length]}">${esc((x.name || '؟').trim().charAt(0))}</i>`).join('');
+    host.innerHTML = `<div class="rg">
+      <div class="rg-h"><div class="rg-cup" aria-hidden="true">🏆</div><div><b>${esc(REG.name || 'الأبطال')} <span class="rg-soon">${closed ? 'القرعة الآن' : 'قريباً'}</span></b><span>${closed ? '🎲 أُغلق التسجيل، وتُجرى القرعة خلال دقائق' : 'جهّز نفسك… واستعدّ للمنافسة'}</span></div></div>
+      ${closed ? '' : `<div class="rg-cd" id="rgCd">${regLeft().map(([v, l]) => `<div><b>${ar(v)}</b><span>${l}</span></div>`).join('')}</div>
+      <p class="rg-when">آخر موعد للتسجيل: ${esc(when)}</p>
+      ${mine ? `<div class="rg-ok">✅ أنت مسجّل في ${esc(REG.name || 'البطولة')}</div><p class="rg-mini">ستصلك القرعة وخصمك الأول عند إغلاق التسجيل · <button type="button" class="rg-x" id="rgOut">إلغاء التسجيل</button></p>`
+        : '<button type="button" class="rg-go" id="rgIn">✋ سجّل مشاركتي</button>'}`}
+      ${L.length ? `<div class="rg-av">${initials}${L.length > 6 ? '<i class="more">+</i>' : ''}</div>` : ''}
+      <p class="rg-mini">${L.length ? (mine && L.length === 1 ? 'أنت أول من سجّل!' : `سجّل حتى الآن ${nWord(L.length, 'طالب واحد', 'طالبان', 'طلاب', 'طالباً')}`) : 'كن أول المسجّلين!'}</p>
+    </div>`;
+    const set = async (on) => {
+      if (regBusy) return; regBusy = true;
+      try {
+        await store.setMyHeroReg(me.id, on ? { pn: me.id, name: me.name, classId: me.classId, at: new Date().toISOString() } : null);
+        toast(on ? '✅ سُجّلت مشاركتك. بالتوفيق!' : 'أُلغي تسجيلك.'); if (on) confetti();
+      } catch (e) { toast(e.code === 'permission-denied' ? 'التسجيل مغلق الآن.' : 'تعذر: ' + (e.code || e.message)); }
+      regBusy = false; await loadHeroReg();
+    };
+    const bi = $('#rgIn', host); if (bi) bi.onclick = () => set(true);
+    const bo = $('#rgOut', host); if (bo) bo.onclick = async () => { if (await confirmBox('إلغاء تسجيلك في البطولة؟ تستطيع التسجيل مرة أخرى قبل الموعد.', 'إلغاء التسجيل')) set(false); };
+    if (!closed) regTk = setInterval(() => {
+      const cd = $('#rgCd', app); if (!cd) return clearInterval(regTk);
+      if (Date.now() >= REG.closeMs) { clearInterval(regTk); loadHeroReg(); return; }
+      regLeft().forEach(([v], i) => { const b = cd.children[i]?.querySelector('b'); if (b) b.textContent = ar(v); });
+    }, 1000);
+  }
   const fmtTimeOf = (iso) => { try { return ar(new Date(iso).toLocaleString('ar', { weekday: 'long', hour: 'numeric', minute: '2-digit' })); } catch { return ''; } };
   let hTab = null;
   function drawHeroes(body) {
@@ -2265,7 +2318,7 @@ function viewStudent(app) {
     Promise.all([store.getShop().catch(() => null), store.getLooks().catch(() => ({}))]).then(([sh, lk]) => { SHOP = sh; setLooks({ ...looksMap(lk), ...(RW.look ? { [me.id]: RW.look } : {}) }); if (tab === 'rewards' && $('#stBody', app)) draw(); syncTitles(); });
     loadMonthTitles();
     store.listSeasons().then((L) => { mySeasons = L; paintSeason(); }).catch(() => {});
-    loadHeroes();
+    loadHeroes(); loadHeroReg();
     iqraCfg().then((c) => { const on = (c.pns || []).includes(me.id); if (on !== iqraOn) { iqraOn = on; if ($('#stBody', app) && !offIqra) draw(); } }).catch(() => {});
     // «العب وتعلّم»: يظهر لمن اختارهم المعلم (طلاب، أو صفوف، أو الجميع)
     store.getPlayCfg().then((c) => { const on = !!c && (c.mode === 'all' || (c.mode === 'classes' && (c.classes || []).includes(me.classId)) || (c.mode === 'pns' && (c.pns || []).includes(me.id))); if (on !== playOn) { playOn = on; if ($('#stBody', app) && !offPlay) draw(); } }).catch(() => {});
@@ -2381,7 +2434,7 @@ function viewStudent(app) {
         <span class="rw-kpi-ic" aria-hidden="true">🏅</span><span class="rw-kpi-tx"><b>خزانتي</b><small>${nAch ? `${ar(nAch)} ${nAch === 1 ? 'وسام' : 'أوسمة'}` : 'لا أوسمة بعد'} · ${nOwn ? `${ar(nOwn)} من المتجر` : 'المتجر بانتظارك 🛍️'}</small></span>
         <span class="rw-kpi-c">🪙 ${ar(myCoins())}</span><span class="rw-kpi-go" aria-hidden="true">←</span></button>`; })() : ''}
       ${tab === 'tasks' ? '<div id="cdMonth"></div><div id="onStu" class="on-stu" hidden></div><div id="voiceStu"></div>' : ''}
-      <div id="boostBar"></div><div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
+      <div id="boostBar"></div><div id="regBar"></div><div id="heroBar"></div><div id="seasonBar"></div><div id="annBar"></div><div id="chBar"></div><div id="khBar"></div><div id="aodStu"></div>${tab === 'tasks' ? '<div class="sp-wrap"><div id="prTileW"></div><div id="spTileW"></div></div>' : ''}
       <div class="tabs" role="tablist">
         ${[['tasks', 'واجباتي'], ['practice', 'تدريب حر'], ['mushaf', 'مصحفي'], ['honor', 'لوحة الشرف'], ...(heroT ? [['heroes', '🏆 الأبطال']] : []), ...(iqraOn ? [['iqra', '📖 اقرأ وارتقِ']] : []), ...(playOn ? [['play', '🎮 العب وتعلّم']] : []), ['rewards', `🏅 خزانتي${RW ? ` · 🪙 ${ar(myCoins())}` : ''}`], ['history', 'سجل التسميع'], ['notebook', 'دفتر الأخطاء']].map(([k, l]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
       </div>
@@ -2391,7 +2444,7 @@ function viewStudent(app) {
     paintFbCta();
     $('#stOut', app).onclick = async () => { await disablePush().catch(() => {}); offNotifs?.(); await store.signOut(); session.set(null); render(); };
     $('#stBell', app).onclick = openBell;
-    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar(); paintBoost();
+    paintBell(); paintAnnBar(); paintChBar(); paintKhBar(); paintSeason(); paintHeroBar(); paintBoost(); paintRegBar();
     if (tab === 'tasks') mountAyahOfDay($('#aodStu', app), { compact: true });
     if (tab === 'tasks') {
       mountIssueTile($('#spTileW', app), { me, cls, store, openModal, closeModal, toast });
@@ -5374,6 +5427,83 @@ function viewTeacher(app) {
       clearInterval(heroIv); heroIv = setInterval(() => (D.tourneys || []).filter((x) => x.status === 'running').forEach(heroTick), 60e3);
       schedulePublish(); heroRedraw();
     } catch (e) { console.warn('tourneys', e); }
+    regTickT();
+  }
+  /* ✋ التسجيل المسبق: يُغلق تلقائياً في موعده، ثم تُجرى القرعة بين المسجّلين وتُرسل للطلاب.
+     يجريها أول من يصل: جهاز المعلم إن كان مفتوحاً، أو خادم الإشعارات (كل ١٠ دقائق)، ويُحجز الحدث حتى لا يتكرر */
+  let regIvT = null, regDrawing = false;
+  async function regTickT() {
+    try {
+      const r = await store.getHeroReg();
+      const was = D.heroReg?.status;
+      D.heroReg = r && r.id ? r : null;
+      D.heroRegs = D.heroReg && D.heroReg.status !== 'done' && D.heroReg.status !== 'off' ? await store.getHeroRegs() : {};
+      if (D.heroReg?.status === 'open' && Date.now() >= D.heroReg.closeMs) await heroRegDraw(D.heroReg);
+      else if (D.heroReg?.status === 'done' && D.heroReg.tid && !(D.tourneys || []).some((x) => x.id === D.heroReg.tid)) { await loadHeroesT(); return; }
+      else if (was && was !== D.heroReg?.status) heroRedraw();
+    } catch (e) { console.warn('heroReg', e); }
+    heroRedraw();
+    clearTimeout(regIvT);
+    const open = D.heroReg?.status === 'open' || D.heroReg?.status === 'drawing';
+    if (open) regIvT = setTimeout(regTickT, Math.max(5e3, Math.min(60e3, D.heroReg.closeMs - Date.now() + 1500)));
+  }
+  const regEntries = () => { const R = D.heroRegs || {}, seen = new Set(); return Object.entries(R).filter(([k, v]) => k !== '_id' && R._id === D.heroReg?.id && v?.pn && !seen.has(v.pn) && seen.add(v.pn)).map(([k, v]) => ({ k, ...v })); };
+  async function heroRegDraw(reg) {
+    if (regDrawing) return; regDrawing = true;
+    try {
+      if (!(await store.claimHeroReg(reg.id, 'teacher'))) return;
+      D.heroRegs = await store.getHeroRegs();
+      const ids = new Set(regEntries().map((x) => x.pn));
+      const studs = D.students.filter((x) => ids.has(x.id) && (reg.draft.classIds || []).includes(x.classId));
+      if (studs.length < 2) {
+        await store.patchHeroReg({ status: 'done', fail: true, n: studs.length, doneAt: new Date().toISOString() });
+        for (const st of studs) { try { await store.addStudentNotif(st.id, { type: 'hero', title: `${reg.name}: لم يكتمل العدد`, body: 'لم يسجّل عدد كافٍ للقرعة، فأُجّلت البطولة. شكراً لحماسك!', link: './#/student', tag: 'hero-reg-' + reg.id }); } catch {} }
+        toast(`أُغلق التسجيل في «${reg.name}» ولم يكتمل العدد (${ar(studs.length)}).`);
+        return;
+      }
+      const cls = [...new Set(studs.map((x) => x.classId))];
+      const x = { ...reg.draft, name: reg.name || reg.draft.name, status: 'running', stage: 'class', classIds: (reg.draft.classIds || []).filter((c) => cls.includes(c)), classChamps: {}, reg: reg.id, createdAt: new Date().toISOString() };
+      const ms = await startTourney(x, studs, { quiet: true });
+      await store.patchHeroReg({ status: 'done', tid: x.id, n: studs.length, doneAt: new Date().toISOString() });
+      toast(`🎲 أُغلق التسجيل وجرت قرعة «${x.name}» بين ${ar(studs.length)} متسابقاً (${ar(ms.filter((y) => !y.bye).length)} مباراة).`);
+    } catch (e) { console.warn('heroRegDraw', e); toast('تعذرت القرعة: ' + (e.code || e.message)); try { await store.patchHeroReg({ status: 'open' }); } catch {} }
+    finally { regDrawing = false; }
+  }
+  /** يُنشئ البطولة والدور الأول ويرسل لكل طالب خصمه */
+  async function startTourney(x, studs, { quiet = false } = {}) {
+    x.id = await store.saveTourney(x);
+    const ms = firstRound(x, studs, new Date());
+    await store.saveMatches(x.id, ms);
+    D.tourneys = [x, ...(D.tourneys || []).filter((y) => y.id !== x.id)]; D.hMatches = D.hMatches || {}; D.hMatches[x.id] = ms;
+    await heroNotify(x, { creates: ms, events: [] });
+    try { const id = await store.addNotif({ type: 'hero', title: `🏆 انطلقت بطولة ${x.name}!`, body: x.reg ? `جرت القرعة بين ${ar(studs.length)} متسابقاً. ادخل تبويب «الأبطال» لترى خصمك في الدور الأول.` : 'جرت القرعة. ادخل تبويب «الأبطال» لترى خصمك في الدور الأول.', link: './#/student', tag: 'hero-' + x.id, classId: x.classIds.length === D.classes.length || x.reg ? 'all' : x.classIds[0] }); await sendPush(id); } catch {}
+    await loadHeroesT();
+    if (!quiet) toast(`انطلقت «${x.name}» بـ${ar(ms.filter((y) => !y.bye).length)} مباراة في الدور الأول.`);
+    return ms;
+  }
+  function regAdminHtml() {
+    const R = D.heroReg; if (!R || !(R.status === 'open' || R.status === 'drawing')) return '';
+    const L = regEntries(), cls = D.classes.filter((c) => (R.draft?.classIds || []).includes(c.id));
+    const acc = D.students.filter((x) => (R.draft?.classIds || []).includes(x.classId) && hasAcc(x)).length, all = D.students.filter((x) => (R.draft?.classIds || []).includes(x.classId)).length;
+    const when = ar(new Date(R.closeMs).toLocaleString('ar', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }));
+    const closed = R.status !== 'open' || Date.now() >= R.closeMs;
+    return `<div class="rgt"><div class="row" style="justify-content:space-between;align-items:center"><b>✋ التسجيل في «${esc(R.name)}»</b><span class="pill${closed ? ' warn' : ''}">${closed ? '🎲 القرعة جارية…' : '⏳ ' + esc(regLeftTxt(R.closeMs))}</span></div>
+      <span class="small muted">يُغلق تلقائياً ${esc(when)} ثم تُجرى القرعة بين المسجّلين ويصل كل طالب خصمه.</span>
+      <div class="rgt-st"><div><b>${ar(L.length)}</b><span>مسجّل</span></div><div><b>${ar(acc)}</b><span>لديهم حساب</span></div><div><b>${ar(all)}</b><span>كل الطلاب</span></div></div>
+      ${cls.map((c) => { const inC = L.filter((x) => x.classId === c.id), tot = D.students.filter((x) => x.classId === c.id).length, rest = D.students.filter((x) => x.classId === c.id && !inC.some((y) => y.pn === x.id));
+        return `<div class="rgt-c"><div class="h"><span>${esc(c.name)}</span><span>${ar(inC.length)} / ${ar(tot)}</span></div><div class="rgt-pb"><i style="width:${tot ? Math.round((inC.length / tot) * 100) : 0}%"></i></div>
+        <div class="rgt-nm">${inC.map((x) => `<span>${esc(x.name)}${closed ? '' : `<button type="button" data-rgdel="${esc(x.k)}" title="حذف">✕</button>`}</span>`).join('')}${!closed && rest.length ? `<select data-rgadd="${esc(c.id)}"><option value="">+ إضافة طالب</option>${rest.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select>` : ''}</div></div>`; }).join('')}
+      ${closed ? '' : `<div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm primary" type="button" id="rgNow">🎲 أغلق الآن واعمل القرعة</button><label class="row small" style="gap:4px">الموعد<input type="datetime-local" id="rgWhen" value="${toLocalInput(new Date(R.closeMs).toISOString())}"></label><button class="btn sm" type="button" id="rgSetW">غيّر الموعد</button><button class="btn sm danger" type="button" id="rgOff">إلغاء التسجيل</button></div>`}
+    </div>`;
+  }
+  const regLeftTxt = (ms) => { const t = Math.max(0, ms - Date.now()), d = Math.floor(t / 864e5), h = Math.floor((t % 864e5) / 36e5), m = Math.floor((t % 36e5) / 6e4); return d ? `باقٍ ${ar(d)} يوم و${ar(h)} ساعة` : h ? `باقٍ ${ar(h)} ساعة و${ar(m)} دقيقة` : `باقٍ ${ar(m)} دقيقة`; };
+  function wireRegAdmin(host) {
+    const R = D.heroReg; if (!R) return;
+    $$('[data-rgdel]', host).forEach((b) => (b.onclick = async () => { b.disabled = true; try { await store.setHeroRegKey(b.dataset.rgdel, null); } catch (e) { toast('تعذر: ' + (e.code || e.message)); } regTickT(); }));
+    $$('[data-rgadd]', host).forEach((sel) => (sel.onchange = async () => { const st = D.students.find((x) => x.id === sel.value); if (!st) return; sel.disabled = true; try { await store.setHeroRegKey('t_' + st.id, { pn: st.id, name: st.name, classId: st.classId, at: new Date().toISOString(), by: 't' }); } catch (e) { toast('تعذر: ' + (e.code || e.message)); } regTickT(); }));
+    const now = $('#rgNow', host); if (now) now.onclick = async () => { if (!(await confirmBox(`إغلاق التسجيل الآن وإجراء القرعة بين ${ar(regEntries().length)} مسجّلاً؟`, 'اعمل القرعة'))) return; now.disabled = true; try { await store.patchHeroReg({ closeMs: Date.now() - 1000, closeAt: new Date().toISOString() }); } catch {} regTickT(); };
+    const sw = $('#rgSetW', host); if (sw) sw.onclick = async () => { const v = $('#rgWhen', host).value; const t = v ? new Date(v).getTime() : 0; if (!t || t < Date.now() + 60e3) return toast('اختر موعداً قادماً.'); try { await store.patchHeroReg({ closeMs: t, closeAt: new Date(t).toISOString() }); toast('غُيّر موعد إغلاق التسجيل.'); } catch (e) { toast('تعذر: ' + (e.code || e.message)); } regTickT(); };
+    const off = $('#rgOff', host); if (off) off.onclick = async () => { if (!(await confirmBox('إلغاء التسجيل والبطولة المنتظرة؟ يختفي المربع من صفحات الطلاب.', 'إلغاء التسجيل'))) return; try { await store.patchHeroReg({ status: 'off' }); toast('أُلغي التسجيل.'); } catch (e) { toast('تعذر: ' + (e.code || e.message)); } regTickT(); };
   }
   const heroRedraw = () => { clearTimeout(heroDrawT); heroDrawT = setTimeout(() => { const h = document.getElementById('hrAdm'); if (h && tab === 'honor') drawHeroAdmin(h); heroModal?.(); }, 300); };
   let heroModal = null;
@@ -5429,13 +5559,15 @@ function viewTeacher(app) {
   }
   function drawHeroAdmin(host) {
     const L = D.tourneys || [];
-    const run = L.find((x) => x.status === 'running');
+    const run = L.find((x) => x.status === 'running') || (D.heroReg && (D.heroReg.status === 'open' || D.heroReg.status === 'drawing'));
     host.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">🏆 الأبطال (خروج المغلوب)</h3><span class="row" style="gap:4px"><button class="btn sm" type="button" id="hrCheer">🎉 عبارات التشجيع</button>${run ? '' : '<button class="btn sm primary" type="button" id="hrNew">+ بطولة جديدة</button>'}</span></div>
+      ${regAdminHtml()}
       <p class="small muted" style="margin:0">يتنافس كل طالبين من الصف نفسه، والفائز يستمر حتى يبقى بطل لكل صف، ثم قرعة بين أبطال الصفوف حتى بطل الأبطال. التقييم آلي بدقة الكلمات فقط ولا يتدخل المعلم. يختار البرنامج لكل متنافسَين مقطعاً من السور التي تحددها بعدد الآيات الذي تحدده لكل دور. النصف والنهائي ومباراة المركز الثالث مباشرة (${ar(LIVE_MIN)} دقائق) بمقطع مفاجئ وتحليل تجويد آلي إلزامي.</p>
       ${L.length ? `<ul class="kh-list">${L.slice(0, 6).map((x) => { const ms = D.hMatches?.[x.id] || [], need = ms.filter((m) => m.live && !m.done && !m.startAt).length;
         return `<li><div><b>${esc(x.name)}</b><span class="small muted">${esc(stageLabel(x, ms))}${x.champion ? ` · البطل: ${esc(x.champion.name)}` : ''}</span>${need ? `<span class="pill warn">📅 ${need === 1 ? 'مباراة مباشرة تنتظر موعداً' : `${ar(need)} مباريات مباشرة تنتظر مواعيدها`}</span>` : ''}</div>
         <div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm${need ? ' gold' : ''}" type="button" data-hrv="${esc(x.id)}">إدارة</button>${x.status === 'done' ? `<button class="btn sm gold" type="button" data-hrc="${esc(x.id)}">🏅 الشهادات</button>` : ''}<button class="btn sm danger" type="button" data-hrd="${esc(x.id)}">حذف</button></div></li>`; }).join('')}</ul>` : ''}`;
     $('#hrNew', host) && ($('#hrNew', host).onclick = newTourney);
+    wireRegAdmin(host);
     $('#hrCheer', host).onclick = editCheers;
     $$('[data-hrv]', host).forEach((b) => (b.onclick = () => manageTourney(b.dataset.hrv)));
     $$('[data-hrc]', host).forEach((b) => (b.onclick = async () => { const x = L.find((y) => y.id === b.dataset.hrc); b.disabled = true; try { await downloadCertificatesPDF(heroCerts(x), 'heroes-certificates.pdf', (i, n) => (b.textContent = `${ar(i)}/${ar(n)}…`)); } catch (e) { toast(e.message); } b.disabled = false; b.textContent = '🏅 الشهادات'; }));
@@ -5451,7 +5583,11 @@ function viewTeacher(app) {
     const rounds = (ids) => { const mx = Math.max(1, ...ids.map((c) => D.students.filter((x) => x.classId === c).length)); return Math.max(1, Math.ceil(Math.log2(mx)) + Math.ceil(Math.log2(Math.max(1, ids.length)))); };
     openModal(`<form class="stack" id="hrF"><h2>🏆 بطولة الأبطال</h2>
       <label class="field">اسم البطولة<input id="hrName" maxlength="50" required value="الأبطال"></label>
-      <div class="field">الصفوف المشاركة (يشترك كل طلابها)<div class="row" style="gap:6px;flex-wrap:wrap">${cls.map((c) => `<label class="chip-ck"><input type="checkbox" value="${esc(c.id)}" checked> ${esc(c.name)} <small class="muted">(${ar(D.students.filter((x) => x.classId === c.id).length)})</small></label>`).join('')}</div></div>
+      <div class="field">من يشارك؟
+        <label class="chip-ck"><input type="radio" name="hrWho" value="reg" checked> ✋ تسجيل مسبق: يسجّل الطالب مشاركته، ثم تُجرى القرعة تلقائياً بين المسجّلين عند الموعد</label>
+        <label class="chip-ck"><input type="radio" name="hrWho" value="all"> 👥 كل طلاب الصفوف المختارة، والقرعة الآن</label></div>
+      <label class="field" id="hrCloseF">آخر موعد للتسجيل (تُجرى القرعة عنده)<input type="datetime-local" id="hrClose"></label>
+      <div class="field">الصفوف المشاركة<div class="row" style="gap:6px;flex-wrap:wrap">${cls.map((c) => `<label class="chip-ck"><input type="checkbox" value="${esc(c.id)}" checked> ${esc(c.name)} <small class="muted">(${ar(D.students.filter((x) => x.classId === c.id).length)})</small></label>`).join('')}</div></div>
       <label class="field">مهلة كل دور قبل النصف النهائي<select id="hrH"><option value="24">٢٤ ساعة</option><option value="48" selected>٤٨ ساعة</option><option value="72">٧٢ ساعة</option></select></label>
       <div class="field">سور البطولة <span class="small muted">(يختار البرنامج منها مقطعاً لكل متنافسَين)</span>
         <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" type="button" data-pr="78-114">جزء عمّ</button><button class="btn sm" type="button" data-pr="67-77">جزء تبارك</button><button class="btn sm" type="button" data-pr="58-66">جزء قد سمع</button><button class="btn sm ghost" type="button" data-pr="none">مسح</button></div>
@@ -5459,7 +5595,10 @@ function viewTeacher(app) {
       <div class="field">عدد الآيات <span class="small muted">(مقطع متتالٍ من موضع عشوائي، والسورة الأقصر من العدد تُعطى كاملة. التعادل يُعاد بمقطع جديد بالطول نفسه)</span><div id="hrRounds" class="stack" style="gap:6px"></div></div>
       <label class="field">نوع المنافسة<select id="hrMode"><option value="hifz">🙈 تسميع غيباً</option><option value="recite">📖 تلاوة نظراً (النص ظاهر)</option></select></label>
       <div class="small muted" id="hrInfo"></div>
-      <div class="row"><button class="btn primary" type="submit">ابدأ البطولة والقرعة</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      <div class="row"><button class="btn primary" type="submit" id="hrGo">افتح التسجيل</button><button class="btn" type="button" data-close>إلغاء</button></div></form>`, (m) => {
+      { const d = new Date(Date.now() + 2 * 864e5); d.setHours(7, 0, 0, 0); $('#hrClose', m).value = toLocalInput(d.toISOString()); }
+      const who = () => $('[name="hrWho"]:checked', m)?.value || 'reg';
+      $$('[name="hrWho"]', m).forEach((r) => (r.onchange = () => { $('#hrCloseF', m).hidden = who() !== 'reg'; $('#hrGo', m).textContent = who() === 'reg' ? 'افتح التسجيل' : 'ابدأ البطولة والقرعة'; paintInfo(); }));
       const sel = () => $$('#hrF .field > .row input[type=checkbox]', m).filter((i) => i.checked).map((i) => i.value);
       const paintR = () => {
         const n = rounds(sel()), reg = Math.max(1, n - 2), host = $('#hrRounds', m);
@@ -5473,7 +5612,7 @@ function viewTeacher(app) {
       const paintInfo = () => {
         const n = rounds(sel()), P = pool(), A = P.reduce((k, x) => k + ayahCount(x), 0);
         const N = sel().reduce((k, c) => k + D.students.filter((x) => x.classId === c).length, 0);
-        $('#hrInfo', m).textContent = `${ar(N)} متسابقاً في ${ar(sel().length)} ${sel().length === 1 ? 'صف' : 'صفوف'}، ونحو ${ar(n)} ${n <= 2 ? 'دور' : 'أدوار'}. السور المختارة: ${ar(P.length)} (${ar(A)} آية).`;
+        $('#hrInfo', m).textContent = (who() === 'reg' ? `يظهر مربع التسجيل لـ${ar(N)} طالباً في` : `${ar(N)} متسابقاً في`) + ` ${ar(sel().length)} ${sel().length === 1 ? 'صف' : 'صفوف'}، ونحو ${ar(n)} ${n <= 2 ? 'دور' : 'أدوار'}. السور المختارة: ${ar(P.length)} (${ar(A)} آية).`;
       };
       $$('#hrF .field > .row input[type=checkbox]', m).forEach((i) => (i.onchange = paintR));
       $$('#hrPool input', m).forEach((i) => (i.onchange = paintInfo));
@@ -5488,16 +5627,25 @@ function viewTeacher(app) {
         const num = (k) => Math.max(1, Math.min(60, Math.round(+$(`input[data-n="${k}"]`, m)?.value || 0) || 1));
         btn.disabled = true;
         const x = { mode: $('#hrMode', m).value === 'recite' ? 'recite' : 'hifz', name: $('#hrName', m).value.trim() || 'الأبطال', status: 'running', stage: 'class', classIds: ids, hours: +$('#hrH', m).value, pool: P, counts: $$('#hrRounds input[data-n^="r"]', m).map((i) => num(i.dataset.n)), semiN: num('semi'), thirdN: num('third'), finalN: num('final'), classChamps: {}, createdAt: new Date().toISOString() };
+        if (who() === 'reg') {
+          const t = new Date($('#hrClose', m).value || 0).getTime();
+          if (!t || t < Date.now() + 5 * 60e3) { btn.disabled = false; return toast('اختر موعداً قادماً لإغلاق التسجيل.'); }
+          const { status, stage, classChamps, createdAt, ...draft } = x;
+          const reg = { id: Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4), status: 'open', name: x.name, closeMs: t, closeAt: new Date(t).toISOString(), draft, createdAt: new Date().toISOString() };
+          try {
+            await store.resetHeroRegs(reg.id);
+            await store.setHeroReg(reg);
+            closeModal();
+            const when = ar(new Date(t).toLocaleString('ar', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }));
+            for (const c of ids.length === D.classes.length ? ['all'] : ids) { try { const id = await store.addNotif({ type: 'hero', title: `✋ التسجيل مفتوح في ${x.name}!`, body: `جهّز نفسك واستعدّ للمنافسة. سجّل مشاركتك من الصفحة الرئيسية قبل ${when}، ثم تُجرى القرعة.`, link: './#/student', tag: 'hero-reg-' + reg.id, classId: c }); await sendPush(id); } catch {} }
+            toast('فُتح التسجيل، وظهر مربع «سجّل مشاركتي» للطلاب.');
+            await regTickT();
+          } catch (er) { toast('تعذر فتح التسجيل: ' + (er.code || er.message)); btn.disabled = false; }
+          return;
+        }
         try {
-          x.id = await store.saveTourney(x);
-          const ms = firstRound(x, studs, new Date());
-          await store.saveMatches(x.id, ms);
-          D.tourneys = [x, ...(D.tourneys || [])]; D.hMatches[x.id] = ms;
           closeModal();
-          await heroNotify(x, { creates: ms, events: [] });
-          try { const id = await store.addNotif({ type: 'hero', title: `🏆 انطلقت بطولة ${x.name}!`, body: 'جرت القرعة. ادخل تبويب «الأبطال» لترى خصمك في الدور الأول.', link: './#/student', tag: 'hero-' + x.id, classId: ids.length === D.classes.length ? 'all' : ids[0] }); await sendPush(id); } catch {}
-          await loadHeroesT();
-          toast(`انطلقت «${x.name}» بـ${ar(ms.filter((y) => !y.bye).length)} مباراة في الدور الأول.`);
+          await startTourney(x, studs);
           manageTourney(x.id);
         } catch (er) { toast('تعذر الإنشاء: ' + (er.code || er.message)); btn.disabled = false; }
       };

@@ -2121,3 +2121,40 @@ html.pg-lock, html.pg-lock body { overflow: hidden; overscroll-behavior: none; }
 .co-t{display:inline-block;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:700;white-space:nowrap}
 .co-t.g{background:#fbe9b7;color:#7a5600}.co-t.s{background:#e5e7eb;color:#374151}.co-t.b{background:#f3d3b5;color:#7c3d12}.co-t.gr{background:#d7f0e3;color:#0a5c46}
 .co-n select{width:auto;min-width:72px;flex:none}
+/* ✋ التسجيل في بطولة الأبطال */
+.rg{position:relative;overflow:hidden;border-radius:20px;padding:16px;margin-bottom:12px;color:#fff;background:radial-gradient(420px 260px at 50% 0,#1b3a7a,#0d1d45 55%,#071433);box-shadow:0 8px 22px rgba(13,29,69,.35)}
+.rg::before{content:"";position:absolute;inset:0;opacity:.08;background-image:radial-gradient(#ffd666 1.3px,transparent 1.4px);background-size:22px 22px;pointer-events:none}
+.rg>*{position:relative}
+.rg-h{display:flex;gap:12px;align-items:center}
+.rg-h>div{display:flex;flex-direction:column;gap:2px}
+.rg-h b{font-size:20px;color:#ffd666}
+.rg-h span{font-size:13px;color:#cbd5f5}
+.rg-cup{font-size:44px;filter:drop-shadow(0 4px 8px rgba(255,214,102,.5))}
+.rg-soon{display:inline-block;background:#e11d48;color:#fff !important;font-weight:800;font-size:12px !important;border-radius:999px;padding:2px 10px;vertical-align:3px;margin-inline-start:4px}
+.rg-cd{display:flex;gap:8px;justify-content:center;margin:14px 0 6px;direction:rtl}
+.rg-cd div{background:rgba(255,255,255,.1);border:1px solid rgba(255,214,102,.35);border-radius:12px;min-width:58px;text-align:center;padding:6px 4px}
+.rg-cd b{display:block;font-size:22px;color:#fff;font-variant-numeric:tabular-nums}
+.rg-cd span{font-size:11px;color:#cbd5f5}
+.rg-when{text-align:center;font-size:12.5px;color:#cbd5f5;margin:0 0 10px}
+.rg-go{display:block;width:100%;border:0;border-radius:14px;padding:12px;font:inherit;font-weight:800;font-size:16px;cursor:pointer;background:linear-gradient(90deg,#d9950f,#ffd666,#d9950f);color:#071433;box-shadow:0 5px 0 #8a5a07}
+.rg-go:active{transform:translateY(3px);box-shadow:0 2px 0 #8a5a07}
+.rg-ok{text-align:center;border-radius:14px;padding:11px;font-weight:800;background:rgba(74,222,128,.15);border:1.5px solid #4ade80;color:#bbf7d0}
+.rg-mini{text-align:center;font-size:12.5px;color:#cbd5f5;margin:8px 0 0}
+.rg-x{background:none;border:0;color:#fca5a5;text-decoration:underline;font:inherit;cursor:pointer;padding:0}
+.rg-av{display:flex;justify-content:center;margin-top:10px}
+.rg-av i{width:26px;height:26px;border-radius:50%;border:2px solid #0d1d45;margin-inline-start:-7px;font-style:normal;font-size:12px;display:grid;place-items:center;font-weight:700;color:#0d1d45}
+.rg-av i.more{background:#e5e7eb}
+/* لوحة المعلم */
+.rgt{border:1.5px solid rgba(13,92,70,.35);border-radius:14px;padding:12px;display:grid;gap:10px;background:rgba(13,92,70,.04)}
+.rgt-st{display:flex;gap:8px}
+.rgt-st div{flex:1;background:rgba(13,92,70,.08);border-radius:12px;padding:8px;text-align:center}
+.rgt-st b{display:block;font-size:20px;color:#0d5c46}
+.rgt-st span{font-size:12px;color:var(--muted,#6b7c73)}
+.rgt-c{border:1px solid var(--line,#e3ebe6);border-radius:12px;padding:8px 10px}
+.rgt-c .h{display:flex;justify-content:space-between;font-weight:700;font-size:13.5px}
+.rgt-pb{height:7px;background:rgba(13,92,70,.1);border-radius:9px;margin:6px 0}
+.rgt-pb i{display:block;height:100%;border-radius:9px;background:#0d5c46}
+.rgt-nm{display:flex;flex-wrap:wrap;gap:5px}
+.rgt-nm span{font-size:12px;border-radius:999px;padding:2px 4px 2px 9px;background:#e6f3ed;color:#0a5c46;display:inline-flex;gap:4px;align-items:center}
+.rgt-nm button{border:0;background:none;color:#b91c1c;cursor:pointer;font-size:12px;padding:0 3px}
+.rgt-nm select{font-size:12px;padding:2px 6px;border-radius:999px;max-width:160px}

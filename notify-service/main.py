@@ -1201,6 +1201,125 @@ def run_week_usage(local: dt.datetime) -> dict | None:
     return to_teachers("📊 ملخّص استخدام الأسبوع", body, "usage-week-" + today, "./#/teacher/watch")
 
 
+
+# ------------------------------------------------------------ ✋ التسجيل المسبق في بطولة الأبطال
+# يُغلق التسجيل في موعده ثم تُجرى القرعة بين المسجّلين (مثل firstRound في js/heroes.js) وتُرسل لكل طالب مباراته.
+# يحجز الحدث بمعاملة حتى لا يجريها جهاز المعلم والخادم معاً.
+import random as _rnd
+
+
+def _rid() -> str:
+    return "".join(_rnd.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8)) + format(int(time.time() * 1000), "x")[-4:]
+
+
+def _ayahs(s: int) -> int:
+    ayah_words(1, 1)  # يحمّل الملف
+    try:
+        return len(_WORDS[s - 1])
+    except Exception:
+        return 7
+
+
+def _pick_passage(t: dict, n: int) -> dict:
+    pool = [int(x) for x in (t.get("pool") or []) if 1 <= int(x) <= 114]
+    if not pool:
+        return {"surah": 112, "from": 1, "to": 4}
+    n = max(1, int(n or 1))
+    s = _rnd.choice(pool)
+    c = _ayahs(s)
+    if c <= n:
+        return {"surah": s, "from": 1, "to": c}
+    a = _rnd.randint(1, c - n + 1)
+    return {"surah": s, "from": a, "to": a + n - 1}
+
+
+def _first_round(t: dict, studs: list[dict], now: dt.datetime) -> list[dict]:
+    counts = t.get("counts") or []
+    n1 = counts[0] if counts else 7
+    iso = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    dl = (now + dt.timedelta(hours=int(t.get("hours") or 48))).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    out = []
+    for cid in t["classIds"]:
+        L = [{"pn": x["pn"], "name": x["name"], "classId": cid} for x in studs if x["classId"] == cid]
+        _rnd.shuffle(L)
+        if len(L) % 2:
+            pick = L.pop(_rnd.randrange(len(L)))
+            out.append({"id": _rid(), "round": 1, "stage": "class", "classId": cid, "slot": 999, "a": pick, "b": None, "bye": True, "done": True, "winner": pick["pn"], **_pick_passage(t, n1), "createdAt": iso})
+        for i in range(0, len(L), 2):
+            out.append({"id": _rid(), "round": 1, "stage": "class", "classId": cid, "slot": i // 2, "a": L[i], "b": L[i + 1], **_pick_passage(t, n1), "live": False,
+                        "startAt": None, "deadline": dl, "ra": None, "rb": None, "tb": 0, "hist": [], "done": False, "createdAt": iso})
+    return out
+
+
+@firestore.transactional
+def _claim_reg(tr, ref, now_ms: int):
+    snap = ref.get(transaction=tr)
+    x = snap.to_dict() if snap.exists else None
+    if not x or x.get("status") != "open" or int(x.get("closeMs") or 0) > now_ms:
+        return None
+    tr.update(ref, {"status": "drawing", "drawAt": now_iso(), "drawBy": "server"})
+    return x
+
+
+def run_hero_reg() -> dict | None:
+    ref = db.collection("leaderboard").document("heroReg")
+    pre = ref.get()
+    if not pre.exists or (pre.to_dict() or {}).get("status") != "open":
+        return None
+    reg = _claim_reg(db.transaction(), ref, int(time.time() * 1000))
+    if not reg:
+        return None
+    try:
+        R = db.collection("leaderboard").document("heroRegs").get().to_dict() or {}
+        draft, cls = reg.get("draft") or {}, set((reg.get("draft") or {}).get("classIds") or [])
+        seen, studs = set(), []
+        for k, v in R.items():
+            if k == "_id" or R.get("_id") != reg.get("id") or not isinstance(v, dict) or not v.get("pn") or v["pn"] in seen:
+                continue
+            ro = db.collection("roster").document(str(v["pn"])).get()
+            if not ro.exists:
+                continue
+            r = ro.to_dict() or {}
+            if r.get("classId") not in cls:
+                continue
+            seen.add(v["pn"])
+            studs.append({"pn": v["pn"], "name": r.get("name") or v.get("name") or "", "classId": r.get("classId")})
+        name = reg.get("name") or draft.get("name") or "الأبطال"
+        if len(studs) < 2:
+            ref.update({"status": "done", "fail": True, "n": len(studs), "doneAt": now_iso()})
+            for x in studs:
+                _student_notif(x["pn"], _rid(), {"type": "hero", "title": f"{name}: لم يكتمل العدد", "body": "لم يسجّل عدد كافٍ للقرعة، فأُجّلت البطولة. شكراً لحماسك!", "link": "./#/student", "tag": "hero-reg-" + reg["id"]})
+            return {"fail": True, "n": len(studs)}
+        now = dt.datetime.now(dt.timezone.utc)
+        used = {x["classId"] for x in studs}
+        t = {**draft, "name": name, "status": "running", "stage": "class", "classIds": [c for c in (draft.get("classIds") or []) if c in used],
+             "classChamps": {}, "reg": reg["id"], "createdAt": now_iso()}
+        t.pop("id", None)
+        tref = db.collection("tourneys").document()
+        tref.set(t)
+        ms = _first_round(t, studs, now)
+        b = db.batch()
+        for m in ms:
+            mid = m.pop("id")
+            m["id"] = mid
+            b.set(tref.collection("matches").document(mid), {k: v for k, v in m.items() if k != "id"})
+        b.commit()
+        hours = int(t.get("hours") or 48)
+        for m in ms:
+            if m.get("bye"):
+                _student_notif(m["a"]["pn"], _rid(), {"type": "hero", "title": f"🍀 {name}: تأهلت بالقرعة", "body": "عدد المتسابقين في صفك فردي، فتأهلت مباشرة إلى الدور ٢. استعد!".translate(AR_DIGITS), "link": "./#/student", "tag": "hero-" + tref.id})
+                continue
+            for me, op in ((m["a"], m["b"]), (m["b"], m["a"])):
+                _student_notif(me["pn"], _rid(), {"type": "hero", "title": f"⚔️ {name}: الدور ١", "body": f"مباراتك ضد {op['name']}. ادخل لترى مقطعك وسلّم تلاوتك خلال {str(hours).translate(AR_DIGITS)} ساعة.", "link": f"./#/student/hero/{m['id']}", "tag": "hero-" + m["id"]})
+        n = {"type": "hero", "title": f"🏆 انطلقت بطولة {name}!", "body": f"جرت القرعة بين {str(len(studs)).translate(AR_DIGITS)} متسابقاً. ادخل تبويب «الأبطال» لترى خصمك في الدور الأول.", "link": "./#/student", "tag": "hero-" + tref.id, "classId": "all", "createdAt": now_iso()}
+        db.collection("notifs").document(_rid()).set(n)
+        ref.update({"status": "done", "tid": tref.id, "n": len(studs), "doneAt": now_iso()})
+        return {"tid": tref.id, "n": len(studs), "matches": len([m for m in ms if not m.get("bye")])}
+    except Exception:
+        ref.update({"status": "open"})
+        raise
+
+
 @app.post("/cron")
 def cron(x_cron_secret: str | None = Header(None)):
     if not CRON_SECRET or not x_cron_secret or not hmac.compare_digest(x_cron_secret, CRON_SECRET):
@@ -1250,8 +1369,12 @@ def cron(x_cron_secret: str | None = Header(None)):
     except Exception as e:
         mrep = {"error": str(e)[:200]}
     try:
+        hreg = run_hero_reg()
+    except Exception as e:
+        hreg = {"error": str(e)[:200]}
+    try:
         aiq = run_ai_queue()
     except Exception as e:
         aiq = [{"error": str(e)[:200]}]
     db.collection("settings").document("cron").set({"lastRun": now, "announcements": len(anns), "reminders": len(reminders), "aiQueue": len(aiq)})
-    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "round": rnd, "monthReport": mrep, "deferredSent": flushed}
+    return {"ai": aiq, "announcements": anns, "starts": starts, "reminders": reminders, "streaks": streaks, "board": board, "teacher": teacher, "week": week, "round": rnd, "monthReport": mrep, "heroReg": hreg, "deferredSent": flushed}

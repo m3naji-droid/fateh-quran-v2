@@ -309,6 +309,14 @@ const local = {
   async setPrizeCfg(c) { LS.set('prizeCfg', c); },
   async setCertCfg(c) { LS.set('certCfg', c); },
   async getCertOrd() { return LS.get('certOrd', null); },
+  async getHeroReg() { return LS.get('heroReg', null); },
+  async setHeroReg(c) { LS.set('heroReg', c); },
+  async patchHeroReg(p) { LS.set('heroReg', { ...(LS.get('heroReg', null) || {}), ...p }); },
+  async claimHeroReg(id, by) { const r = LS.get('heroReg', null); if (!r || r.id !== id || r.status !== 'open') return false; LS.set('heroReg', { ...r, status: 'drawing', drawAt: now(), drawBy: by }); return true; },
+  async getHeroRegs() { return LS.get('heroRegs', {}); },
+  async resetHeroRegs(id) { LS.set('heroRegs', { _id: id }); },
+  async setMyHeroReg(pn, v) { const m = LS.get('heroRegs', {}); if (v) m['u' + pn] = v; else delete m['u' + pn]; LS.set('heroRegs', m); },
+  async setHeroRegKey(k, v) { const m = LS.get('heroRegs', {}); if (v) m[k] = v; else delete m[k]; LS.set('heroRegs', m); },
   async setCertOrd(c) { LS.set('certOrd', c); },
   async setShop(x) { LS.set('shop', x); },
   async getLooks() { return LS.get('looks', {}); },
@@ -811,6 +819,19 @@ async function makeCloud() {
     async getCertCfg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'certCfg')); return d.exists() ? d.data() : null; },
     async setCertCfg(c) { await setDoc(doc(db, 'leaderboard', 'certCfg'), c); },
     // ترتيب الشهادات (أساس الترتيب وعدد المراكز)
+    // ✋ التسجيل المسبق في بطولة الأبطال: leaderboard/heroReg (إعداد المعلم) و leaderboard/heroRegs (كل طالب مفتاحه)
+    async getHeroReg() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'heroReg')); return d.exists() ? d.data() : null; },
+    async setHeroReg(c) { await setDoc(doc(db, 'leaderboard', 'heroReg'), c); },
+    async patchHeroReg(p) { await setDoc(doc(db, 'leaderboard', 'heroReg'), p, { merge: true }); },
+    /** يحجز القرعة لجهاز واحد (المعلم أو الخادم) حتى لا تُجرى مرتين */
+    async claimHeroReg(id, by) {
+      const r = doc(db, 'leaderboard', 'heroReg');
+      return fs.runTransaction(db, async (tr) => { const d = await tr.get(r); const x = d.exists() ? d.data() : null; if (!x || x.id !== id || x.status !== 'open') return false; tr.update(r, { status: 'drawing', drawAt: now(), drawBy: by }); return true; });
+    },
+    async getHeroRegs() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'heroRegs')); return d.exists() ? d.data() : {}; },
+    async resetHeroRegs(id) { await setDoc(doc(db, 'leaderboard', 'heroRegs'), { _id: id }); },
+    async setMyHeroReg(pn, v) { await updateDoc(doc(db, 'leaderboard', 'heroRegs'), { [auth.currentUser.uid]: v || fs.deleteField() }); },
+    async setHeroRegKey(k, v) { await updateDoc(doc(db, 'leaderboard', 'heroRegs'), { [k]: v || fs.deleteField() }); },
     async getCertOrd() { await ensureAnon(); const d = await getDoc(doc(db, 'leaderboard', 'certOrd')); return d.exists() ? d.data() : null; },
     async setCertOrd(c) { await setDoc(doc(db, 'leaderboard', 'certOrd'), c); },
     // مبالغ الجوائز (حاسبة الجوائز)
